@@ -1,0 +1,129 @@
+{
+  "나": [
+    {
+      "type": "아파트",
+      "address": "서울 성동구 왕십리로31나길 22 한신무학아파트 2동 402호",
+      "acquisitionDate": "2018-07-31",
+      "purchasePrice": 62000,
+      "officialPrice": 67100,
+      "lastTransactionPrice": 110000,
+      "lastTransactionDate": "2025-06-02 (3층, 114.59㎡)",
+      "notes": "1세대 1주택 요건 충족",
+      "regulatedArea": true,
+      "sigunguCode": "11200",
+      "bjdCode": "10600",
+      "bonbun": "0022",
+      "bubun": "0000"
+    },
+    {
+      "type": "빌라",
+      "address": "고양시 덕양구 주교동 622-15 성림빌라 A동 지하1",
+      "acquisitionDate": "2020-02-11",
+      "purchasePrice": 4100,
+      "officialPrice": 4790,
+      "lastTransactionPrice": 16800,
+      "lastTransactionDate": "2022-07-29 (1층, 36.43㎡)",
+      "notes": "민간임대사업자 등록 (2021-12-21)",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0622",
+      "bubun": "0015"
+    },
+    {
+      "type": "빌라 → 재건축",
+      "address": "서울 서초구 양재동 335-3 미림빌라 201호",
+      "acquisitionDate": "2021-04-12",
+      "purchasePrice": 27000,
+      "officialPrice": 18000,
+      "lastTransactionPrice": 40000,
+      "lastTransactionDate": "2024-06-18 (2층, 34.71㎡)",
+      "notes": "민간임대사업자 등록 (2021-12-21)",
+      "regulatedArea": true,
+      "sigunguCode": "11650",
+      "bjdCode": "10200",
+      "bonbun": "0335",
+      "bubun": "0003"
+    }
+  ],
+  "아빠": [
+    {
+      "type": "아파트",
+      "address": "서울 광진구 뚝섬로34길 67 광진트라팰리스아파트 A동 2904호",
+      "acquisitionDate": "2015-06-10",
+      "purchasePrice": 110000,
+      "officialPrice": 165800,
+      "lastTransactionPrice": 290000,
+      "lastTransactionDate": "2025-03-05 (15층, 169.53㎡)",
+      "notes": "1세대 1주택 요건 충족",
+      "regulatedArea": true,
+      "sigunguCode": "11215",
+      "bjdCode": "10600",
+      "bonbun": "0067",
+      "bubun": "0000"
+    },
+    {
+      "type": "빌라 → 재건축",
+      "address": "고양시 덕양구 주교동 618-7 대명빌라 라동 301호",
+      "acquisitionDate": "2018-09-12",
+      "purchasePrice": 13000,
+      "officialPrice": 7400,
+      "lastTransactionPrice": 13000,
+      "lastTransactionDate": "2020-05-23 (2층, 46.68㎡)",
+      "notes": "민간임대사업자 등록 (2021-12-21)",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0618",
+      "bubun": "0007"
+    },
+    {
+      "type": "빌라",
+      "address": "고양시 덕양구 주교동 582-1 삼성빌라 2층 202호",
+      "acquisitionDate": "2020-03-15",
+      "purchasePrice": 8500,
+      "officialPrice": 5850,
+      "lastTransactionPrice": 8500,
+      "lastTransactionDate": "2020-01-17 (2층, 35.82㎡)",
+      "notes": "민간임대사업자 등록 (2021-12-21)",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0582",
+      "bubun": "0001"
+    }
+  ],
+  "엄마": [
+    {
+      "type": "빌라",
+      "address": "서울 서초구 양재동 360-5 미창빌라 401호",
+      "acquisitionDate": "2019-04-22",
+      "purchasePrice": 29000,
+      "officialPrice": 20200,
+      "lastTransactionPrice": 78000,
+      "lastTransactionDate": "2024-12-01 (1층, 57.51㎡)",
+      "notes": "민간임대사업자 등록 (2021-12-21)",
+      "regulatedArea": true,
+      "sigunguCode": "11650",
+      "bjdCode": "10200",
+      "bonbun": "0360",
+      "bubun": "0005"
+    },
+    {
+      "type": "빌라 → 재건축",
+      "address": "고양시 덕양구 주교동 573-17 플러스빌라 B동 301호",
+      "acquisitionDate": "2021-11-05",
+      "purchasePrice": 8070,
+      "officialPrice": 6000,
+      "lastTransactionPrice": 7900,
+      "lastTransactionDate": "2018-07-12 (1층, 34.2㎡)",
+      "notes": "민간임대사업자 등록 (2021-12-21)",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0573",
+      "bubun": "0017"
+    }
+  ]
+}
+
