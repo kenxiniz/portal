@@ -1,5 +1,6 @@
 import propertiesData from './properties.json';
 
+/*
 export type MyProperty = {
   type: string;
   address: string;
@@ -9,6 +10,23 @@ export type MyProperty = {
   lastTransactionPrice: number;
   notes: string;
   regulatedArea: boolean;
+};
+*/
+
+export type MyProperty = {
+  type: string;
+  acquisitionDate: string;
+  purchasePrice: number;
+  officialPrice: number;
+  lastTransactionPrice: number;
+  lastTransactionDate: string;
+  notes: string;
+  regulatedArea: boolean;
+  sigunguCode: string;
+  bjdCode: string;
+  bonbun: string;
+  bubun: string;
+  address: string;
 };
 
 export type PropertyData = MyProperty & {
