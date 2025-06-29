@@ -237,7 +237,7 @@ export function calculateComprehensiveRealEstateTax(allData: OwnerProperties): T
 
     const { taxable, log } = getTaxableProperties(properties);
     const houseCount = taxable.length;
-    let descParts = [...log];
+    const descParts = [...log];
     let referenceAmount: number | undefined = undefined;
 
     if (houseCount === 0) {
