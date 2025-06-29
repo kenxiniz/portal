@@ -46,7 +46,7 @@ export default function Home() {
             Read our docs
           </a>
           <Link href="/my-properties" className={styles.secondary}>
-            나의 부동산
+            부동산
           </Link>
         </div>
       </main>

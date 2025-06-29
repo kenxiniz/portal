@@ -1,4 +1,7 @@
-type Property = {
+/* @/lib/tax.tsx */
+
+/* [수정] 모든 타입을 외부에서 import할 수 있도록 export 키워드를 추가합니다. */
+export type Property = {
   type: string;
   acquisitionDate: string;
   purchasePrice: number;
@@ -14,24 +17,22 @@ type Property = {
   address: string;
 };
 
-type OwnerProperties = Record<string, Property[]>;
+export type OwnerProperties = Record<string, Property[]>;
 
-/* [수정] 종부세 계산 결과를 위한 최종 타입 정의 */
-type TaxResult = {
+export type TaxResult = {
   owner: string;
-  taxAmount: number; /* 최종 납부액 (종부세+농특세) */
+  taxAmount: number;
   description: string;
-  referenceAmount?: number; /* [추가] 참고 금액 필드 */
+  referenceAmount?: number;
 };
 
-/* [수정] 재산세 계산 결과를 위한 최종 타입 정의 */
-type PropertyTaxResult = {
+export type PropertyTaxResult = {
   owner: string;
-  taxAmount: number; /* 재산세 본세 */
+  taxAmount: number;
   educationTax: number;
-  totalPayableAmount: number; /* 재산세 + 지방교육세 합계 */
+  totalPayableAmount: number;
   description: string;
-  referenceAmount?: number; /* [추가] 참고 금액 필드 */
+  referenceAmount?: number;
 };
 
 const getBuildingName = (address: string): string => {
@@ -39,36 +40,20 @@ const getBuildingName = (address: string): string => {
   return match ? match[0] : "건물명 미확인";
 };
 
-/**
- *  * 1세대 1주택자 여부와 공시지가에 따라 재산세 공정시장가액비율을 결정합니다.
- *   * @param officialPrice - 공시지가
- *    * @param isSingleHomeOwner - (재산세 기준) 1세대 1주택자 여부
- *     * @returns 공정시장가액비율
- *      */
 const getPropertyTaxFairMarketRatio = (officialPrice: number, isSingleHomeOwner: boolean): number => {
-  /* 1세대 1주택자 특례는 1주택 보유 시에만 적용 */
   if (!isSingleHomeOwner) {
-    return 0.6; /* 2주택 이상은 60% */
+    return 0.6;
   }
-
   const priceInWon = officialPrice;
-
-  if (priceInWon <= 300_000_000) { /* 3억 이하 */
+  if (priceInWon <= 300_000_000) {
     return 0.43;
-  } else if (priceInWon <= 600_000_000) { /* 3억 초과 6억 이하 */
-  return 0.44;
-  } else { /* 6억 초과 */
-  return 0.45;
+  } else if (priceInWon <= 600_000_000) {
+    return 0.44;
+  } else {
+    return 0.45;
   }
 };
 
-/**
- *  * 주택분 재산세 과세표준 및 세액을 계산합니다. 특례세율 적용 여부를 추가로 판단합니다.
- *   * @param officialPrice - 공시지가
- *    * @param fairMarketRatio - 공정시장가액비율
- *     * @param isSpecialRateApplicable - 9억 이하 1주택 특례세율 적용 여부
- *      * @returns { taxBase: number, taxAmount: number, rate: number, deduction: number, rateType: string }
- *       */
 const calculatePropertyTaxBracket = (officialPrice: number, fairMarketRatio: number, isSpecialRateApplicable: boolean): { taxBase: number; taxAmount: number; rate: number; deduction: number; rateType: string } => {
   const taxBase = officialPrice * fairMarketRatio;
   let rate = 0;
@@ -76,47 +61,25 @@ const calculatePropertyTaxBracket = (officialPrice: number, fairMarketRatio: num
   let rateType = '일반세율';
 
   if (isSpecialRateApplicable) {
-    /* 9억 이하 1세대 1주택 특례세율 적용 */
     rateType = '특례세율';
-    if (taxBase <= 60_000_000) {
-      rate = 0.0005; deduction = 0;
-    } else if (taxBase <= 150_000_000) {
-      rate = 0.0010; deduction = 30_000;
-    } else if (taxBase <= 300_000_000) {
-      rate = 0.0020; deduction = 180_000;
-    } else {
-      rate = 0.0035; deduction = 630_000;
-    }
+    if (taxBase <= 60_000_000) { rate = 0.0005; deduction = 0; }
+    else if (taxBase <= 150_000_000) { rate = 0.0010; deduction = 30_000; }
+    else if (taxBase <= 300_000_000) { rate = 0.0020; deduction = 180_000; }
+    else { rate = 0.0035; deduction = 630_000; }
   } else {
-    /* 일반세율 적용 */
-    if (taxBase <= 60_000_000) {
-      rate = 0.0010; deduction = 0;
-    } else if (taxBase <= 150_000_000) {
-      rate = 0.0015; deduction = 30_000;
-    } else if (taxBase <= 300_000_000) {
-      rate = 0.0025; deduction = 180_000;
-    } else {
-      rate = 0.0040; deduction = 630_000;
-    }
+    if (taxBase <= 60_000_000) { rate = 0.0010; deduction = 0; }
+    else if (taxBase <= 150_000_000) { rate = 0.0015; deduction = 30_000; }
+    else if (taxBase <= 300_000_000) { rate = 0.0025; deduction = 180_000; }
+    else { rate = 0.0040; deduction = 630_000; }
   }
-
   const taxAmount = Math.floor(taxBase * rate - deduction);
   return { taxBase, taxAmount: Math.max(0, taxAmount), rate, deduction, rateType };
 };
 
-
-/**
- *  * 종부세 세율 및 누진공제액을 계산합니다.
- *   * @param taxBase - 과세표준 금액
- *    * @param houseCount - 과세 대상 주택 수
- *     * @returns { taxAmount: number, rate: number, deduction: number }
- *      **/
 const calculateComprehensiveTaxByBracket = (taxBase: number, houseCount: number): { taxAmount: number; rate: number; deduction: number } => {
   let rate = 0;
   let deduction = 0;
-
   if (houseCount >= 3) {
-    /* 3주택 이상 세율 적용 */
     if (taxBase <= 300_000_000) { rate = 0.005; deduction = 0; }
     else if (taxBase <= 600_000_000) { rate = 0.007; deduction = 600_000; }
     else if (taxBase <= 1_200_000_000) { rate = 0.010; deduction = 2_400_000; }
@@ -125,7 +88,6 @@ const calculateComprehensiveTaxByBracket = (taxBase: number, houseCount: number)
     else if (taxBase <= 9_400_000_000) { rate = 0.040; deduction = 89_400_000; }
     else { rate = 0.050; deduction = 183_400_000; }
   } else {
-    /* 2주택 이하 세율 적용 */
     if (taxBase <= 300_000_000) { rate = 0.005; deduction = 0; }
     else if (taxBase <= 600_000_000) { rate = 0.007; deduction = 600_000; }
     else if (taxBase <= 1_200_000_000) { rate = 0.010; deduction = 2_400_000; }
@@ -134,12 +96,10 @@ const calculateComprehensiveTaxByBracket = (taxBase: number, houseCount: number)
     else if (taxBase <= 9_400_000_000) { rate = 0.020; deduction = 36_000_000; }
     else { rate = 0.027; deduction = 101_800_000; }
   }
-
-  const taxAmount = Math.floor((taxBase * rate) - deduction);
+  const taxAmount = Math.floor(taxBase * rate - deduction);
   return { taxAmount: Math.max(0, taxAmount), rate, deduction };
 };
 
-/* [공용 로직] 과세 대상 주택을 필터링하는 함수 */
 const getTaxableProperties = (properties: Property[]) => {
   const log: string[] = [];
   const taxable = properties.filter((p) => {
@@ -159,31 +119,24 @@ const getTaxableProperties = (properties: Property[]) => {
 
 export function calculatePropertyTax(allData: OwnerProperties): PropertyTaxResult[] {
   const results: PropertyTaxResult[] = [];
-
   for (const owner in allData) {
     const properties = allData[owner];
-
     const { taxable } = getTaxableProperties(properties);
     const isSingleTaxableHomeOwner = taxable.length === 1;
-
     let totalTaxAmount = 0;
     let totalEducationTax = 0;
     const descParts: string[] = [];
     let referenceAmount: number | undefined = undefined;
 
     descParts.push(`[${owner}]님은 과세대상 주택 ${taxable.length}채를 보유하여 ${isSingleTaxableHomeOwner ? '1세대 1주택자' : '다주택자'}입니다.`);
-
     properties.forEach(p => {
       const officialPrice = p.officialPrice * 10000;
       const fairMarketRatio = getPropertyTaxFairMarketRatio(officialPrice, isSingleTaxableHomeOwner);
       const isSpecialRateApplicable = isSingleTaxableHomeOwner && officialPrice <= 900_000_000;
-
       const { taxBase, taxAmount, rate, deduction, rateType } = calculatePropertyTaxBracket(officialPrice, fairMarketRatio, isSpecialRateApplicable);
-
       totalTaxAmount += taxAmount;
       const educationTaxPerProperty = Math.floor(taxAmount * 0.2);
       totalEducationTax += educationTaxPerProperty;
-
       descParts.push(`\n- ${getBuildingName(p.address)} (공시지가: ${officialPrice.toLocaleString()}원)`);
       descParts.push(`  공정시장가액비율: ${fairMarketRatio * 100}%`);
       descParts.push(`  과세표준: ${Math.floor(taxBase).toLocaleString()}원`);
@@ -221,7 +174,6 @@ export function calculatePropertyTax(allData: OwnerProperties): PropertyTaxResul
       referenceAmount,
     });
   }
-
   return results;
 }
 
@@ -234,22 +186,16 @@ export function calculateComprehensiveRealEstateTax(allData: OwnerProperties): T
 
   for (const owner in allData) {
     const properties = allData[owner];
-
     const { taxable, log } = getTaxableProperties(properties);
     const houseCount = taxable.length;
     const descParts = [...log];
     let referenceAmount: number | undefined = undefined;
 
     if (houseCount === 0) {
-      results.push({
-        owner,
-        taxAmount: 0,
-        description: "과세 대상 주택이 없습니다."
-      });
+      results.push({ owner, taxAmount: 0, description: "과세 대상 주택이 없습니다." });
       continue;
     }
 
-    /* --- 1. 종합부동산세 과세표준 및 산출세액 계산 --- */
     const deductionAmount = houseCount === 1 ? singleHomeDeduction : multiHomeDeduction;
     const deductionType = houseCount === 1 ? "1주택자 공제" : "기본 공제";
     const totalOfficialPrice = taxable.reduce((sum, p) => sum + p.officialPrice * 10000, 0);
@@ -271,12 +217,10 @@ export function calculateComprehensiveRealEstateTax(allData: OwnerProperties): T
     const { taxAmount: initialComprehensiveTax } = calculateComprehensiveTaxByBracket(comprehensiveTaxBase, houseCount);
     descParts.push(`→ 종부세 산출세액: ${initialComprehensiveTax.toLocaleString()}원`);
 
-    /* --- 2. 재산세 중복분 공제액 계산 (사용자 제공 최종 계산식 적용) --- */
     const isSingleTaxableHomeOwner = taxable.length === 1;
     const totalOfficialPriceForTaxable = taxable.reduce((sum,p) => sum + p.officialPrice*10000, 0);
     const propertyTaxFairMarketRatioForDeduction = getPropertyTaxFairMarketRatio(totalOfficialPriceForTaxable, isSingleTaxableHomeOwner);
     const propertyTaxRateForDeduction = 0.004;
-
     const propertyTaxDeduction = Math.floor(comprehensiveTaxBase * propertyTaxFairMarketRatioForDeduction * propertyTaxRateForDeduction);
 
     descParts.push(`\n공제할 재산세액 (중복분): ${propertyTaxDeduction.toLocaleString()}원`);
@@ -286,7 +230,6 @@ export function calculateComprehensiveRealEstateTax(allData: OwnerProperties): T
     ].join('\n');
     descParts.push(formulaDesc);
 
-    /* --- 3. 최종 종부세 및 농특세 계산 --- */
     const finalComprehensiveTax = Math.max(0, initialComprehensiveTax - propertyTaxDeduction);
     descParts.push(`\n→ 차감 후 종부세: ${finalComprehensiveTax.toLocaleString()}원`);
 
@@ -323,6 +266,5 @@ export function calculateComprehensiveRealEstateTax(allData: OwnerProperties): T
       referenceAmount,
     });
   }
-
   return results;
 }
