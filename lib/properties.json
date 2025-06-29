@@ -124,6 +124,102 @@
       "bonbun": "0573",
       "bubun": "0017"
     }
+  ],
+  "승수": [
+    {
+      "type": "아파트",
+      "address": "광주광역시 남구 주월동 1303 제석산호반힐하임아파트 104동 1501호",
+      "acquisitionDate": "2021-04-30",
+      "purchasePrice": 50000,
+      "officialPrice": 7320,
+      "lastTransactionPrice": 7900,
+      "lastTransactionDate": "2021-11-29 (1층, 35.06㎡)",
+      "notes": "취득일부터 관리처분인가 전까지 포함, 2년 보유",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0573",
+      "bubun": "0017"
+    },
+    {
+      "type": "빌라",
+      "address": "고양시 덕양구 주교동 623-17 원앙빌라 나동 지하층 102호",
+      "acquisitionDate": "2020-02-05",
+      "purchasePrice": 8500,
+      "officialPrice": 4790,
+      "lastTransactionPrice": 16800,
+      "lastTransactionDate": "2022-07-29 (1층, 36.43㎡)",
+      "notes": "민간임대사업자 등록 (2021-12-21)",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0622",
+      "bubun": "0015"
+    },
+    {
+      "type": "빌라",
+      "address": "고양시 덕양구 주교동 575-14 금강빌라 3층 2호",
+      "acquisitionDate": "2020-03-10",
+      "purchasePrice": 9000,
+      "officialPrice": 4790,
+      "lastTransactionPrice": 16800,
+      "lastTransactionDate": "2022-07-29 (1층, 36.43㎡)",
+      "notes": "민간임대사업자 등록 (2021-12-21)",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0622",
+      "bubun": "0015"
+    }
+  ],
+  "매부": [
+    {
+      "type": "아파트",
+      "address": "서울 서초구 강남대로2길 24 마로니에아파트",
+      "acquisitionDate": "2019-04-22",
+      "purchasePrice": 62000,
+      "officialPrice": 42700,
+      "lastTransactionPrice": 54000,
+      "lastTransactionDate": "2020-10-10 (1층, 84.48㎡)",
+      "notes": "재건축 투자",
+      "regulatedArea": true,
+      "sigunguCode": "11650",
+      "bjdCode": "10200",
+      "bonbun": "0360",
+      "bubun": "0005"
+    }
+  ],
+  "동생": [
+    {
+      "type": "빌라 → 재건축",
+      "address": "고양시 덕양구 주교동 588-7 세인빌라 301호",
+      "acquisitionDate": "2020-07-14",
+      "purchasePrice": 9900,
+      "officialPrice": 7320,
+      "lastTransactionPrice": 7900,
+      "lastTransactionDate": "2021-11-29 (1층, 35.06㎡)",
+      "notes": "취득일부터 관리처분인가 전까지 포함, 2년 보유",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0573",
+      "bubun": "0017"
+    },
+    {
+      "type": "조합원 계약금",
+      "address": "하남시덕풍동 352-2 수리골 조합원아파트",
+      "acquisitionDate": "2020-07-14",
+      "purchasePrice": 5000,
+      "officialPrice": 0,
+      "lastTransactionPrice": 0,
+      "lastTransactionDate": "",
+      "notes": "관리처분인가 전에는 주택 아님",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0573",
+      "bubun": "0017"
+    }
   ]
 }
 
