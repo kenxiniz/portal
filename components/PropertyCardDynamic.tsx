@@ -4,32 +4,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import KakaoMapButton from "./KakaoMapButton";
-import { Building, MapPin, Landmark, ShieldAlert, Tag, Calendar, Wallet, Info } from 'lucide-react';
-
-/* MyProperty 타입을 직접 정의합니다. (lib/api에서 가져와도 무방) */
-type MyProperty = {
-  type: string;
-  acquisitionDate: string;
-  purchasePrice: number;
-  officialPrice: number;
-  lastTransactionPrice: number;
-  lastTransactionDate: string;
-  notes: string;
-  regulatedArea: boolean;
-  sigunguCode: string;
-  bjdCode: string;
-  bonbun: string;
-  bubun: string;
-  address: string;
-};
+import { Building, MapPin, Landmark, ShieldAlert, Tag, Calendar, Wallet, Info, ChevronDown } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import type { Property } from "@/lib/tax"; // lib/tax.tsx에서 타입을 가져옵니다.
 
 type Props = {
-  property: MyProperty;
+  property: Property;
 };
 
 const getBuildingName = (address: string): string => {
   const match = address.match(/([가-힣A-Za-z0-9]+(아파트|빌라))/);
   return match ? match[0] : "건물명 미확인";
+};
+
+const getStreetAddress = (address: string): string => {
+  const match = address.split(/([가-힣A-Za-z0-9]+(아파트|빌라))/);
+  return match && match[0] ? match[0].trim() : address;
 };
 
 const fieldConfig = [
@@ -45,6 +35,7 @@ const fieldConfig = [
 
 export default function PropertyCardDynamic({ property }: Props) {
   const address = property.address as string;
+  const streetAddress = getStreetAddress(address);
 
   const formatPrice = (value: number) => {
     if (!value) return '-';
@@ -55,36 +46,41 @@ export default function PropertyCardDynamic({ property }: Props) {
   };
 
   return (
-    /* [수정] 카드 배경을 밝게 하고, 다크모드 색상 조정 */
-    <Card className="w-full max-w-md transform transition-all duration-300 hover:shadow-xl bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">
-    <CardHeader>
-    <div className="flex justify-between items-start mb-2">
+    /* [수정] Card 대신 Collapsible을 최상위로 사용합니다. */
+    <Collapsible className="w-full max-w-md">
+    <Card className="w-full bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">
+    {/* 항상 보이는 헤더 부분 */}
+    <CollapsibleTrigger className="w-full">
+    <CardHeader className="flex flex-row justify-between items-center text-left">
     <div className="flex items-center gap-3">
     <Building className="h-8 w-8 text-blue-500" />
     <div>
     <CardTitle className="text-xl font-bold">{getBuildingName(address)}</CardTitle>
-    <CardDescription className="text-xs pt-1 flex items-center">
+    <CardDescription className="text-xs text-gray-500 dark:text-gray-400 pt-1 flex items-center">
     <MapPin className="h-3 w-3 mr-1" />
-    {address}
+    {streetAddress}
     </CardDescription>
     </div>
     </div>
+    <ChevronDown className="h-5 w-5 shrink-0 transition-transform duration-200 [&[data-state=open]]:-rotate-180" />
+    </CardHeader>
+    </CollapsibleTrigger>
+
+    {/* 펼쳤을 때 보이는 상세 정보 */}
+    <CollapsibleContent>
+    <CardContent className="pt-0">
+    {/* 지도 버튼은 상세 정보에 포함 */}
+    <div className="flex justify-end mb-2">
     <KakaoMapButton address={address} />
     </div>
-    </CardHeader>
-    <CardContent>
     <Table>
     <TableBody>
     {fieldConfig.map(({ key, label, icon: Icon }) => {
-      const value = property[key as keyof MyProperty];
+      const value = property[key as keyof Property];
       let displayValue: React.ReactNode;
 
       if (typeof value === 'boolean') {
-        displayValue = value ? (
-          <Badge variant="destructive">예</Badge>
-        ) : (
-        <Badge variant="secondary">아니오</Badge>
-        );
+        displayValue = value ? <Badge variant="destructive">예</Badge> : <Badge variant="secondary">아니오</Badge>;
       } else if (typeof value === 'number' && key.includes('Price')) {
         displayValue = <span className="font-mono">{formatPrice(value)}</span>;
       } else {
@@ -106,6 +102,8 @@ export default function PropertyCardDynamic({ property }: Props) {
     </TableBody>
     </Table>
     </CardContent>
+    </CollapsibleContent>
     </Card>
+    </Collapsible>
   );
 };

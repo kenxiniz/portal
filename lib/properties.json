@@ -125,53 +125,6 @@
       "bubun": "0017"
     }
   ],
-  "승수": [
-    {
-      "type": "아파트",
-      "address": "광주광역시 남구 주월동 1303 제석산호반힐하임아파트 104동 1501호",
-      "acquisitionDate": "2021-04-30",
-      "purchasePrice": 50000,
-      "officialPrice": 26900,
-      "lastTransactionPrice": 41500,
-      "lastTransactionDate": "2025-04-04 (13층, 84.9399㎡)",
-      "notes": "1세대 1주택 요건 충족",
-      "regulatedArea": false,
-      "sigunguCode": "41281",
-      "bjdCode": "10300",
-      "bonbun": "0573",
-      "bubun": "0017"
-    },
-    {
-      "type": "빌라",
-      "address": "고양시 덕양구 주교동 623-17 원앙빌라 나동 지하층 102호",
-      "acquisitionDate": "2020-02-05",
-      "purchasePrice": 8500,
-      "officialPrice": 6550,
-      "lastTransactionPrice": 11000,
-      "lastTransactionDate": "2023-09-21 (1층, 36.27㎡)",
-      "notes": "민간임대사업자 (2021-12-21)",
-      "regulatedArea": false,
-      "sigunguCode": "41281",
-      "bjdCode": "10300",
-      "bonbun": "0622",
-      "bubun": "0015"
-    },
-    {
-      "type": "빌라",
-      "address": "고양시 덕양구 주교동 575-14 금강빌라 3층 2호",
-      "acquisitionDate": "2020-03-10",
-      "purchasePrice": 9000,
-      "officialPrice": 5050,
-      "lastTransactionPrice": 11500,
-      "lastTransactionDate": "2021-03-30 (1층, 33.84㎡)",
-      "notes": "민간임대사업자 (2021-12-21)",
-      "regulatedArea": false,
-      "sigunguCode": "41281",
-      "bjdCode": "10300",
-      "bonbun": "0622",
-      "bubun": "0015"
-    }
-  ],
   "매부": [
     {
       "type": "아파트",
@@ -219,6 +172,53 @@
       "bjdCode": "10300",
       "bonbun": "0573",
       "bubun": "0017"
+    }
+  ],
+  "승수": [
+    {
+      "type": "아파트",
+      "address": "광주광역시 남구 주월동 1303 제석산호반힐하임아파트 104동 1501호",
+      "acquisitionDate": "2021-04-30",
+      "purchasePrice": 50000,
+      "officialPrice": 26900,
+      "lastTransactionPrice": 41500,
+      "lastTransactionDate": "2025-04-04 (13층, 84.9399㎡)",
+      "notes": "1세대 1주택 요건 충족",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0573",
+      "bubun": "0017"
+    },
+    {
+      "type": "빌라",
+      "address": "고양시 덕양구 주교동 623-17 원앙빌라 나동 지하층 102호",
+      "acquisitionDate": "2020-02-05",
+      "purchasePrice": 8500,
+      "officialPrice": 6550,
+      "lastTransactionPrice": 11000,
+      "lastTransactionDate": "2023-09-21 (1층, 36.27㎡)",
+      "notes": "민간임대사업자 (2021-12-21)",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0622",
+      "bubun": "0015"
+    },
+    {
+      "type": "빌라",
+      "address": "고양시 덕양구 주교동 575-14 금강빌라 3층 2호",
+      "acquisitionDate": "2020-03-10",
+      "purchasePrice": 9000,
+      "officialPrice": 5050,
+      "lastTransactionPrice": 11500,
+      "lastTransactionDate": "2021-03-30 (1층, 33.84㎡)",
+      "notes": "민간임대사업자 (2021-12-21)",
+      "regulatedArea": false,
+      "sigunguCode": "41281",
+      "bjdCode": "10300",
+      "bonbun": "0622",
+      "bubun": "0015"
     }
   ]
 }

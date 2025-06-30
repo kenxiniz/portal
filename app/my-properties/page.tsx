@@ -5,17 +5,24 @@ import PropertyCardDynamic from "@/components/PropertyCardDynamic";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import allDataJson from "@/lib/properties.json";
+import sellStrategiesJson from "@/lib/sell_strategies.json";
+/* [추가] 제목에 사용할 아이콘을 import 합니다. */
+  import { TrendingUp } from 'lucide-react';
+import StrategyCard from "@/components/StrategyCard";
 
 export default function MyPropertiesPage() {
   const allData: OwnerProperties = allDataJson;
+  const strategies = sellStrategiesJson as Record<string, { title: string; description: string; }>;
   const owners = Object.keys(allData);
   const comprehensiveTaxResults = calculateComprehensiveRealEstateTax(allData);
   const propertyTaxResults = calculatePropertyTax(allData);
 
   return (
-    <div className="flex flex-col items-center p-4 md:p-8 bg-slate-50 dark:bg-slate-950 min-h-screen">
-    <h1 className="text-4xl font-extrabold text-slate-900 dark:text-slate-100 mb-8">
-    부동산 재테크
+    <div className="flex flex-col items-center p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
+    {/* [수정] 제목과 스타일을 Z세대 느낌으로 변경합니다. */}
+    <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-8 flex items-center gap-3">
+    <span>부동산 포트폴리오</span>
+    <TrendingUp className="h-8 w-8 text-blue-500" />
     </h1>
 
     <Accordion type="single" collapsible className="w-full max-w-7xl space-y-4">
@@ -23,6 +30,7 @@ export default function MyPropertiesPage() {
       const properties = allData[owner];
       const comprehensiveTaxInfo = comprehensiveTaxResults.find((t) => t.owner === owner);
       const propertyTaxInfo = propertyTaxResults.find((t) => t.owner === owner);
+      const strategyInfo = strategies[owner];
 
       const totalTax = (propertyTaxInfo?.totalPayableAmount ?? 0) + (comprehensiveTaxInfo?.taxAmount ?? 0);
 
@@ -39,22 +47,21 @@ export default function MyPropertiesPage() {
         <AccordionContent className="p-6 pt-2">
         <div className="border-t border-slate-200 dark:border-slate-800 pt-6">
         <section className="w-full flex flex-col items-center space-y-6">
-        <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 재산세 */}
+        <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {strategyInfo && (
+          <StrategyCard strategy={strategyInfo} />
+        )}
         <Collapsible className="w-full p-4 rounded-lg bg-slate-50 dark:bg-slate-800 space-y-2">
-        <CollapsibleTrigger className="w-full">
-        <div className="text-center">
+        <CollapsibleTrigger className="w-full text-center">
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">재산세</h3>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-        총 납부액: <span className="font-semibold text-slate-900 dark:text-slate-100">{propertyTaxInfo?.totalPayableAmount.toLocaleString()} 원</span>
+        총 납부액: <span className="font-semibold text-slate-900 dark:text-slate-100">{propertyTaxInfo?.totalPayableAmount?.toLocaleString() ?? '0'} 원</span>
         </p>
-        {/* [수정] 색상을 붉은 계열로 변경 */}
         {propertyTaxInfo?.referenceAmount && (
           <p className="text-xs text-red-500 dark:text-red-400">
           (임대사업 아닐 시: {propertyTaxInfo.referenceAmount.toLocaleString()} 원)
           </p>
         )}
-        </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
         <pre className="mt-2 w-full text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap text-left font-mono bg-white dark:bg-slate-900 p-3 rounded-md">
@@ -62,21 +69,17 @@ export default function MyPropertiesPage() {
         </pre>
         </CollapsibleContent>
         </Collapsible>
-        {/* 종부세 */}
         <Collapsible className="w-full p-4 rounded-lg bg-slate-50 dark:bg-slate-800 space-y-2">
-        <CollapsibleTrigger className="w-full">
-        <div className="text-center">
+        <CollapsibleTrigger className="w-full text-center">
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">종합부동산세</h3>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-        총 납부액: <span className="font-semibold text-slate-900 dark:text-slate-100">{comprehensiveTaxInfo?.taxAmount.toLocaleString()} 원</span>
+        총 납부액: <span className="font-semibold text-slate-900 dark:text-slate-100">{comprehensiveTaxInfo?.taxAmount?.toLocaleString() ?? '0'} 원</span>
         </p>
-        {/* [수정] 색상을 붉은 계열로 변경 */}
         {comprehensiveTaxInfo?.referenceAmount && (
           <p className="text-xs text-red-500 dark:text-red-400">
           (임대사업 아닐 시: {comprehensiveTaxInfo.referenceAmount.toLocaleString()} 원)
           </p>
         )}
-        </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
         <pre className="mt-2 w-full text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap text-left font-mono bg-white dark:bg-slate-900 p-3 rounded-md">

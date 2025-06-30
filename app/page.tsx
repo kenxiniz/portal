@@ -13,17 +13,21 @@ export default function Home() {
           width={500}
           height={500}
           priority
-        />
-        <ol>
-          <li>
-            Get started by editing <code>app/page/main.tsx</code>.
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
-
+          />
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100">
+          깐부 자산 포트폴리오
+          </h1>
+          <p className="mt-2 text-lg text-slate-600 dark:text-slate-400">
+          당신의 포트폴리오를 스마트하게 분석하세요
+          </p>
+        </div>
         <div className={styles.ctas}>
+          <Link href="/my-properties" className={styles.primary}>
+            부동산
+          </Link>
           <a
-            className={styles.primary}
+            className={styles.secondary}
             href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
             target="_blank"
             rel="noopener noreferrer"
@@ -45,9 +49,6 @@ export default function Home() {
           >
             Read our docs
           </a>
-          <Link href="/my-properties" className={styles.secondary}>
-            부동산
-          </Link>
         </div>
       </main>
       <footer className={styles.footer}>
