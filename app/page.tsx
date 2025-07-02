@@ -31,6 +31,9 @@ export default function Home() {
           <Link href="/my-properties" className={styles.primary}>
             부동산
           </Link>
+          <Link href="/stock" className={styles.primary}>
+            주식
+          </Link>
           <a
             className={styles.secondary}
             href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"

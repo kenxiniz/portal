@@ -13,13 +13,25 @@ interface StockChartDisplayProps {
   error: string | null;
 }
 
-/* 커스텀 툴팁 */
-const CustomTooltip = ({ active, payload, label }: any) => {
+/*
+ *   - 오류 해결: [key: string]: any 타입을 [key: string]: unknown 으로 변경하여
+ *     - @typescript-eslint/no-explicit-any 규칙을 준수합니다.
+ *     */
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{
+    payload: StockDataPoint;
+    [key: string]: unknown;
+  }>;
+  label?: string | number;
+}
+
+const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
       <div className="p-2 bg-slate-800 text-white rounded-md border border-slate-700 text-xs shadow-lg">
-      <p className="font-bold">{`날짜: ${new Date(label).toLocaleDateString()}`}</p>
+      <p className="font-bold">{`날짜: ${new Date(label as string).toLocaleDateString()}`}</p>
       <hr className="my-1 border-slate-600" />
       <p>종가: <span className="font-mono">{data.close.toFixed(2)}</span></p>
       {data.rsi != null && <p>RSI(14): <span className="font-mono">{data.rsi.toFixed(2)}</span></p>}

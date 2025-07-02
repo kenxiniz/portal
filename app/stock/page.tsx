@@ -1,13 +1,14 @@
+/* app/stock/page.tsx */
+
 "use client";
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { useThemeDetector } from '@/hooks/useThemeDetector'; /* 테마 훅 import */
-import { TickerState, calculateRSI, StockDataPoint } from '@/lib/stockUtils'; /* 유틸리티 import */
+import { useThemeDetector } from '@/hooks/useThemeDetector';
+import { TickerState, calculateRSI, StockDataPoint } from '@/lib/stockUtils';
 import allTickers from '@/lib/stock.json';
-import { StockCollapsibleCard } from '@/components/StockCollapsibleCard'; /* 새 컴포넌트 import */
+import { StockCollapsibleCard } from '@/components/StockCollapsibleCard';
 
 export default function StockPage() {
-  /* 모든 티커의 상태를 저장하는 Map */
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(() => {
     const initialState: Record<string, TickerState> = {};
     allTickers.tickers.forEach(ticker => {
@@ -16,116 +17,65 @@ export default function StockPage() {
     return initialState;
   });
 
-  const [openedTickers, setOpenedTickers] = useState<Set<string>>(new Set()); /* 열린 폴딩 카드 관리 */
-  const gridStrokeColor = useThemeDetector(); /* 커스텀 훅 사용 */
+  /* 현재 열려 있는 카드의 티커를 저장하는 상태 */
+  const [openedTicker, setOpenedTicker] = useState<string | null>(null);
+  const gridStrokeColor = useThemeDetector();
 
-  const API_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY; 
-
-  /* 주식 데이터 fetching 함수 */
+  /* 주식 데이터를 가져오는 함수 */
   const fetchStockData = useCallback(async (ticker: string) => {
-    if (!API_KEY || API_KEY === 'YOUR_API_KEY_HERE') {
-      setTickerStates(prev => ({
-        ...prev,
-        [ticker]: { ...prev[ticker], error: "API Key is not configured. Please add your Alpha Vantage API key to a .env.local file (e.g., NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY=YOUR_API_KEY_HERE)." }
-      }));
-      return;
-    }
-
-    setTickerStates(prev => ({
-      ...prev,
-      [ticker]: { ...prev[ticker], loading: true, error: null }
-    }));
+    setTickerStates(prev => ({ ...prev, [ticker]: { ...prev[ticker], loading: true, error: null } }));
 
     try {
-      const response = await fetch(
-        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&outputsize=full&apikey=${API_KEY}`
-      );
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
+      const response = await fetch(`/api/stock/${ticker}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const data: StockDataPoint[] = await response.json();
 
-        if (data['Time Series (Daily)']) {
-          const timeSeries = data['Time Series (Daily)'];
-          let chartData: StockDataPoint[] = [];
-          const today = new Date();
-          const threeMonthsAgo = new Date();
-          threeMonthsAgo.setMonth(today.getMonth() - 3);
+      const dataWithRSI = calculateRSI(data);
 
-          for (const dateKey in timeSeries) {
-            const date = new Date(dateKey);
-            if (date >= threeMonthsAgo && date <= today) {
-              chartData.push({
-                date: dateKey,
-                open: parseFloat(timeSeries[dateKey]['1. open']),
-                high: parseFloat(timeSeries[dateKey]['2. high']),
-                low: parseFloat(timeSeries[dateKey]['3. low']),
-                close: parseFloat(timeSeries[dateKey]['4. close']),
-                volume: parseFloat(timeSeries[dateKey]['6. volume']),
-              });
-            }
-          }
-          chartData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-          /* RSI 계산 */
-          const dataWithRSI = calculateRSI(chartData);
-
-          setTickerStates(prev => ({
-            ...prev,
-            [ticker]: { data: dataWithRSI, loading: false, error: null }
-          }));
-        } else {
-          const errorMessage = data["Note"] || data["Error Message"] || "No data available.";
-          console.warn(`No daily time series data for ${ticker}:`, errorMessage);
-          setTickerStates(prev => ({
-            ...prev,
-            [ticker]: { ...prev[ticker], loading: false, error: `No data available for ${ticker}: ${errorMessage}` }
-          }));
-        }
-    } catch (e: any) {
+      setTickerStates(prev => ({
+        ...prev,
+        [ticker]: { data: dataWithRSI, loading: false, error: null }
+      }));
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred';
       console.error(`Failed to fetch data for ${ticker}:`, e);
       setTickerStates(prev => ({
         ...prev,
-        [ticker]: { ...prev[ticker], loading: false, error: `Failed to load data for ${ticker}. Error: ${e.message}` }
+        [ticker]: { ...prev[ticker], loading: false, error: `Failed to load data for ${ticker}. Error: ${errorMessage}` }
       }));
     }
-  }, [API_KEY]);
+  }, []);
 
-  /* 컴포넌트
-   * 마운트
-   * 시
-   * 첫
-   * 번째
-   * 티커
-   * 데이터
-   * 로드
-   * */
+  /*
+   *     - 페이지가 처음 로드될 때 이 useEffect가 실행됩니다.
+   *         - 첫 번째 티커(allTickers.tickers[0])를 가져와 openedTicker 상태로 설정하여
+   *             - 첫 번째 카드가 항상 열려 있도록 합니다.
+   *               */
   useEffect(() => {
       if (allTickers.tickers.length > 0) {
       const firstTicker = allTickers.tickers[0];
+      setOpenedTicker(firstTicker);
       fetchStockData(firstTicker);
-      setOpenedTickers(prev => new Set(prev).add(firstTicker));
       }
       }, [fetchStockData]);
 
-  /* 폴딩
-   * 카드
-   * 토글
-   * 핸들러
-   * */
-  const handleToggleCollapsible = (ticker: string, isOpen: boolean) => {
-    setOpenedTickers(prev => {
-        const newSet = new Set(prev);
-        if (isOpen) {
-        newSet.add(ticker);
-        if (!tickerStates[ticker].data && !tickerStates[ticker].loading) {
-        fetchStockData(ticker);
-        }
-        } else {
-        newSet.delete(ticker);
-        }
-        return newSet;
-        });
+  /* 사용자가 카드를 클릭할 때 호출되는 핸들러 */
+  const handleOpenChange = (ticker: string) => {
+    const isCurrentlyOpen = openedTicker === ticker;
+    /* 현재 열린 카드를 다시 클릭하면 닫고, 다른 카드를 클릭하면 그 카드를 엽니다. */
+    const newOpenedTicker = isCurrentlyOpen ? null : ticker;
+    setOpenedTicker(newOpenedTicker);
+
+    /* 새 카드를 여는 경우, 아직 데이터가 없다면 데이터를 가져옵니다. */
+    if (!isCurrentlyOpen && newOpenedTicker) {
+      const tickerState = tickerStates[newOpenedTicker];
+      if (!tickerState.data && !tickerState.loading) {
+        fetchStockData(newOpenedTicker);
+      }
+    }
   };
 
   return (
@@ -134,26 +84,17 @@ export default function StockPage() {
     주식 포트폴리오
     </h1>
 
-    {tickerStates[allTickers.tickers[0]]?.error && (
-      <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
-      <strong className="font-bold">Error:</strong>
-      <span className="block sm:inline ml-2">{tickerStates[allTickers.tickers[0]].error}</span>
-      </div>
-    )}
-
     <div className="w-full max-w-7xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     {allTickers.tickers.map((ticker) => {
       const state = tickerStates[ticker];
-      const isOpen = openedTickers.has(ticker);
-
       return (
         <StockCollapsibleCard
         key={ticker}
         ticker={ticker}
         tickerState={state}
         gridStrokeColor={gridStrokeColor}
-        isOpen={isOpen}
-        onOpenChange={handleToggleCollapsible}
+        isOpen={openedTicker === ticker}
+        onOpenChange={() => handleOpenChange(ticker)}
         />
       );
     })}

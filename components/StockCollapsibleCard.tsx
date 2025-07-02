@@ -14,7 +14,8 @@ interface StockCollapsibleCardProps {
   tickerState: TickerState;
   gridStrokeColor: string;
   isOpen: boolean;
-  onOpenChange: (ticker: string, open: boolean) => void;
+  /* onOpenChange prop의 타입을 boolean 인자 없이 받도록 수정 */
+  onOpenChange: () => void;
 }
 
 export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
@@ -27,7 +28,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   return (
     <Collapsible
     open={isOpen}
-    onOpenChange={(open) => onOpenChange(ticker, open)}
+    onOpenChange={onOpenChange} /* boolean 인자를 전달하지 않고 바로 호출 */
     className="w-full"
     >
     <Card className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 shadow-lg rounded-lg">

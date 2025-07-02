@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 캐시 폴더를 Git 추적에서 제외
+.cache/
