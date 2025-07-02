@@ -1,90 +1,142 @@
 /* components/StockChartDisplay.tsx */
 
-import React from 'react';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
-} from 'recharts';
-import { StockDataPoint } from '@/lib/stockUtils';
+"use client";
+
+import React, { useEffect, useRef } from 'react';
+import { StockDataPoint, TradingSignal } from '@/lib/stockUtils';
+/* 오류 수정: 사용되지 않는 'LineData'와 'WhitespaceData' 타입을 import 목록에서 제거합니다. */
+import { createChart, ColorType, CandlestickSeries, LineSeries, CandlestickData, Time, SeriesMarker } from 'lightweight-charts';
 
 interface StockChartDisplayProps {
   data: StockDataPoint[];
+  signals: TradingSignal[];
   gridStrokeColor: string;
   loading: boolean;
   error: string | null;
 }
 
-/*
- *   - 오류 해결: [key: string]: any 타입을 [key: string]: unknown 으로 변경하여
- *     - @typescript-eslint/no-explicit-any 규칙을 준수합니다.
- *     */
-interface CustomTooltipProps {
-  active?: boolean;
-  payload?: Array<{
-    payload: StockDataPoint;
-    [key: string]: unknown;
-  }>;
-  label?: string | number;
-}
+export const StockChartDisplay: React.FC<StockChartDisplayProps> = ({ data, signals, gridStrokeColor, loading, error }) => {
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const rsiChartContainerRef = useRef<HTMLDivElement>(null);
 
-const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label }) => {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    return (
-      <div className="p-2 bg-slate-800 text-white rounded-md border border-slate-700 text-xs shadow-lg">
-      <p className="font-bold">{`날짜: ${new Date(label as string).toLocaleDateString()}`}</p>
-      <hr className="my-1 border-slate-600" />
-      <p>종가: <span className="font-mono">{data.close.toFixed(2)}</span></p>
-      {data.rsi != null && <p>RSI(14): <span className="font-mono">{data.rsi.toFixed(2)}</span></p>}
-      </div>
-    );
-  }
-  return null;
-};
+  useEffect(() => {
+    if (!chartContainerRef.current || !rsiChartContainerRef.current || data.length === 0) return;
 
-export const StockChartDisplay: React.FC<StockChartDisplayProps> = ({ data, gridStrokeColor, loading, error }) => {
-  if (loading) {
-    return <p className="text-slate-700 dark:text-slate-300">데이터 로딩 중...</p>;
-  }
+    /* ----- 메인 차트 (캔들스틱) 생성 ----- */
+    const mainChart = createChart(chartContainerRef.current, {
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: gridStrokeColor },
+      grid: { vertLines: { color: 'rgba(70, 130, 180, 0.1)' }, horzLines: { color: 'rgba(70, 130, 180, 0.1)' } },
+      width: chartContainerRef.current.clientWidth,
+      height: 250,
+      timeScale: { timeVisible: true, secondsVisible: false }
+    });
 
-  if (error) {
-    return (
-      <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-      <strong className="font-bold">Error:</strong>
-      <span className="block sm:inline ml-2">{error}</span>
-      </div>
-    );
-  }
+    const candlestickSeries = mainChart.addSeries(CandlestickSeries, {
+      borderVisible: false, wickUpColor: '#999999', wickDownColor: '#999999',
+    });
 
-  if (!data || data.length === 0) {
-    return <p className="text-slate-500 dark:text-slate-400">지난 3개월간 데이터가 없습니다.</p>;
-  }
+    const markersByDate = new Map<string, SeriesMarker<Time>>();
+    signals.forEach(signal => {
+      let markerConfig: SeriesMarker<Time> = {
+        time: signal.date as Time,
+        position: 'inBar',
+        color: 'transparent',
+        shape: 'circle',
+        text: ''
+      };
+      if (signal.type === 'buy') {
+        markerConfig = { ...markerConfig, position: 'belowBar', color: '#26a69a', shape: 'arrowUp', text: '매수' };
+      } else if (signal.type === 'sell') {
+        markerConfig = { ...markerConfig, position: 'aboveBar', color: '#ef5350', shape: 'arrowDown', text: '매도' };
+      } else if (signal.type === 'inverse-buy') {
+        markerConfig = { ...markerConfig, position: 'aboveBar', color: '#ff9800', shape: 'arrowDown', text: '인버스' };
+      }
+      if (markerConfig.text) {
+        markersByDate.set(signal.date, markerConfig);
+      }
+    });
+
+    const chartData: (CandlestickData & Partial<SeriesMarker<Time>>)[] = data.map((d, i) => {
+      let color = '#999999';
+      if (i > 0) {
+        const prevClose = data[i - 1].close;
+        if (d.close > prevClose) color = d.close < d.open ? '#2962FF' : '#26a69a';
+        else if (d.close < prevClose) color = d.close > d.open ? '#ef5350' : '#000000';
+      }
+
+      const marker = markersByDate.get(d.date);
+
+      return {
+        time: d.date as Time, open: d.open, high: d.high, low: d.low, close: d.close, color: color,
+        /* 마커가 있는 경우, 해당 속성을 데이터 객체에 포함시킵니다. */
+        ...(marker && { 
+          position: marker.position, 
+          color: marker.color, 
+          shape: marker.shape, 
+          text: marker.text 
+        })
+      };
+    });
+    candlestickSeries.setData(chartData);
+
+    if (data.length > 1) {
+      const lastDate = new Date(data[data.length - 1].date);
+      const twoMonthsAgo = new Date(lastDate);
+      twoMonthsAgo.setMonth(lastDate.getMonth() - 2);
+      mainChart.timeScale().setVisibleRange({
+        from: (twoMonthsAgo.getTime() / 1000) as Time,
+        to: (lastDate.getTime() / 1000) as Time,
+      });
+    }
+
+    const upperBandSeries = mainChart.addSeries(LineSeries, { color: '#ccc', lineWidth: 1, lineStyle: 2 });
+    const lowerBandSeries = mainChart.addSeries(LineSeries, { color: '#ccc', lineWidth: 1, lineStyle: 2 });
+    upperBandSeries.setData(data.filter(d => d.bollingerBands).map(d => ({ time: d.date as Time, value: d.bollingerBands!.upper })));
+    lowerBandSeries.setData(data.filter(d => d.bollingerBands).map(d => ({ time: d.date as Time, value: d.bollingerBands!.lower })));
+
+    /* -----
+     * RSI
+     * 차트
+     * 생성
+     * -----
+     *  */
+    const rsiChart = createChart(rsiChartContainerRef.current, {
+layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: gridStrokeColor },
+grid: { vertLines: { color: 'rgba(70, 130, 180, 0.1)' }, horzLines: { color: 'rgba(70, 130, 180, 0.1)' } },
+width: rsiChartContainerRef.current.clientWidth,
+height: 100,
+timeScale: { visible: false },
+});
+
+    const rsiSeries = rsiChart.addSeries(LineSeries, { color: '#82ca9d', lineWidth: 2 });
+    rsiSeries.setData(data.filter(d => d.rsi).map(d => ({ time: d.date as Time, value: d.rsi! })));
+
+    rsiSeries.createPriceLine({ price: 70, color: 'red', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '과매수' });
+    rsiSeries.createPriceLine({ price: 30, color: 'green', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '과매도' });
+
+    mainChart.timeScale().subscribeVisibleTimeRangeChange(timeRange => rsiChart.timeScale().setVisibleRange(timeRange!));
+
+    const handleResize = () => {
+      mainChart.applyOptions({ width: chartContainerRef.current!.clientWidth });
+      rsiChart.applyOptions({ width: rsiChartContainerRef.current!.clientWidth });
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      mainChart.remove();
+      rsiChart.remove();
+    };
+  }, [data, signals, gridStrokeColor]);
+
+  if (loading) return <p className="text-slate-700 dark:text-slate-300">데이터 로딩 중...</p>;
+  if (error) return <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert"><strong className="font-bold">Error:</strong><span className="block sm:inline ml-2">{error}</span></div>;
+  if (!data || data.length === 0) return <p className="text-slate-500 dark:text-slate-400">차트를 표시할 데이터가 없습니다.</p>;
 
   return (
-    <div className="flex flex-col gap-4">
-    {/* 주가 차트 (선 그래프) */}
-    <ResponsiveContainer width="100%" height={250}>
-    <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-    <CartesianGrid strokeDasharray="3 3" stroke={gridStrokeColor} />
-    <XAxis dataKey="date" tickFormatter={(tick) => new Date(tick).toLocaleDateString()} />
-    <YAxis domain={['dataMin - 5', 'dataMax + 5']} />
-    <Tooltip content={<CustomTooltip />} />
-    <Legend />
-    <Line type="monotone" dataKey="close" stroke="#8884d8" dot={false} name="종가" />
-    </LineChart>
-    </ResponsiveContainer>
-
-    {/* RSI 보조지표 차트 */}
-    <ResponsiveContainer width="100%" height={100}>
-    <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-    <CartesianGrid strokeDasharray="3 3" stroke={gridStrokeColor} />
-    <XAxis dataKey="date" hide={true} />
-    <YAxis domain={[0, 100]} tickCount={3} />
-    <Tooltip content={<CustomTooltip />} />
-    <Line type="monotone" dataKey="rsi" stroke="#82ca9d" dot={false} name="RSI(14)" />
-    <ReferenceLine y={70} stroke="red" strokeDasharray="3 3" label={{ value: '과매수 (70)', position: 'insideTopRight', fill: 'red', fontSize: 10 }} />
-    <ReferenceLine y={30} stroke="green" strokeDasharray="3 3" label={{ value: '과매도 (30)', position: 'insideBottomRight', fill: 'green', fontSize: 10 }} />
-    </LineChart>
-    </ResponsiveContainer>
+    <div className="flex flex-col gap-1">
+    <div ref={chartContainerRef} style={{ width: '100%', height: '250px' }} />
+    <div ref={rsiChartContainerRef} style={{ width: '100%', height: '100px' }} />
     </div>
   );
 };

@@ -40,7 +40,7 @@ export default function MyPropertiesPage() {
         <div className="flex justify-between items-center w-full">
         <h2 className="text-2xl font-bold">{owner}</h2>
         <p className="text-lg text-slate-600 dark:text-slate-300 font-medium">
-        총 납부예상세액: <span className="font-bold text-blue-600 dark:text-blue-400">{totalTax.toLocaleString()} 원</span>
+        연간 보유 비용: <span className="font-bold text-blue-600 dark:text-blue-400">{totalTax.toLocaleString()} 원</span>
         </p>
         </div>
         </AccordionTrigger>
