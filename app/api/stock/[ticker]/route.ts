@@ -3,7 +3,6 @@
 import { NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs/promises';
-/* analyzeAllTradingSignals 함수를 import 합니다. */
 import { StockDataPoint, CachedStockData, calculateRSI, calculateBollingerBands, analyzeAllTradingSignals } from '@/lib/stockUtils';
 
 const cacheDir = path.join(process.cwd(), '.cache');
@@ -44,60 +43,54 @@ export async function GET(request: Request) {
   const stockCache = await readStockCache();
   const cachedTickerData = stockCache[ticker];
   const today = new Date().toISOString().split('T')[0];
+  let rawData: StockDataPoint[];
 
   if (cachedTickerData && cachedTickerData.lastFetch === today) {
-    console.log(`[API Route - ${ticker}] Loading from cache.`);
-    return NextResponse.json({ data: cachedTickerData.data, signals: cachedTickerData.signals });
-  }
+    console.log(`✅ [${ticker}] CACHE HIT: Loading raw data from cache file.`);
+    rawData = cachedTickerData.data;
+  } else {
+    console.log(`❌ [${ticker}] CACHE MISS: Fetching new data from Alpha Vantage API.`);
+    if (!API_KEY || API_KEY === 'YOUR_API_KEY_HERE') {
+      return NextResponse.json({ error: "API Key is not configured on the server." }, { status: 500 });
+    }
+    try {
+      const response = await fetch(
+        `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&outputsize=full&apikey=${API_KEY}`
+      );
+        if (!response.ok) throw new Error(`Alpha Vantage API error! status: ${response.status}`);
+        const data = await response.json();
+        if (data['Time Series (Daily)']) {
+          const timeSeries = data['Time Series (Daily)'];
+          const allDataPoints: StockDataPoint[] = [];
+          for (const dateKey in timeSeries) {
+            allDataPoints.push({
+              date: dateKey,
+              open: parseFloat(timeSeries[dateKey]['1. open']),
+              high: parseFloat(timeSeries[dateKey]['2. high']),
+              low: parseFloat(timeSeries[dateKey]['3. low']),
+              close: parseFloat(timeSeries[dateKey]['4. close']),
+              volume: parseFloat(timeSeries[dateKey]['6. volume']),
+            });
+          }
+          allDataPoints.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  console.log(`[API Route - ${ticker}] Fetching from API.`);
-  if (!API_KEY || API_KEY === 'YOUR_API_KEY_HERE') {
-    return NextResponse.json({ error: "API Key is not configured on the server." }, { status: 500 });
-  }
-
-  try {
-    const response = await fetch(
-      `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&outputsize=full&apikey=${API_KEY}`
-    );
-      if (!response.ok) throw new Error(`Alpha Vantage API error! status: ${response.status}`);
-      const data = await response.json();
-
-      if (data['Time Series (Daily)']) {
-        const timeSeries = data['Time Series (Daily)'];
-        const allDataPoints: StockDataPoint[] = [];
-
-        for (const dateKey in timeSeries) {
-          allDataPoints.push({
-            date: dateKey,
-            open: parseFloat(timeSeries[dateKey]['1. open']),
-            high: parseFloat(timeSeries[dateKey]['2. high']),
-            low: parseFloat(timeSeries[dateKey]['3. low']),
-            close: parseFloat(timeSeries[dateKey]['4. close']),
-            volume: parseFloat(timeSeries[dateKey]['6. volume']),
-          });
+          const now = new Date();
+          const oneYearAgo = new Date();
+          oneYearAgo.setFullYear(now.getFullYear() - 1);
+          rawData = allDataPoints.filter(d => new Date(d.date) >= oneYearAgo);
+          stockCache[ticker] = { lastFetch: today, data: rawData };
+          await writeStockCache(stockCache);
+        } else {
+          throw new Error(data["Note"] || data["Error Message"] || "No data available.");
         }
-        allDataPoints.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-        const now = new Date();
-        const oneYearAgo = new Date();
-        oneYearAgo.setFullYear(now.getFullYear() - 1);
-
-        const chartData = allDataPoints.filter(d => new Date(d.date) >= oneYearAgo);
-
-        const dataWithIndicators = calculateBollingerBands(calculateRSI(chartData));
-        /* 새로운 분석 함수를 호출합니다. */
-        const signals = analyzeAllTradingSignals(dataWithIndicators);
-
-        stockCache[ticker] = { lastFetch: today, data: dataWithIndicators, signals: signals };
-        await writeStockCache(stockCache);
-
-        return NextResponse.json({ data: dataWithIndicators, signals: signals });
-      } else {
-        throw new Error(data["Note"] || data["Error Message"] || "No data available.");
-      }
-  } catch (e: unknown) {
-    const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred';
-    console.error(`[API Route - ${ticker}] Failed to fetch data:`, e);
-    return NextResponse.json({ error: `Failed to load data for ${ticker}. Error: ${errorMessage}` }, { status: 500 });
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred';
+      console.error(`[API Route - ${ticker}] Failed to fetch data:`, e);
+      return NextResponse.json({ error: `Failed to load data for ${ticker}. Error: ${errorMessage}` }, { status: 500 });
+    }
   }
+
+  const dataWithIndicators = calculateBollingerBands(calculateRSI(rawData));
+  const signals = analyzeAllTradingSignals(dataWithIndicators);
+  return NextResponse.json({ data: dataWithIndicators, signals: signals });
 }
