@@ -19,17 +19,9 @@ interface StockCollapsibleCardProps {
   onOpenChange: () => void;
 }
 
-/*
- *  * [수정] 날짜 포맷팅 함수가 숫자 타임스탬프를 받아
- *   * 한국식 날짜('YY. M. D.')로 변환하도록 수정합니다.
- *   */
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
-  return date.toLocaleDateString('ko-KR', {
-    year: '2-digit',
-    month: 'numeric',
-    day: 'numeric',
-  });
+  return date.toLocaleDateString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric' });
 }
 
 export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
@@ -61,34 +53,34 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     onOpenChange={onOpenChange}
     className="w-full"
     >
-    <Card className="w-full bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 shadow-lg rounded-lg">
+    <Card className="w-full bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 shadow-lg rounded-lg py-0">
     <CollapsibleTrigger asChild>
-    <CardHeader className={cn("flex flex-row justify-between items-center cursor-pointer rounded-t-lg transition-colors py-2 px-4")}>
+    <CardHeader className={cn("flex flex-row justify-between items-center cursor-pointer rounded-t-lg transition-colors py-4 px-4")}>
     <CardTitle className={cn("text-xl font-semibold", getCardTitleClassName())}>{ticker}</CardTitle>
     {tickerState.loading && <span className="text-sm">로딩 중...</span>}
-    {tickerState.error && <span className="text-red-500 text-sm">오류 발생!</span>}
+    {tickerState.error && <span className="text-sm text-red-500">오류</span>}
     {isOpen ? <ChevronUp className="h-5 w-5 ml-2" /> : <ChevronDown className="h-5 w-5 ml-2" />}
     </CardHeader>
     </CollapsibleTrigger>
     <CollapsibleContent>
-    <CardContent className="pt-0 p-4">
+    <CardContent className="pt-2 p-4">
     {historicalSignals.length > 0 ? (
-      <div className="my-4">
+      <div className="my-2">
       <h4 className="text-sm font-semibold mb-2">과거 신호 내역</h4>
       <Table>
       <TableHeader>
       <TableRow>
-      <TableHead>기간</TableHead>
-      <TableHead>신호</TableHead>
+      <TableHead className="h-8">기간</TableHead>
+      <TableHead className="h-8">신호</TableHead>
       </TableRow>
       </TableHeader>
       <TableBody>
       {historicalSignals.map((signal, index) => (
         <TableRow key={index}>
-        <TableCell className="font-mono text-xs whitespace-nowrap">
+        <TableCell className="font-mono text-xs whitespace-nowrap py-1">
         {signal.startDate ? `${formatDate(signal.startDate)} ~ ${formatDate(signal.date)}` : formatDate(signal.date)}
         </TableCell>
-        <TableCell className="text-xs">{signal.reason}</TableCell>
+        <TableCell className="text-xs py-1">{signal.reason}</TableCell>
         </TableRow>
       ))}
       </TableBody>
@@ -99,14 +91,21 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     )}
 
     <StockChartDisplay
-    data={tickerState.data || []}
+    data={tickerState.data}
+    /* [핵심]
+     * signals
+     * prop을
+     * 다시
+     * 전달합니다.
+     * */
+    signals={tickerState.signals}
     gridStrokeColor={gridStrokeColor}
     loading={tickerState.loading}
     error={tickerState.error}
     />
-    </CardContent>
-    </CollapsibleContent>
-    </Card>
-    </Collapsible>
-  );
+      </CardContent>
+      </CollapsibleContent>
+      </Card>
+      </Collapsible>
+      );
 };
