@@ -2,12 +2,12 @@
 
 "use client";
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { TickerState } from '@/lib/stockUtils';
-import { StockChartDisplay } from './StockChartDisplay';
+import { TickerState, TradingSignal } from '@/lib/stockUtils';
+import { StockChartDisplay, StockChartDisplayHandles } from './StockChartDisplay';
 import { cn } from '@/lib/utils';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -32,6 +32,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   onOpenChange
 }) => {
   const latestSignal = tickerState.signals.length > 0 ? tickerState.signals[tickerState.signals.length - 1] : null;
+  const chartRef = useRef<StockChartDisplayHandles>(null);
 
   const getCardTitleClassName = () => {
     if (!latestSignal) return "";
@@ -46,6 +47,12 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   };
 
   const historicalSignals = tickerState.signals.filter(s => s.type !== 'hold');
+
+  const handleSignalClick = (signal: TradingSignal) => {
+    const targetDate = signal.startDate || signal.date;
+    console.log(`[${ticker}] Row Clicked! Target Date:`, targetDate);
+    chartRef.current?.moveToDate(targetDate);
+  };
 
   return (
     <Collapsible
@@ -76,7 +83,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
       </TableHeader>
       <TableBody>
       {historicalSignals.map((signal, index) => (
-        <TableRow key={index}>
+        <TableRow key={index} onClick={() => handleSignalClick(signal)} className="cursor-pointer">
         <TableCell className="font-mono text-xs whitespace-nowrap py-1">
         {signal.startDate ? `${formatDate(signal.startDate)} ~ ${formatDate(signal.date)}` : formatDate(signal.date)}
         </TableCell>
@@ -91,21 +98,16 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     )}
 
     <StockChartDisplay
+    ref={chartRef}
     data={tickerState.data}
-    /* [핵심]
-     * signals
-     * prop을
-     * 다시
-     * 전달합니다.
-     * */
     signals={tickerState.signals}
     gridStrokeColor={gridStrokeColor}
     loading={tickerState.loading}
     error={tickerState.error}
     />
-      </CardContent>
-      </CollapsibleContent>
-      </Card>
-      </Collapsible>
-      );
+    </CardContent>
+    </CollapsibleContent>
+    </Card>
+    </Collapsible>
+  );
 };

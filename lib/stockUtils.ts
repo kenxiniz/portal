@@ -1,7 +1,7 @@
 /* lib/stockUtils.ts */
 
 export interface StockDataPoint {
-  date: string; /* YYYY-MM-DD 형식의 문자열 */
+  date: string; /* yyyy-MM-dd 형식의 문자열 */
   open: number;
   high: number;
   low: number;
@@ -112,8 +112,20 @@ export const analyzeAllTradingSignals = (data: StockDataPoint[]): TradingSignal[
   lastFiveDays.forEach(d => {
     if (d.bollingerBands && d.close >= d.bollingerBands.upper) {
       historicalSignals.push({
-        date: d.date, type: 'sell', reason: '수익 실현 (볼린저 밴드)',
+        date: d.date,
+        type: 'sell',
+        /* [수정] 수익 실현 이유에 'BB 상단'을 명시합니다. */
+        reason: '수익 실현 (BB 상단)',
         details: `주가(${d.close.toFixed(2)})가 BB상단(${d.bollingerBands.upper.toFixed(2)}) 도달.`
+      });
+    }
+    /* [추가] BB 하단 터치 시 수익 실현 신호를 추가합니다. */
+    if (d.bollingerBands && d.close <= d.bollingerBands.lower) {
+      historicalSignals.push({
+        date: d.date,
+        type: 'sell',
+        reason: '수익 실현 (BB 하단)',
+        details: `주가(${d.close.toFixed(2)})가 BB하단(${d.bollingerBands.lower.toFixed(2)}) 도달.`
       });
     }
   });
