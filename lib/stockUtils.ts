@@ -1,7 +1,7 @@
 /* lib/stockUtils.ts */
 
 export interface StockDataPoint {
-  date: string; /* yyyy-MM-dd 형식의 문자열 */
+  date: string; /* यार-MM-dd 형식의 문자열 */
   open: number;
   high: number;
   low: number;
@@ -15,12 +15,16 @@ export interface StockDataPoint {
   };
 }
 
+/* 수익률, 평균가 등 추가 정보를 담을 수 있도록 인터페이스 확장 */
 export interface TradingSignal {
   date: string;
   startDate?: string;
   type: 'buy' | 'sell' | 'inverse-buy' | 'hold';
   reason: string;
   details?: string;
+  entryPrice?: number; /* [수정] 진입 가격으로 이름 변경 */
+  profitRate?: number; /* 수익률 */
+  realizedPrice?: number; /* 수익 실현 가격 */
 }
 
 export interface TickerState {
@@ -35,7 +39,7 @@ export interface CachedStockData {
   data: StockDataPoint[];
 }
 
-/* 이하 모든 함수는 변경 없습니다. */
+
 export const calculateRSI = (data: StockDataPoint[], period: number = 14): StockDataPoint[] => {
   if (data.length <= period) return data;
   const rsiData = [...data];
@@ -76,74 +80,194 @@ export const calculateBollingerBands = (data: StockDataPoint[], period: number =
   return bbData;
 };
 
+
+/*
+ *  * [수정] 전체 매매 신호 분석 로직을 상태 기반(초기화 포함)으로 재구성합니다.
+ *   */
 export const analyzeAllTradingSignals = (data: StockDataPoint[]): TradingSignal[] => {
-  const WINDOW_SIZE = 60;
-  if (data.length < WINDOW_SIZE) return [];
-  const historicalSignals: TradingSignal[] = [];
-  for (let i = WINDOW_SIZE; i < data.length; i++) {
-    const currentWindow = data.slice(i - WINDOW_SIZE, i);
+  if (data.length === 0) return [];
+
+  const signals: TradingSignal[] = [];
+  let lastBuySignal: TradingSignal | null = null;
+  let lastInverseBuySignal: TradingSignal | null = null;
+
+  /* 쌍바닥 찾기 상태 변수 */
+  let firstTrough: StockDataPoint | null = null;
+  let firstTroughIndex: number | null = null;
+  let troughRsiState: 'initial' | 'crossed_30' | 'dipped' = 'initial';
+
+  /* 쌍봉 찾기 상태 변수 */
+  let firstPeak: StockDataPoint | null = null;
+  let firstPeakIndex: number | null = null;
+  let peakRsiState: 'initial' | 'crossed_70' | 'rallied' = 'initial';
+
+
+  for (let i = 1; i < data.length; i++) { /* 0번째 인덱스는 전일 데이터가 없으므로 1부터 시작 */
     const currentPoint = data[i];
-    const troughs = currentWindow.filter((d, j, arr) => j > 0 && j < arr.length - 1 && d.low < arr[j-1].low && d.low < arr[j+1].low);
-    const peaks = currentWindow.filter((d, j, arr) => j > 0 && j < arr.length - 1 && d.high > arr[j-1].high && d.high > arr[j+1].high);
-    const highRSI70 = peaks.filter(p => p.rsi && p.rsi > 70);
-    if (highRSI70.length >= 2) {
-      const lastPeak = highRSI70[highRSI70.length - 1];
-      if (currentPoint.high > lastPeak.high && currentPoint.rsi! < lastPeak.rsi!) {
-        historicalSignals.push({
-          startDate: lastPeak.date, date: currentPoint.date, type: 'inverse-buy',
-          reason: '인버스 매수 (RSI 쌍봉)',
-          details: `주가는 전고점(${lastPeak.high.toFixed(2)})을 돌파했으나 RSI는 하락.`
-        });
+    const prevPoint = data[i - 1];
+
+    /* --- 쌍바닥 (매수) 신호 로직 --- */
+    if (!firstTrough) {
+      if (prevPoint.rsi! < 30 && currentPoint.rsi! > prevPoint.rsi!) {
+        firstTrough = prevPoint;
+        firstTroughIndex = i - 1;
+        troughRsiState = 'initial';
+      }
+    } else {
+      const daysSinceFirstTrough = i - firstTroughIndex!;
+      if (currentPoint.rsi! < firstTrough.rsi!) {
+        firstTrough = null;
+        firstTroughIndex = null;
+        troughRsiState = 'initial';
+      }
+      else if (daysSinceFirstTrough > 90) {
+        firstTrough = null;
+        firstTroughIndex = null;
+        troughRsiState = 'initial';
+      } else if (daysSinceFirstTrough > 5) {
+        if (troughRsiState === 'initial' && currentPoint.rsi! > 30) {
+          troughRsiState = 'crossed_30';
+        } else if (troughRsiState === 'crossed_30' && currentPoint.rsi! < prevPoint.rsi!) {
+          troughRsiState = 'dipped';
+        } else if (troughRsiState === 'dipped' && currentPoint.rsi! > prevPoint.rsi!) {
+          if (currentPoint.close < firstTrough.close && currentPoint.rsi! > firstTrough.rsi!) {
+            const buySignal: TradingSignal = {
+              date: currentPoint.date,
+              startDate: firstTrough.date,
+              type: 'buy',
+              reason: '매수 (RSI 쌍바닥)',
+              entryPrice: currentPoint.close,
+              details: `RSI 상승 다이버전스`
+            };
+            signals.push(buySignal);
+            lastBuySignal = buySignal;
+            firstTrough = null;
+            firstTroughIndex = null;
+            troughRsiState = 'initial';
+          } else {
+            troughRsiState = 'dipped';
+          }
+        }
       }
     }
-    const lowRSI30 = troughs.filter(t => t.rsi && t.rsi < 30);
-    if (lowRSI30.length >= 2) {
-      const lastTrough = lowRSI30[lowRSI30.length - 1];
-      if (currentPoint.low < lastTrough.low && currentPoint.rsi! > lastTrough.rsi!) {
-        historicalSignals.push({
-          startDate: lastTrough.date, date: currentPoint.date, type: 'buy',
-          reason: '매수 (RSI 쌍바닥)',
-          details: `주가는 전저점(${lastTrough.low.toFixed(2)})보다 하락했으나 RSI는 상승.`
-        });
+
+    /* ---
+     * 쌍봉
+     * (인버스
+     * 매수)
+     * 신호
+     * 로직
+     * ---
+     *  */
+    if (!firstPeak) {
+      if (prevPoint.rsi! > 70 && currentPoint.rsi! < prevPoint.rsi!) {
+        firstPeak = prevPoint;
+        firstPeakIndex = i - 1;
+        peakRsiState = 'initial';
+      }
+    } else {
+      const daysSinceFirstPeak = i - firstPeakIndex!;
+      if (currentPoint.rsi! > firstPeak.rsi!) {
+        firstPeak = null;
+        firstPeakIndex = null;
+        peakRsiState = 'initial';
+      }
+      else if (daysSinceFirstPeak > 90) {
+        firstPeak = null;
+        firstPeakIndex = null;
+        peakRsiState = 'initial';
+      } else if (daysSinceFirstPeak > 5) {
+        if (peakRsiState === 'initial' && currentPoint.rsi! < 70) {
+          peakRsiState = 'crossed_70';
+        } else if (peakRsiState === 'crossed_70' && currentPoint.rsi! > prevPoint.rsi!) {
+          peakRsiState = 'rallied';
+        } else if (peakRsiState === 'rallied' && currentPoint.rsi! < prevPoint.rsi!) {
+          if (currentPoint.close > firstPeak.close && currentPoint.rsi! < firstPeak.rsi!) {
+            const inverseBuySignal: TradingSignal = {
+date: currentPoint.date,
+      startDate: firstPeak.date,
+      type: 'inverse-buy',
+      reason: '인버스 매수 (RSI 쌍봉)',
+      entryPrice: currentPoint.close,
+      details: `RSI 하락 다이버전스`
+            };
+            signals.push(inverseBuySignal);
+            lastInverseBuySignal = inverseBuySignal;
+            firstPeak = null;
+            firstPeakIndex = null;
+            peakRsiState = 'initial';
+          } else {
+            peakRsiState = 'rallied';
+          }
+        }
       }
     }
-  }
-  const lastFiveDays = data.slice(-5);
-  lastFiveDays.forEach(d => {
-    if (d.bollingerBands && d.close >= d.bollingerBands.upper) {
-      historicalSignals.push({
-        date: d.date,
-        type: 'sell',
-        /* [수정] 수익 실현 이유에 'BB 상단'을 명시합니다. */
-        reason: '수익 실현 (BB 상단)',
-        details: `주가(${d.close.toFixed(2)})가 BB상단(${d.bollingerBands.upper.toFixed(2)}) 도달.`
-      });
-    }
-    /* [추가] BB 하단 터치 시 수익 실현 신호를 추가합니다. */
-    if (d.bollingerBands && d.close <= d.bollingerBands.lower) {
-      historicalSignals.push({
-        date: d.date,
-        type: 'sell',
-        reason: '수익 실현 (BB 하단)',
-        details: `주가(${d.close.toFixed(2)})가 BB하단(${d.bollingerBands.lower.toFixed(2)}) 도달.`
-      });
-    }
-  });
-  const uniqueSignals = new Map<string, TradingSignal>();
-  historicalSignals.forEach(signal => {
-    if (signal.startDate) {
-      const key = `${signal.startDate}-${signal.reason}`;
-      uniqueSignals.set(key, signal);
-    }
-  });
-  const filteredSignals = [ ...historicalSignals.filter(s => !s.startDate), ...Array.from(uniqueSignals.values())];
-  const finalSignals = filteredSignals.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const latestSignal = finalSignals.length > 0 ? finalSignals[finalSignals.length - 1] : null;
-  if (!latestSignal || new Date(latestSignal.date).getTime() !== new Date(data[data.length - 1].date).getTime()) {
-    finalSignals.push({
-      date: data[data.length - 1].date, type: 'hold', reason: '관망 (중립 구간)',
-      details: '현재 명확한 매수/매도 신호가 없습니다.'
-    });
-  }
-  return finalSignals;
-};
+
+
+      /* ---
+       * 수익
+       * 실현
+       * 신호
+       * 로직
+       * ---
+       *  */
+    if (currentPoint.bollingerBands) {
+      if (lastBuySignal && currentPoint.close >= currentPoint.bollingerBands.upper) {
+        const profitRate = ((currentPoint.close - lastBuySignal.entryPrice!) / lastBuySignal.entryPrice!) * 100;
+        signals.push({
+date: currentPoint.date,
+type: 'sell',
+reason: profitRate >= 0 ? '수익 실현 (BB 상단)' : '손실 (BB 상단)',
+realizedPrice: currentPoint.close,
+profitRate: profitRate,
+/* [수정]
+ * details에
+ * BB
+ * 상단
+ * 가격을
+ * 추가합니다.
+ * */
+details: `BB상단: ${currentPoint.bollingerBands.upper.toFixed(2)}`
+});
+lastBuySignal = null;
+}
+else if (lastInverseBuySignal && currentPoint.close <= currentPoint.bollingerBands.lower) {
+  const profitRate = ((lastInverseBuySignal.entryPrice! - currentPoint.close) / lastInverseBuySignal.entryPrice!) * 100;
+  signals.push({
+date: currentPoint.date,
+type: 'sell',
+reason: profitRate >= 0 ? '수익 실현 (BB 하단)' : '손실 (BB 하단)',
+realizedPrice: currentPoint.close,
+profitRate: profitRate,
+/* [수정]
+ * details에
+ * BB
+ * 하단
+ * 가격을
+ * 추가합니다.
+ * */
+details: `BB하단: ${currentPoint.bollingerBands.lower.toFixed(2)}`
+});
+lastInverseBuySignal = null;
+}
+}
+}
+
+/* 중복 신호 제거 및 최종 정리 */
+const uniqueSignals = Array.from(new Map(signals.map(s => [`${s.date}-${s.reason}`, s])).values());
+
+/* 마지막 날짜에 유의미한 신호가 없으면 '관망' 추가 */
+if (data.length > 0) {
+  const lastSignalDate = uniqueSignals.length > 0 ? uniqueSignals[uniqueSignals.length - 1].date : null;
+  if (lastSignalDate !== data[data.length - 1].date) {
+    uniqueSignals.push({
+date: data[data.length - 1].date,
+type: 'hold',
+reason: '관망 (중립 구간)',
+});
+}
+}
+
+
+return uniqueSignals.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    };
