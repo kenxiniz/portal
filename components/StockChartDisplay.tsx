@@ -24,7 +24,6 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
     const rsiChartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<{ main: IChartApi | null, rsi: IChartApi | null }>({ main: null, rsi: null });
 
-    /* [최종 수정] 사용자님의 피드백을 반영하여 차트 이동 로직을 수정합니다. */
     useImperativeHandle(ref, () => ({
       moveToDate(date: string) {
         if (chartRef.current.main && data && data.length > 0) {
@@ -39,12 +38,12 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
               /*
                *                * [핵심 수정] 올바른 위치 계산:
                *                               * 1. 오른쪽 끝을 기준으로 한 상대 위치(음수)를 계산합니다.
-               *                                              * 2. 선택한 날짜를 '왼쪽'에 위치시키기 위해, 현재 보이는 막대 수만큼 더해줍니다.
+               *                                              * 2. 선택한 날짜를 '중앙'에 위치시키기 위해, 현재 보이는 막대 수의 '절반'만큼만 추가로 빼줍니다.
                *                                                             */
               const positionFromRight = -(lastIndex - targetIndex);
-              const finalPosition = positionFromRight + (barsVisible - 1);
+              const finalPosition = positionFromRight + Math.floor(barsVisible / 2);
 
-              chartRef.current.main.timeScale().scrollToPosition(Math.floor(finalPosition), true);
+              chartRef.current.main.timeScale().scrollToPosition(finalPosition, true);
             }
           }
         }
@@ -80,7 +79,6 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
 
         chartRef.current = { main: mainChart, rsi: rsiChart };
 
-        /* [수정] 캔들 시리즈의 색상과 테두리 옵션을 설정합니다. */
         const candlestickSeries = mainChart.addSeries(CandlestickSeries, {
           upColor: '#1E88E5',
           downColor: '#E53935',
@@ -97,7 +95,7 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
           const sellSignalDay = signals.find(s => s.date === d.date && s.type === 'sell');
 
           if (buySignalPeriod || sellSignalDay) {
-            color = '#FFEB3B'; /* 눈에 띄는 밝은 노란색 */
+            color = '#FFEB3B';
           }
 
           return { time: d.date as Time, open: d.open, high: d.high, low: d.low, close: d.close, color: color };
@@ -118,7 +116,7 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
         rsiSeries.createPriceLine({ price: 30, color: 'green', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '과매도' });
 
         if (data.length > 1) {
-          const lastDate = data[data.length - 1].date;
+          const lastDate = data.at(-1)!.date;
           const twoMonthsAgoDate = new Date(lastDate);
           twoMonthsAgoDate.setMonth(twoMonthsAgoDate.getMonth() - 2);
           mainChart.timeScale().setVisibleRange({
@@ -153,7 +151,7 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
       <div ref={rsiChartContainerRef} style={{ width: '100%', height: '100px' }} />
       </div>
     );
-    }
+  }
 );
 
 StockChartDisplay.displayName = 'StockChartDisplay';

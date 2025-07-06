@@ -48,26 +48,26 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   isOpen,
   onOpenChange
 }) => {
-  const latestSignal = tickerState.signals.length > 0 ? tickerState.signals[tickerState.signals.length - 1] : null;
+  const latestSignal = tickerState.signals.length > 0 ? tickerState.signals.at(-1) : null;
   const chartRef = useRef<StockChartDisplayHandles>(null);
 
   const getCardTitleClassName = () => {
     if (!latestSignal) return "";
-    const { type } = latestSignal;
+    const { type, profitRate } = latestSignal;
     if (type.includes('buy')) {
       return 'text-blue-500 dark:text-blue-400';
     }
-    /* [수정] 손실일 경우에도 색상이 적용되도록 sell 타입을 확인합니다. */
     if (type === 'sell') {
-      return latestSignal.profitRate! >= 0 ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400';
+      return profitRate! >= 0 ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400';
     }
     return "";
   };
 
   const historicalSignals = tickerState.signals.filter(s => s.type !== 'hold');
 
+  /* [수정] 클릭된 신호의 '마지막 날짜'를 차트로 전달하는 함수 */
   const handleSignalClick = (signal: TradingSignal) => {
-    const targetDate = signal.startDate || signal.date;
+    const targetDate = signal.date; /* 기간이 있더라도 항상 마지막 날짜를 기준으로 이동 */
     chartRef.current?.moveToDate(targetDate);
   };
 
@@ -96,7 +96,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
       <TableRow>
       <TableHead className="h-8">기간</TableHead>
       <TableHead className="h-8">신호</TableHead>
-      {/* [수정] 테이블 헤더를 변경합니다. */ }
       <TableHead className="h-8 text-right">가격/수익률</TableHead>
       </TableRow>
       </TableHeader>
@@ -106,17 +105,18 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
         <TableCell className="font-mono text-xs whitespace-nowrap py-1">
         {signal.startDate ? `${formatDate(signal.startDate)} ~ ${formatDate(signal.date)}` : formatDate(signal.date)}
         </TableCell>
-        <TableCell className="text-xs py-1 flex items-center gap-1">
+        <TableCell className="text-xs py-1">
+        <div className="flex items-center gap-1">
         {getSignalIcon(signal)}
-        {signal.reason}
+        <span>{signal.reason}</span>
+        </div>
         </TableCell>
         <TableCell className="text-xs py-1 text-right font-mono">
         {signal.type === 'sell' && signal.profitRate !== undefined && (
-          <div className="flex flex-col items-end">
+          <div className="flex flex-col items-end justify-center">
           <span className={signal.profitRate >= 0 ? 'text-green-500' : 'text-red-500'}>
           {signal.profitRate.toFixed(2)}%
           </span>
-          {/* [추가] BB 밴드 가격을 표시합니다. */}
           <span className="text-gray-500 text-[10px]">{signal.details}</span>
           </div>
         )}
