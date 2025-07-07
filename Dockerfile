@@ -22,6 +22,11 @@ RUN npm ci
 # 나머지 소스 코드를 복사합니다.
 COPY . .
 
+ARG NEXT_PUBLIC_ACCESS_API_KEY
+ENV NEXT_PUBLIC_ACCESS_API_KEY=$NEXT_PUBLIC_ACCESS_API_KEY
+ARG NEXT_PUBLIC_AUTH_COOKIE_NAME
+ENV NEXT_PUBLIC_AUTH_COOKIE_NAME=$NEXT_PUBLIC_AUTH_COOKIE_NAME
+
 # 프로덕션용으로 애플리케이션을 빌드합니다.
 # 이 과정에서 .next/standalone 폴더가 생성됩니다.
 RUN npm run build
