@@ -15,16 +15,15 @@ export interface StockDataPoint {
   };
 }
 
-/* 수익률, 평균가 등 추가 정보를 담을 수 있도록 인터페이스 확장 */
 export interface TradingSignal {
   date: string;
   startDate?: string;
   type: 'buy' | 'sell' | 'inverse-buy' | 'hold';
   reason: string;
   details?: string;
-  entryPrice?: number; /* [수정] 진입 가격으로 이름 변경 */
-  profitRate?: number; /* 수익률 */
-  realizedPrice?: number; /* 수익 실현 가격 */
+  entryPrice?: number;
+  profitRate?: number;
+  realizedPrice?: number;
 }
 
 export interface TickerState {
@@ -94,58 +93,62 @@ export const analyzeAllTradingSignals = (data: StockDataPoint[]): TradingSignal[
   /* 쌍바닥 찾기 상태 변수 */
   let firstTrough: StockDataPoint | null = null;
   let firstTroughIndex: number | null = null;
-  let troughRsiState: 'initial' | 'crossed_30' | 'dipped' = 'initial';
+  let potentialSecondTrough: StockDataPoint | null = null;
 
   /* 쌍봉 찾기 상태 변수 */
   let firstPeak: StockDataPoint | null = null;
   let firstPeakIndex: number | null = null;
-  let peakRsiState: 'initial' | 'crossed_70' | 'rallied' = 'initial';
+  let potentialSecondPeak: StockDataPoint | null = null;
 
 
-  for (let i = 1; i < data.length; i++) { /* 0번째 인덱스는 전일 데이터가 없으므로 1부터 시작 */
+  for (let i = 1; i < data.length; i++) {
     const currentPoint = data[i];
     const prevPoint = data[i - 1];
 
     /* --- 쌍바닥 (매수) 신호 로직 --- */
-    if (!firstTrough) {
-      if (prevPoint.rsi! < 30 && currentPoint.rsi! > prevPoint.rsi!) {
-        firstTrough = prevPoint;
-        firstTroughIndex = i - 1;
-        troughRsiState = 'initial';
-      }
-    } else {
-      const daysSinceFirstTrough = i - firstTroughIndex!;
-      if (currentPoint.rsi! < firstTrough.rsi!) {
+    /* 1. 어제 발견된 잠재적 두 번째 바닥을 오늘 종가로 확정하는 로직 */
+    if (potentialSecondTrough && firstTrough) {
+      if (currentPoint.close > potentialSecondTrough.close) {
+        /* 확정! 매수 신호 생성 */
+        const buySignal: TradingSignal = {
+          date: potentialSecondTrough.date, /* 신호 날짜는 어제 */
+          startDate: firstTrough.date,
+          type: 'buy',
+          reason: '매수 (RSI 쌍바닥)',
+          entryPrice: potentialSecondTrough.close, /* 진입 가격은 어제의 종가 */
+          details: `RSI 상승 다이버전스`
+        };
+        signals.push(buySignal);
+        lastBuySignal = buySignal;
+
+        /* 모든 상태 초기화 */
         firstTrough = null;
         firstTroughIndex = null;
-        troughRsiState = 'initial';
+        potentialSecondTrough = null;
+      } else {
+        /* 확정 실패. 잠재적 바닥 상태만 초기화. 첫 번째 바닥은 유지하고 다시 탐색. */
+        potentialSecondTrough = null;
       }
-      else if (daysSinceFirstTrough > 90) {
-        firstTrough = null;
-        firstTroughIndex = null;
-        troughRsiState = 'initial';
-      } else if (daysSinceFirstTrough > 5) {
-        if (troughRsiState === 'initial' && currentPoint.rsi! > 30) {
-          troughRsiState = 'crossed_30';
-        } else if (troughRsiState === 'crossed_30' && currentPoint.rsi! < prevPoint.rsi!) {
-          troughRsiState = 'dipped';
-        } else if (troughRsiState === 'dipped' && currentPoint.rsi! > prevPoint.rsi!) {
+    }
+
+    /* 2. 새로운 신호 탐색 (기존에 잠재적 바닥이 없었을 경우에만) */
+    if (!potentialSecondTrough) {
+      if (!firstTrough) {
+        if (prevPoint.rsi! < 30 && currentPoint.rsi! > prevPoint.rsi!) {
+          firstTrough = prevPoint;
+          firstTroughIndex = i - 1;
+        }
+      } else {
+        const daysSinceFirstTrough = i - firstTroughIndex!;
+        if (currentPoint.rsi! < firstTrough.rsi!) {
+          firstTrough = null;
+          firstTroughIndex = null;
+        } else if (daysSinceFirstTrough > 90) {
+          firstTrough = null;
+          firstTroughIndex = null;
+        } else if (daysSinceFirstTrough > 5) {
           if (currentPoint.close < firstTrough.close && currentPoint.rsi! > firstTrough.rsi!) {
-            const buySignal: TradingSignal = {
-              date: currentPoint.date,
-              startDate: firstTrough.date,
-              type: 'buy',
-              reason: '매수 (RSI 쌍바닥)',
-              entryPrice: currentPoint.close,
-              details: `RSI 상승 다이버전스`
-            };
-            signals.push(buySignal);
-            lastBuySignal = buySignal;
-            firstTrough = null;
-            firstTroughIndex = null;
-            troughRsiState = 'initial';
-          } else {
-            troughRsiState = 'dipped';
+            potentialSecondTrough = currentPoint; /* 오늘을 잠재적 바닥으로 설정하고 내일 확인 */
           }
         }
       }
@@ -159,58 +162,56 @@ export const analyzeAllTradingSignals = (data: StockDataPoint[]): TradingSignal[
      * 로직
      * ---
      *  */
-    if (!firstPeak) {
-      if (prevPoint.rsi! > 70 && currentPoint.rsi! < prevPoint.rsi!) {
-        firstPeak = prevPoint;
-        firstPeakIndex = i - 1;
-        peakRsiState = 'initial';
-      }
-    } else {
-      const daysSinceFirstPeak = i - firstPeakIndex!;
-      if (currentPoint.rsi! > firstPeak.rsi!) {
-        firstPeak = null;
-        firstPeakIndex = null;
-        peakRsiState = 'initial';
-      }
-      else if (daysSinceFirstPeak > 90) {
-        firstPeak = null;
-        firstPeakIndex = null;
-        peakRsiState = 'initial';
-      } else if (daysSinceFirstPeak > 5) {
-        if (peakRsiState === 'initial' && currentPoint.rsi! < 70) {
-          peakRsiState = 'crossed_70';
-        } else if (peakRsiState === 'crossed_70' && currentPoint.rsi! > prevPoint.rsi!) {
-          peakRsiState = 'rallied';
-        } else if (peakRsiState === 'rallied' && currentPoint.rsi! < prevPoint.rsi!) {
-          if (currentPoint.close > firstPeak.close && currentPoint.rsi! < firstPeak.rsi!) {
-            const inverseBuySignal: TradingSignal = {
-date: currentPoint.date,
+    if (potentialSecondPeak && firstPeak) {
+      if (currentPoint.close < potentialSecondPeak.close) {
+        const inverseBuySignal: TradingSignal = {
+date: potentialSecondPeak.date,
       startDate: firstPeak.date,
       type: 'inverse-buy',
       reason: '인버스 매수 (RSI 쌍봉)',
-      entryPrice: currentPoint.close,
+      entryPrice: potentialSecondPeak.close,
       details: `RSI 하락 다이버전스`
-            };
-            signals.push(inverseBuySignal);
-            lastInverseBuySignal = inverseBuySignal;
-            firstPeak = null;
-            firstPeakIndex = null;
-            peakRsiState = 'initial';
-          } else {
-            peakRsiState = 'rallied';
-          }
-        }
+        };
+        signals.push(inverseBuySignal);
+        lastInverseBuySignal = inverseBuySignal;
+        firstPeak = null;
+        firstPeakIndex = null;
+        potentialSecondPeak = null;
+      } else {
+        potentialSecondPeak = null;
       }
     }
 
+    if (!potentialSecondPeak) {
+      if (!firstPeak) {
+        if (prevPoint.rsi! > 70 && currentPoint.rsi! < prevPoint.rsi!) {
+          firstPeak = prevPoint;
+          firstPeakIndex = i - 1;
+        }
+      } else {
+        const daysSinceFirstPeak = i - firstPeakIndex!;
+        if (currentPoint.rsi! > firstPeak.rsi!) {
+          firstPeak = null;
+          firstPeakIndex = null;
+        } else if (daysSinceFirstPeak > 90) {
+          firstPeak = null;
+          firstPeakIndex = null;
+        } else if (daysSinceFirstPeak > 5) {
+          if (currentPoint.close > firstPeak.close && currentPoint.rsi! < firstPeak.rsi!) {
+            potentialSecondPeak = currentPoint;
+          }
+        }
+      }
+  }
 
-      /* ---
-       * 수익
-       * 실현
-       * 신호
-       * 로직
-       * ---
-       *  */
+
+  /* ---
+   * 수익
+   * 실현
+   * 신호
+   * 로직
+   * ---
+   *  */
     if (currentPoint.bollingerBands) {
       if (lastBuySignal && currentPoint.close >= currentPoint.bollingerBands.upper) {
         const profitRate = ((currentPoint.close - lastBuySignal.entryPrice!) / lastBuySignal.entryPrice!) * 100;
@@ -220,13 +221,6 @@ type: 'sell',
 reason: profitRate >= 0 ? '수익 실현 (BB 상단)' : '손실 (BB 상단)',
 realizedPrice: currentPoint.close,
 profitRate: profitRate,
-/* [수정]
- * details에
- * BB
- * 상단
- * 가격을
- * 추가합니다.
- * */
 details: `BB상단: ${currentPoint.bollingerBands.upper.toFixed(2)}`
 });
 lastBuySignal = null;
@@ -239,13 +233,6 @@ type: 'sell',
 reason: profitRate >= 0 ? '수익 실현 (BB 하단)' : '손실 (BB 하단)',
 realizedPrice: currentPoint.close,
 profitRate: profitRate,
-/* [수정]
- * details에
- * BB
- * 하단
- * 가격을
- * 추가합니다.
- * */
 details: `BB하단: ${currentPoint.bollingerBands.lower.toFixed(2)}`
 });
 lastInverseBuySignal = null;
@@ -253,21 +240,18 @@ lastInverseBuySignal = null;
 }
 }
 
-/* 중복 신호 제거 및 최종 정리 */
 const uniqueSignals = Array.from(new Map(signals.map(s => [`${s.date}-${s.reason}`, s])).values());
 
-/* 마지막 날짜에 유의미한 신호가 없으면 '관망' 추가 */
-if (data.length > 0) {
-  const lastSignalDate = uniqueSignals.length > 0 ? uniqueSignals[uniqueSignals.length - 1].date : null;
-  if (lastSignalDate !== data[data.length - 1].date) {
-    uniqueSignals.push({
-date: data[data.length - 1].date,
-type: 'hold',
-reason: '관망 (중립 구간)',
-});
-}
-}
+        if (data.length > 0) {
+          const lastSignalDate = uniqueSignals.length > 0 ? uniqueSignals.at(-1)!.date : null;
+          if (lastSignalDate !== data.at(-1)!.date) {
+            uniqueSignals.push({
+              date: data.at(-1)!.date,
+              type: 'hold',
+              reason: '관망 (중립 구간)',
+            });
+          }
+        }
 
-
-return uniqueSignals.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    };
+        return uniqueSignals.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        };
