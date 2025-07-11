@@ -80,12 +80,12 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
         chartRef.current = { main: mainChart, rsi: rsiChart };
 
         const candlestickSeries = mainChart.addSeries(CandlestickSeries, {
-          upColor: '#1E88E5',
-          downColor: '#E53935',
+          upColor: '#E53935',
+          downColor: '#1E88E5',
           borderUpColor: 'black',
           borderDownColor: 'black',
-          wickUpColor: '#1E88E5',
-          wickDownColor: '#E53935',
+          wickUpColor: '#E53935',
+          wickDownColor: '#1E88E5',
         });
 
         const candlestickChartData: CandlestickData[] = data.map((d) => {
