@@ -11,22 +11,35 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 function LoginForm() {
   const [apiKey, setApiKey] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false); // 로딩 상태 추가
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const handleLogin = () => {
-    /* [추가] 디버깅을 위해 환경 변수의 실제 값을 콘솔에 출력합니다. */
-    console.log("Input Key:", apiKey);
-    console.log("Env Key:", process.env.NEXT_PUBLIC_ACCESS_API_KEY);
+  const handleLogin = async () => {
+    setIsLoading(true);
+    setError('');
 
-    if (apiKey === process.env.NEXT_PUBLIC_ACCESS_API_KEY) {
-      const expires = new Date(Date.now() + 864e5).toUTCString();
-      document.cookie = `${process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME}=true; expires=${expires}; path=/`;
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ apiKey }),
+      });
 
-      const callbackUrl = searchParams.get('callbackUrl') || '/';
-      router.push(callbackUrl);
-    } else {
-      setError('API 키가 올바르지 않습니다.');
+      if (response.ok) {
+        const callbackUrl = searchParams.get('callbackUrl') || '/';
+        router.push(callbackUrl);
+      } else {
+        const data = await response.json();
+        setError(data.error || 'API 키가 올바르지 않습니다.');
+      }
+    } catch (err) {
+      console.error('Login request failed:', err);
+      setError('로그인 요청에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -46,12 +59,13 @@ function LoginForm() {
     value={apiKey}
     onChange={(e) => setApiKey(e.target.value)}
     onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+    disabled={isLoading}
     />
     {error && <p className="text-sm text-red-500">{error}</p>}
     </CardContent>
     <CardFooter>
-    <Button className="w-full" onClick={handleLogin}>
-    입장
+    <Button className="w-full" onClick={handleLogin} disabled={isLoading}>
+    {isLoading ? '로그인 중...' : '입장'}
     </Button>
     </CardFooter>
     </Card>

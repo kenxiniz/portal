@@ -105,7 +105,7 @@ if (global.isSchedulerRunning) {
   }
 
   /* 주식 데이터 캐시 업데이트 (매일 오전 7시) */
-  cron.schedule('0 7 * * *', async () => {
+  cron.schedule('0 8 * * *', async () => {
     console.log('매일 오전 7시: 주식 데이터 캐시 업데이트를 시작합니다...');
     for (const ticker of allTickers.tickers) {
       try {
@@ -126,7 +126,7 @@ if (global.isSchedulerRunning) {
    * (매
    * 1분)
    * */
-  cron.schedule('* * * * *', async () => {
+  cron.schedule('* 9 * * *', async () => {
     console.log('--------------------');
     console.log(`[${new Date().toLocaleTimeString()}] 매매 신호를 확인합니다...`);
     let anyNewSignalFound = false;
