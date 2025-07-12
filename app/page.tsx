@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./page.module.css";
-import { KeyRound } from "lucide-react"; // [추가] lucide-react에서 아이콘 임포트
+import { KeyRound, Users } from "lucide-react";
 
 export const metadata = {
   title: "깐부 프로젝트",
@@ -48,56 +48,14 @@ export default function Home() {
     </div>
     </main>
     <footer className={styles.footer}>
-    {/* [수정] <Image> 대신 KeyRound 아이콘 컴포넌트 사용 */}
     <Link href="/get-token" className={styles.footerLink}>
     <KeyRound className={styles.footerIcon} />
     토큰 발급
     </Link>
-    <a
-    href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-    target="_blank"
-    rel="noopener noreferrer"
-    className={styles.footerLink}
-    >
-    <Image
-    aria-hidden
-    src="/file.svg"
-    alt="File icon"
-    width={16}
-    height={16}
-    />
-    Learn
-    </a>
-    <a
-    href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-    target="_blank"
-    rel="noopener noreferrer"
-    className={styles.footerLink}
-    >
-    <Image
-    aria-hidden
-    src="/window.svg"
-    alt="Window icon"
-    width={16}
-    height={16}
-    />
-    Examples
-    </a>
-    <a
-    href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-    target="_blank"
-    rel="noopener noreferrer"
-    className={styles.footerLink}
-    >
-    <Image
-    aria-hidden
-    src="/globe.svg"
-    alt="Globe icon"
-    width={16}
-    height={16}
-    />
-    Go to nextjs.org →
-    </a>
+    <Link href="/api/friends" className={styles.footerLink} target="_blank">
+    <Users className={styles.footerIcon} />
+    친구 UUID 확인
+    </Link>
     </footer>
     </div>
   );

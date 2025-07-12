@@ -1,23 +1,28 @@
-# Docker 빌드 시 제외할 파일 및 폴더 목록
+# .dockerignore
 
-# Docker 관련 파일
-Dockerfile
-.dockerignore
-docker-compose.yml
-
-# 의존성 폴더
+# 의존성
 node_modules
 
-# Next.js 빌드 캐시 및 결과물
+# Next.js 빌드 결과물
 .next
-out
 
-# 기타
-.DS_Store
-*.pem
-.env*.local
-.cache/
+# 캐시 파일
+.cache
+
+# 로그 파일
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+
+# OS 특정 파일
+.DS_Store
+
+# Git
+.git
+.gitignore
+
+# 환경 변수 파일 (보안)
+.env*
+!/.env.production
+!/.env.local

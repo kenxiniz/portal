@@ -13,7 +13,7 @@ export default function GetTokenPage() {
     return (
       <div className="flex items-center justify-center min-h-screen">
       <p className="text-red-500">
-      환경 변수(NEXT_PUBLIC_KAKAO_CLIENT_ID, NEXT_PUBLIC_KAKAO_REDIRECT_URI)가 설정되지 않았습니다.
+      환경 변수(NEXT_PUBLIC_KAKA O_CLIENT_ID, NEXT_PUBLIC_KAKAO_REDIRECT_URI)가 설정되지 않았습니다.
         </p>
       </div>
     );
@@ -32,22 +32,22 @@ export default function GetTokenPage() {
     <CardHeader>
     <CardTitle className="text-2xl">개발자 토큰 발급</CardTitle>
     <CardDescription>
-    {/* [수정] 따옴표를 &apos;로 변경 */}
-    스케줄러에서 사용할 카카오톡 &apos;친구에게 보내기&apos; 토큰을 발급받습니다.
+    {/* [수정] 따옴표를 &apos;로 변경 */
+      "스케줄러에서 사용할 카카오톡 '친구에게 보내기' 토큰을 발급받습니다."}
       </CardDescription>
-    </CardHeader>
-    <CardContent>
-    <p className="text-sm text-gray-600 dark:text-gray-400">
-    {/* [수정] 따옴표를 &apos;로 변경 */}
-    새로운 &apos;친구 목록&apos; 권한을 얻기 위해 아래 버튼을 눌러 다시 로그인해주세요.
-      </p>
-    </CardContent>
-    <CardFooter>
-    <Button className="w-full" onClick={handleLogin}>
-    카카오 로그인하여 토큰 받기
-    </Button>
-    </CardFooter>
-    </Card>
-    </div>
+      </CardHeader>
+      <CardContent>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+      {/* [수정] 따옴표를 &apos;로 변경 */
+        "새로운 '친구 목록' 권한을 얻기 위해 아래 버튼을 눌러 다시 로그인해주세요."}
+        </p>
+        </CardContent>
+        <CardFooter>
+        <Button className="w-full" onClick={handleLogin}>
+        카카오 로그인하여 토큰 받기
+        </Button>
+        </CardFooter>
+        </Card>
+        </div>
   );
 }
