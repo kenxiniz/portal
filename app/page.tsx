@@ -1,9 +1,8 @@
 /* @/app/page.tsx */
-
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./page.module.css";
-import { KeyRound, Users } from "lucide-react";
+import { KeyRound, Users, Building2, LineChart, TrendingUp, BarChart3 } from "lucide-react";
 
 export const metadata = {
   title: "깐부 프로젝트",
@@ -24,6 +23,7 @@ export default function Home() {
     priority
     />
     </div>
+
     <div className="text-center">
     <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100">
     깐부 자산 포트폴리오
@@ -32,21 +32,27 @@ export default function Home() {
     당신의 포트폴리오를 스마트하게 분석하세요
     </p>
     </div>
+
     <div className={styles.ctas}>
     <Link href="/my-properties" className={styles.primary}>
-    부동산
+    <Building2 className={styles.ctaIcon} />
+    내 부동산
     </Link>
     <Link href="/stock" className={styles.primary}>
-    주식 (기존)
+    <LineChart className={styles.ctaIcon} />
+    미국 주식
     </Link>
     <Link href="/kis-stock" className={styles.primary}>
-    주식 (한투)
+    <TrendingUp className={styles.ctaIcon} />
+    한투 주식
     </Link>
     <Link href="/k-stock" className={styles.primary}>
-    한국 주식
+    <BarChart3 className={styles.ctaIcon} />
+    K-주식
     </Link>
     </div>
     </main>
+
     <footer className={styles.footer}>
     <Link href="/get-token" className={styles.footerLink}>
     <KeyRound className={styles.footerIcon} />
@@ -60,3 +66,4 @@ export default function Home() {
     </div>
   );
 }
+

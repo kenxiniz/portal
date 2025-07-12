@@ -21,7 +21,7 @@ export default function MyPropertiesPage() {
     <div className="flex flex-col items-center p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
     {/* [수정] 제목과 스타일을 Z세대 느낌으로 변경합니다. */}
     <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-8 flex items-center gap-3">
-    <span>부동산 포트폴리오</span>
+    <span>내 부동산</span>
     <TrendingUp className="h-8 w-8 text-blue-500" />
     </h1>
 

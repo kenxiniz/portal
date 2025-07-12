@@ -180,6 +180,14 @@ a.primary {
   }
 }
 
+/* [추가] ctaIcon: 버튼 안의 아이콘을 위한 스타일 */
+.ctaIcon {
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
 @media (prefers-color-scheme: dark) {
   .logoContainer {
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);

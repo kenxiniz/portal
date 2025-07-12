@@ -78,7 +78,7 @@ export default function StockPage() {
   return (
     <div className="flex flex-col items-center p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
     <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-8">
-    주식 포트폴리오 (기존)
+    미국 주식
     </h1>
     <div className="w-full max-w-7xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     {tickers.map((ticker) => {
