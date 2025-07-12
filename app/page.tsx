@@ -1,3 +1,5 @@
+/* @/app/page.tsx */
+
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./page.module.css";
@@ -10,99 +12,80 @@ export const metadata = {
 export default function Home() {
   return (
     <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/logo.png"
-          alt="Next.js logo"
-          width={500}
-          height={500}
-          priority
-          />
-        <div className="text-center">
-          <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100">
-          깐부 자산 포트폴리오
-          </h1>
-          <p className="mt-2 text-lg text-slate-600 dark:text-slate-400">
-          당신의 포트폴리오를 스마트하게 분석하세요
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <Link href="/my-properties" className={styles.primary}>
-            부동산
-          </Link>
-          <Link href="/stock" className={styles.primary}>
-            주식
-          </Link>
-          <a
-            className={styles.secondary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            href="https://nextjs.org/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.secondary}
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className={styles.footer}>
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+    <main className={styles.main}>
+    <Image
+    className={styles.logo}
+    src="/logo.png"
+    alt="Next.js logo"
+    width={500}
+    height={500}
+    priority
+    />
+    <div className="text-center">
+    <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100">
+    깐부 자산 포트폴리오
+    </h1>
+    <p className="mt-2 text-lg text-slate-600 dark:text-slate-400">
+    당신의 포트폴리오를 스마트하게 분석하세요
+    </p>
+    </div>
+    <div className={styles.ctas}>
+    <Link href="/my-properties" className={styles.primary}>
+    부동산
+    </Link>
+    <Link href="/stock" className={styles.primary}>
+    주식 (기존)
+    </Link>
+    {/* [추가] 한국투자증권 페이지로 연결되는 버튼 */}
+    <Link href="/kis-stock" className={styles.primary}>
+    주식 (한투)
+    </Link>
+    </div>
+    </main>
+    <footer className={styles.footer}>
+    <a
+    href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
+    target="_blank"
+    rel="noopener noreferrer"
+    >
+    <Image
+    aria-hidden
+    src="/file.svg"
+    alt="File icon"
+    width={16}
+    height={16}
+    />
+    Learn
+    </a>
+    <a
+    href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
+    target="_blank"
+    rel="noopener noreferrer"
+    >
+    <Image
+    aria-hidden
+    src="/window.svg"
+    alt="Window icon"
+    width={16}
+    height={16}
+    />
+    Examples
+    </a>
+    <a
+    href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
+    target="_blank"
+    rel="noopener noreferrer"
+    >
+    <Image
+    aria-hidden
+    src="/globe.svg"
+    alt="Globe icon"
+    width={16}
+    height={16}
+    />
+    Go to nextjs.org →
+    </a>
+    </footer>
     </div>
   );
 }

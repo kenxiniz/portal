@@ -1,7 +1,7 @@
 /* lib/stockUtils.ts */
 
 export interface StockDataPoint {
-  date: string; /* यार-MM-dd 형식의 문자열 */
+  date: string; /* YYYY-MM-DD 형식의 문자열 */
   open: number;
   high: number;
   low: number;
@@ -79,10 +79,6 @@ export const calculateBollingerBands = (data: StockDataPoint[], period: number =
   return bbData;
 };
 
-
-/*
- *  * [수정] 전체 매매 신호 분석 로직을 상태 기반(초기화 포함)으로 재구성합니다.
- *   */
 export const analyzeAllTradingSignals = (data: StockDataPoint[]): TradingSignal[] => {
   if (data.length === 0) return [];
 
@@ -100,38 +96,31 @@ export const analyzeAllTradingSignals = (data: StockDataPoint[]): TradingSignal[
   let firstPeakIndex: number | null = null;
   let potentialSecondPeak: StockDataPoint | null = null;
 
-
   for (let i = 1; i < data.length; i++) {
     const currentPoint = data[i];
     const prevPoint = data[i - 1];
 
     /* --- 쌍바닥 (매수) 신호 로직 --- */
-    /* 1. 어제 발견된 잠재적 두 번째 바닥을 오늘 종가로 확정하는 로직 */
     if (potentialSecondTrough && firstTrough) {
       if (currentPoint.close > potentialSecondTrough.close) {
-        /* 확정! 매수 신호 생성 */
         const buySignal: TradingSignal = {
-          date: potentialSecondTrough.date, /* 신호 날짜는 어제 */
+          date: potentialSecondTrough.date,
           startDate: firstTrough.date,
           type: 'buy',
           reason: '매수 (RSI 쌍바닥)',
-          entryPrice: potentialSecondTrough.close, /* 진입 가격은 어제의 종가 */
+          entryPrice: potentialSecondTrough.close,
           details: `RSI 상승 다이버전스`
         };
         signals.push(buySignal);
         lastBuySignal = buySignal;
-
-        /* 모든 상태 초기화 */
         firstTrough = null;
         firstTroughIndex = null;
         potentialSecondTrough = null;
       } else {
-        /* 확정 실패. 잠재적 바닥 상태만 초기화. 첫 번째 바닥은 유지하고 다시 탐색. */
         potentialSecondTrough = null;
       }
     }
 
-    /* 2. 새로운 신호 탐색 (기존에 잠재적 바닥이 없었을 경우에만) */
     if (!potentialSecondTrough) {
       if (!firstTrough) {
         if (prevPoint.rsi! < 30 && currentPoint.rsi! > prevPoint.rsi!) {
@@ -148,29 +137,22 @@ export const analyzeAllTradingSignals = (data: StockDataPoint[]): TradingSignal[
           firstTroughIndex = null;
         } else if (daysSinceFirstTrough > 5) {
           if (currentPoint.close < firstTrough.close && currentPoint.rsi! > firstTrough.rsi!) {
-            potentialSecondTrough = currentPoint; /* 오늘을 잠재적 바닥으로 설정하고 내일 확인 */
+            potentialSecondTrough = currentPoint;
           }
         }
       }
     }
 
-    /* ---
-     * 쌍봉
-     * (인버스
-     * 매수)
-     * 신호
-     * 로직
-     * ---
-     *  */
+    /* --- 쌍봉 (인버스 매수) 신호 로직 --- */
     if (potentialSecondPeak && firstPeak) {
       if (currentPoint.close < potentialSecondPeak.close) {
         const inverseBuySignal: TradingSignal = {
-date: potentialSecondPeak.date,
-      startDate: firstPeak.date,
-      type: 'inverse-buy',
-      reason: '인버스 매수 (RSI 쌍봉)',
-      entryPrice: potentialSecondPeak.close,
-      details: `RSI 하락 다이버전스`
+          date: potentialSecondPeak.date,
+          startDate: firstPeak.date,
+          type: 'inverse-buy',
+          reason: '인버스 매수 (RSI 쌍봉)',
+          entryPrice: potentialSecondPeak.close,
+          details: `RSI 하락 다이버전스`
         };
         signals.push(inverseBuySignal);
         lastInverseBuySignal = inverseBuySignal;
@@ -202,16 +184,15 @@ date: potentialSecondPeak.date,
           }
         }
       }
-  }
+    }
 
-
-  /* ---
-   * 수익
-   * 실현
-   * 신호
-   * 로직
-   * ---
-   *  */
+    /* ---
+     * 수익
+     * 실현
+     * 신호
+     * 로직
+     * ---
+     *  */
     if (currentPoint.bollingerBands) {
       if (lastBuySignal && currentPoint.close >= currentPoint.bollingerBands.upper) {
         const profitRate = ((currentPoint.close - lastBuySignal.entryPrice!) / lastBuySignal.entryPrice!) * 100;
@@ -242,16 +223,16 @@ lastInverseBuySignal = null;
 
 const uniqueSignals = Array.from(new Map(signals.map(s => [`${s.date}-${s.reason}`, s])).values());
 
-        if (data.length > 0) {
-          const lastSignalDate = uniqueSignals.length > 0 ? uniqueSignals.at(-1)!.date : null;
-          if (lastSignalDate !== data.at(-1)!.date) {
-            uniqueSignals.push({
-              date: data.at(-1)!.date,
-              type: 'hold',
-              reason: '관망 (중립 구간)',
-            });
-          }
-        }
+    if (data.length > 0) {
+      const lastSignalDate = uniqueSignals.length > 0 ? uniqueSignals.at(-1)!.date : null;
+      if (lastSignalDate !== data.at(-1)!.date) {
+        uniqueSignals.push({
+          date: data.at(-1)!.date,
+          type: 'hold',
+          reason: '관망 (중립 구간)',
+        });
+      }
+    }
 
-        return uniqueSignals.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        };
+    return uniqueSignals.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  };
