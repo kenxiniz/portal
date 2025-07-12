@@ -1,8 +1,8 @@
 /* /lib/kisApi.ts */
 
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { StockDataPoint } from './stockUtils';
-import stockConfig from './stock.json'; /* stock.json 파일 import */
+import stockConfig from './stock.json';
 
 const KIS_API_URL = 'https://openapi.koreainvestment.com:9443';
 const KIS_APP_KEY = process.env.KIS_APP_KEY;
@@ -10,6 +10,19 @@ const KIS_APP_SECRET = process.env.KIS_APP_SECRET;
 
 let accessToken: string | null = null;
 let tokenExpiresAt: number | null = null;
+
+interface KisStockItem {
+  xymd: string;
+  open: string;
+  high: string;
+  low: string;
+  clos: string;
+  tvol: string;
+}
+
+interface KisApiError {
+  msg1?: string;
+}
 
 /*
  *  * API 인증 토큰을 발급받거나 기존 토큰을 반환하는 함수
@@ -44,11 +57,11 @@ async function getAccessToken(): Promise<string> {
 }
 
 /*
- *  * [수정] 페이지네이션을 구현하여 2년치 데이터를 모두 가져오는 함수
+ *  * 페이지네이션을 구현하여 2년치 데이터를 모두 가져오는 함수
  *   */
 async function getDailyOverseasStockData(ticker: string, exchange: string): Promise<StockDataPoint[]> {
   const token = await getAccessToken();
-  let allData: StockDataPoint[] = [];
+  const allData: StockDataPoint[] = [];
   let currentBymd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   let continueFetching = true;
 
@@ -60,9 +73,9 @@ async function getDailyOverseasStockData(ticker: string, exchange: string): Prom
       'AUTH': '',
       'EXCD': exchange,
       'SYMB': ticker,
-      'GUBN': '0', /* 0: 일별 */
+      'GUBN': '0',
       'BYMD': currentBymd,
-      'MODP': '1', /* 1: 수정주가 */
+      'MODP': '1',
     }).toString();
 
     const url = `${KIS_API_URL}/uapi/overseas-price/v1/quotations/dailyprice?${params}`;
@@ -83,7 +96,7 @@ async function getDailyOverseasStockData(ticker: string, exchange: string): Prom
         throw new Error(response.data.msg1 || 'Failed to fetch data from KIS API');
       }
 
-      const chunk = response.data.output2.map((item: any) => ({
+      const chunk = response.data.output2.map((item: KisStockItem) => ({
         date: `${item.xymd.substring(0, 4)}-${item.xymd.substring(4, 6)}-${item.xymd.substring(6, 8)}`,
         open: parseFloat(item.open),
         high: parseFloat(item.high),
@@ -111,7 +124,7 @@ async function getDailyOverseasStockData(ticker: string, exchange: string): Prom
       }
 
     } catch (error) {
-      const axiosError = error as any;
+      const axiosError = error as AxiosError<KisApiError>;
       const errorMessage = axiosError.response?.data?.msg1 || axiosError.message;
       console.error(`❌ Failed to fetch overseas daily data for ${ticker} (EXCD: ${exchange}):`, errorMessage);
       throw new Error(`Failed to fetch overseas daily data for ${ticker} (EXCD: ${exchange}): ${errorMessage}`);
@@ -123,7 +136,7 @@ async function getDailyOverseasStockData(ticker: string, exchange: string): Prom
 }
 
 /*
- *  * [수정] 종목 정보를 stock.json에서 찾아 API를 호출하는 통합 함수
+ *  * 종목 정보를 stock.json에서 찾아 API를 호출하는 통합 함수
  *   */
 export async function getDailyStockData(ticker: string): Promise<StockDataPoint[]> {
   const stockInfo = stockConfig.tickers.find(t => t.ticker.toUpperCase() === ticker.toUpperCase());
