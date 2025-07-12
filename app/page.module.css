@@ -17,46 +17,41 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* [수정] 모바일에서도 콘텐츠가 중앙에 오도록 justify-content 변경 */
   justify-content: center;
   min-height: 100vh;
-  padding: 2rem; /* 전체적인 패딩 조정 */
+  padding: 2rem;
 }
 
 .main {
   display: flex;
   flex-direction: column;
-  gap: 2rem; /* 32px */
+  gap: 2rem;
   align-items: center;
-  /* [추가] 메인 콘텐츠가 너비를 꽉 채우도록 */
   width: 100%;
 }
 
-/* 로고를 감싸는 원형 컨테이너 */
 .logoContainer {
-  width: 200px; /* 원의 크기 */
+  width: 200px;
   height: 200px;
   border-radius: 50%;
-  overflow: hidden; /* 이미지를 원형으로 마스킹 */
+  overflow: hidden;
   box-shadow: 0 10px 30px rgba(0,0,0,0.07);
   animation: subtle-float 5s ease-in-out infinite;
-  transition: box-shadow 0.3s ease, transform 0.3s ease; /* transform 추가 */
-  flex-shrink: 0; /* [추가] 화면이 작아져도 로고 크기 유지 */
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+  flex-shrink: 0;
 }
 
 .logoContainer:hover {
-  transform: translateY(-4px); /* 호버 시 살짝 위로 이동 */
+  transform: translateY(-4px);
   box-shadow: 0 18px 45px rgba(0,0,0,0.12);
 }
 
-/* 로고 이미지 스타일 */
 .logo {
   width: 100%;
   height: 100%;
-  object-fit: cover; /* 이미지가 원을 꽉 채우도록 */
+  object-fit: cover;
   filter: none;
 }
-
 
 .main ol {
   font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", "Oxygen Mono", "Ubuntu Monospace", "Source Code Pro", "Fira Mono", "Droid Sans Mono", "Courier New", monospace;
@@ -81,15 +76,13 @@
 
 .ctas {
   display: flex;
-  gap: 1rem; /* 16px */
-  margin-top: 1rem; /* 로고와의 간격 추가 */
-  /* [추가] PC뷰에서 버튼들이 수평으로 정렬되도록 */
+  gap: 1rem;
+  margin-top: 1rem;
   flex-direction: row;
-  flex-wrap: wrap; /* 화면 작아지면 줄바꿈 */
+  flex-wrap: wrap;
   justify-content: center;
 }
 
-/* 버튼 공통 스타일 - 로고와 통일감 있는 스타일 */
 .ctas a {
   border-radius: 14px;
   height: 50px;
@@ -102,71 +95,87 @@
   font-size: 17px;
   font-weight: 600;
   border: 1px solid transparent;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); /* 그림자 효과 추가 */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   flex-shrink: 0;
 }
 
-/* Primary 버튼 스타일 */
 a.primary {
   @apply bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100;
-  border: 1px solid rgba(0,0,0,0.04); /* 미세한 테두리 */
+  border: 1px solid rgba(0,0,0,0.04);
 }
 
 .footer {
   display: flex;
-  gap: 1.5rem; /* 24px */
-  position: absolute; /* [추가] 푸터를 하단에 고정 */
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.5rem;
+  position: absolute;
   bottom: 2rem;
 }
 
-/* Enable hover only on non-touch devices */
+/* [수정] footer a -> .footerLink 로 변경하여 일관성 유지 */
+.footerLink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* [추가] lucide-react 아이콘을 위한 스타일 */
+.footerIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.footer img {
+  flex-shrink: 0;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  /* 버튼 호버 효과 - 입체감 강조 */
   a.primary:hover {
     transform: translateY(-2px) scale(1.02);
-    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12); /* 그림자 강조 */
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
     @apply bg-gray-50 dark:bg-gray-700;
   }
-  .footer a:hover {
+
+  .footerLink:hover {
     text-decoration: underline;
     text-underline-offset: 4px;
   }
 }
 
-/* [수정] 모바일 화면 스타일 */
 @media (max-width: 600px) {
   .logoContainer {
     width: 140px;
     height: 140px;
-    margin-bottom: 1rem; /* 로고와 타이틀 간격 */
+    margin-bottom: 1rem;
   }
 
   .main h1 {
-    font-size: 2.25rem; /* 모바일에서 제목 크기 조정 */
+    font-size: 2.25rem;
   }
 
   .main p {
-    font-size: 1rem; /* 모바일에서 설명 텍스트 크기 조정 */
+    font-size: 1rem;
   }
 
   .ctas {
-    flex-direction: column; /* 버튼 세로 정렬 */
-    width: 100%; /* 버튼이 화면 너비에 맞게 조정 */
+    flex-direction: column;
+    width: 100%;
     max-width: 320px;
     gap: 1rem;
   }
 
   .ctas a {
-    /* [수정] 모바일에서 버튼 크기 키우기 */
     height: 52px;
     font-size: 18px;
     width: 100%;
   }
 
   .footer {
-    /* [수정] 모바일 푸터 레이아웃 */
     flex-direction: column;
-    position: static; /* 기본 위치로 변경 */
+    position: static;
     margin-top: 4rem;
   }
 }

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./page.module.css";
+import { KeyRound } from "lucide-react"; // [추가] lucide-react에서 아이콘 임포트
 
 export const metadata = {
   title: "깐부 프로젝트",
@@ -13,7 +14,6 @@ export default function Home() {
   return (
     <div className={styles.page}>
     <main className={styles.main}>
-    {/* [수정] 로고를 div로 감싸 원형 마스크를 적용합니다. */}
     <div className={styles.logoContainer}>
     <Image
     className={styles.logo}
@@ -48,10 +48,16 @@ export default function Home() {
     </div>
     </main>
     <footer className={styles.footer}>
+    {/* [수정] <Image> 대신 KeyRound 아이콘 컴포넌트 사용 */}
+    <Link href="/get-token" className={styles.footerLink}>
+    <KeyRound className={styles.footerIcon} />
+    토큰 발급
+    </Link>
     <a
     href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
     target="_blank"
     rel="noopener noreferrer"
+    className={styles.footerLink}
     >
     <Image
     aria-hidden
@@ -66,6 +72,7 @@ export default function Home() {
     href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
     target="_blank"
     rel="noopener noreferrer"
+    className={styles.footerLink}
     >
     <Image
     aria-hidden
@@ -80,6 +87,7 @@ export default function Home() {
     href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
     target="_blank"
     rel="noopener noreferrer"
+    className={styles.footerLink}
     >
     <Image
     aria-hidden
