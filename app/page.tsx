@@ -36,9 +36,12 @@ export default function Home() {
     <Link href="/stock" className={styles.primary}>
     주식 (기존)
     </Link>
-    {/* [추가] 한국투자증권 페이지로 연결되는 버튼 */}
     <Link href="/kis-stock" className={styles.primary}>
     주식 (한투)
+    </Link>
+    {/* [추가] 한국투자증권 K-Stock 페이지로 연결되는 버튼 */}
+    <Link href="/k-stock" className={styles.primary}>
+    한국 주식
     </Link>
     </div>
     </main>

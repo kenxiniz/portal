@@ -5,16 +5,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useThemeDetector } from '@/hooks/useThemeDetector';
 import { TickerState, StockDataPoint, TradingSignal } from '@/lib/stockUtils';
-import stockConfig from '@/lib/stock.json'; /* [수정] stock.json 파일을 직접 import */
+import stockConfig from '@/lib/stock.json';
 import { StockCollapsibleCard } from '@/components/StockCollapsibleCard';
 
-/* [수정] stock.json 구조 변경에 따라 티커 목록 추출 방식 변경 */
-const tickers = stockConfig.tickers.map(t => t.ticker);
+const tickers = stockConfig.us_stocks.map(t => t.ticker);
 
 export default function StockPage() {
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(() => {
     const initialState: Record<string, TickerState> = {};
-    /* [수정] 변경된 tickers 배열 사용 */
     tickers.forEach(ticker => {
       initialState[ticker] = { data: null, loading: false, error: null, signals: [] };
     });
@@ -31,7 +29,6 @@ export default function StockPage() {
     }
 
     try {
-      /* 기존 Alpha Vantage API 라우트 호출 */
       const response = await fetch(`/api/stock/${ticker}`);
       if (!response.ok) {
         const errorData = await response.json();
@@ -84,21 +81,21 @@ export default function StockPage() {
     주식 포트폴리오 (기존)
     </h1>
     <div className="w-full max-w-7xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-    {/* [수정] 변경된 tickers 배열 사용 */
-      tickers.map((ticker) => {
-        const state = tickerStates[ticker];
-        return (
-          <StockCollapsibleCard
-          key={ticker}
-          ticker={ticker}
-          tickerState={state}
-          gridStrokeColor={gridStrokeColor}
-          isOpen={openedTicker === ticker}
-          onOpenChange={() => handleOpenChange(ticker)}
-          />
-        );
-      })}
-      </div>
-      </div>
+    {tickers.map((ticker) => {
+      const state = tickerStates[ticker];
+      return (
+        <StockCollapsibleCard
+        key={ticker}
+        ticker={ticker}
+        tickerState={state}
+        gridStrokeColor={gridStrokeColor}
+        isOpen={openedTicker === ticker}
+        onOpenChange={() => handleOpenChange(ticker)}
+        currency="USD" /* [수정] 통화 속성 전달 */
+        />
+      );
+    })}
+    </div>
+    </div>
   );
 }

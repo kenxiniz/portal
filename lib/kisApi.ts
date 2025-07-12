@@ -25,8 +25,8 @@ interface KisApiError {
 }
 
 /*
- *  * API 인증 토큰을 발급받거나 기존 토큰을 반환하는 함수
- *   */
+ *  * * API 인증 토큰을 발급받거나 기존 토큰을 반환하는 함수
+ *   * */
 async function getAccessToken(): Promise<string> {
   const now = Date.now();
   if (accessToken && tokenExpiresAt && now < tokenExpiresAt) {
@@ -57,8 +57,8 @@ async function getAccessToken(): Promise<string> {
 }
 
 /*
- *  * 페이지네이션을 구현하여 2년치 데이터를 모두 가져오는 함수
- *   */
+ *  * * 페이지네이션을 구현하여 2년치 데이터를 모두 가져오는 함수
+ *   * */
 async function getDailyOverseasStockData(ticker: string, exchange: string): Promise<StockDataPoint[]> {
   const token = await getAccessToken();
   const allData: StockDataPoint[] = [];
@@ -136,10 +136,11 @@ async function getDailyOverseasStockData(ticker: string, exchange: string): Prom
 }
 
 /*
- *  * 종목 정보를 stock.json에서 찾아 API를 호출하는 통합 함수
- *   */
+ *  * * 종목 정보를 stock.json에서 찾아 API를 호출하는 통합 함수
+ *   * */
 export async function getDailyStockData(ticker: string): Promise<StockDataPoint[]> {
-  const stockInfo = stockConfig.tickers.find(t => t.ticker.toUpperCase() === ticker.toUpperCase());
+  /* [수정] stock.json의 us_stocks를 참조하도록 변경 */
+  const stockInfo = stockConfig.us_stocks.find(t => t.ticker.toUpperCase() === ticker.toUpperCase());
 
   if (stockInfo) {
     return getDailyOverseasStockData(stockInfo.ticker, stockInfo.exchange);

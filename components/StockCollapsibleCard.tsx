@@ -17,6 +17,7 @@ interface StockCollapsibleCardProps {
   gridStrokeColor: string;
   isOpen: boolean;
   onOpenChange: () => void;
+  currency?: 'USD' | 'KRW'; /* 통화 속성 */
 }
 
 const formatDate = (dateString: string) => {
@@ -46,10 +47,19 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   tickerState,
   gridStrokeColor,
   isOpen,
-  onOpenChange
+  onOpenChange,
+  currency = 'USD'
 }) => {
   const latestSignal = tickerState.signals.length > 0 ? tickerState.signals.at(-1) : null;
   const chartRef = useRef<StockChartDisplayHandles>(null);
+
+  /* [추가] 통화에 따라 가격을 포맷하는 함수 */
+  const formatPrice = (price: number) => {
+    if (currency === 'KRW') {
+      return `${Math.round(price).toLocaleString()}원`;
+    }
+    return `$${price.toFixed(2)}`;
+  };
 
   const getCardTitleClassName = () => {
     if (!latestSignal) return "";
@@ -65,7 +75,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
 
   const historicalSignals = tickerState.signals.filter(s => s.type !== 'hold');
 
-  /* [수정] 클릭된 신호의 '마지막 날짜'를 차트로 전달하는 함수 */
   const handleSignalClick = (signal: TradingSignal) => {
     const targetDate = signal.date; /* 기간이 있더라도 항상 마지막 날짜를 기준으로 이동 */
     chartRef.current?.moveToDate(targetDate);
@@ -122,7 +131,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
         )}
         {signal.type.includes('buy') && signal.entryPrice !== undefined && (
           <span>
-          ${signal.entryPrice.toFixed(2)}
+          {formatPrice(signal.entryPrice)}
           </span>
         )}
         </TableCell>

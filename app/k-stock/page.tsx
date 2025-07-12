@@ -1,4 +1,4 @@
-/* /app/kis-stock/page.tsx */
+/* /app/k-stock/page.tsx */
 
 "use client";
 
@@ -8,9 +8,9 @@ import { TickerState, StockDataPoint, TradingSignal } from '@/lib/stockUtils';
 import stockConfig from '@/lib/stock.json';
 import { StockCollapsibleCard } from '@/components/StockCollapsibleCard';
 
-const tickers = stockConfig.us_stocks.map(t => t.ticker);
+const tickers = stockConfig.k_stocks.map(t => t.ticker);
 
-export default function KisStockPage() {
+export default function KStockPage() {
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(() => {
     const initialState: Record<string, TickerState> = {};
     tickers.forEach(ticker => {
@@ -29,7 +29,7 @@ export default function KisStockPage() {
     }
 
     try {
-      const response = await fetch(`/api/kisStock/${ticker}`);
+      const response = await fetch(`/api/k-stock/${ticker}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
@@ -78,20 +78,23 @@ export default function KisStockPage() {
   return (
     <div className="flex flex-col items-center p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
     <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-8">
-    주식 포트폴리오 (한투)
+    주식 포트폴리오 (한국)
     </h1>
     <div className="w-full max-w-7xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     {tickers.map((ticker) => {
       const state = tickerStates[ticker];
+      const stockInfo = stockConfig.k_stocks.find(s => s.ticker === ticker);
+      const displayName = stockInfo ? stockInfo.name : ticker;
+
       return (
         <StockCollapsibleCard
         key={ticker}
-        ticker={ticker}
+        ticker={displayName}
         tickerState={state}
         gridStrokeColor={gridStrokeColor}
         isOpen={openedTicker === ticker}
         onOpenChange={() => handleOpenChange(ticker)}
-        currency="USD" /* [수정] 통화 속성 전달 */
+        currency="KRW" /* [수정] 통화 속성 전달 */
         />
       );
     })}

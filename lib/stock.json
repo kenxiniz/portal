@@ -1,5 +1,5 @@
 {
-  "tickers": [
+  "us_stocks": [
     { "ticker": "TSLA", "exchange": "NAS" },
     { "ticker": "NVDA", "exchange": "NAS" },
     { "ticker": "TMV",  "exchange": "AMS" },
@@ -8,5 +8,18 @@
     { "ticker": "SOXS", "exchange": "AMS" },
     { "ticker": "YINN", "exchange": "AMS" },
     { "ticker": "YANG", "exchange": "AMS" }
+  ],
+  "k_stocks": [
+    { "ticker": "457480", "name": "ACE 테슬라벨류체인" },
+    { "ticker": "483320", "name": "ACE 엔비디아벨류체인" },
+    { "ticker": "400570", "name": "KODEX 유럽탄소배출권" },
+    { "ticker": "261220", "name": "KODEX WTI원유선물" },
+    { "ticker": "261240", "name": "KODEX 미국달러선물" },
+    { "ticker": "292560", "name": "TIGER 일본엔선물" },
+    { "ticker": "411106", "name": "ACE KRX금현물" },
+    { "ticker": "486450", "name": "SOL 미국AI전력인프라" },
+    { "ticker": "371160", "name": "TIGER 차이나항셍테크" },
+    { "ticker": "381180", "name": "TIGER 필라델피아반도체" },
+    { "ticker": "305720", "name": "KODEX 2차전지산업" }
   ]
 }

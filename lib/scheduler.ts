@@ -5,7 +5,8 @@ import axios, { AxiosError } from 'axios';
 import stockConfig from './stock.json';
 import { TradingSignal } from './stockUtils';
 
-const tickers = stockConfig.tickers.map(t => t.ticker);
+/* [수정] us_stocks를 사용하도록 변경 */
+const tickers = stockConfig.us_stocks.map(t => t.ticker);
 
 declare global {
   var isSchedulerRunning: boolean | undefined;
@@ -144,60 +145,60 @@ if (global.isSchedulerRunning) {
    *   API
    *   기준
    *   */
-  cron.schedule('* * * * *', async () => {
+  cron.schedule('* 6 * * *', async () => {
       console.log('--------------------');
       console.log(`[${new Date().toLocaleTimeString()}] 매매 신호를 확인합니다...`);
       let anyNewSignalFound = false;
 
       for (const ticker of tickers) {
-        try {
-          console.log(`[${ticker}] 신호 확인 중...`);
-          const response = await axios.get(`${process.env.NEXTAUTH_URL}/api/kisStock/${ticker}`);
-          const { signals }: { signals: TradingSignal[] } = response.data;
-          const latestSignal = signals.at(-1);
+      try {
+      console.log(`[${ticker}] 신호 확인 중...`);
+      const response = await axios.get(`${process.env.NEXTAUTH_URL}/api/kisStock/${ticker}`);
+      const { signals }: { signals: TradingSignal[] } = response.data;
+      const latestSignal = signals.at(-1);
 
-          console.log(`[${ticker}] 최신 신호:`, latestSignal ?? '없음');
+      console.log(`[${ticker}] 최신 신호:`, latestSignal ?? '없음');
 
-          if (latestSignal && latestSignal.type !== 'hold') {
-            const signalId = `${ticker}-${latestSignal.type}-${latestSignal.date}`;
+      if (latestSignal && latestSignal.type !== 'hold') {
+        const signalId = `${ticker}-${latestSignal.type}-${latestSignal.date}`;
 
-            console.log(`[${ticker}] 신호 비교: (이전: ${lastSentSignals[ticker] || '없음'}) vs (현재: ${signalId})`);
-            if (lastSentSignals[ticker] !== signalId) {
-              const signalType = latestSignal.type.includes('buy') ? '📈 매수' : '📉 매도';
-              const price = latestSignal.entryPrice ?? latestSignal.realizedPrice;
-              const profitRate = latestSignal.profitRate;
+        console.log(`[${ticker}] 신호 비교: (이전: ${lastSentSignals[ticker] || '없음'}) vs (현재: ${signalId})`);
+        if (lastSentSignals[ticker] !== signalId) {
+          const signalType = latestSignal.type.includes('buy') ? '📈 매수' : '📉 매도';
+          const price = latestSignal.entryPrice ?? latestSignal.realizedPrice;
+          const profitRate = latestSignal.profitRate;
 
-              const template = {
-                object_type: 'text',
-                text: `[${ticker}] ${signalType} 신호\n\n- 전략: ${latestSignal.reason}\n- 날짜: ${latestSignal.date}\n- 가격: ${price ? `$${price.toFixed(2)}` : '-'}\n- 수익률: ${profitRate ? `${profitRate.toFixed(2)}%` : '-'}`,
-                link: { web_url: `${process.env.NEXTAUTH_URL}/kis-stock`, mobile_web_url: `${process.env.NEXTAUTH_URL}/kis-stock` },
-                button_title: '포트폴리오 바로가기'
-              };
+          const template = {
+            object_type: 'text',
+            text: `[${ticker}] ${signalType} 신호\n\n- 전략: ${latestSignal.reason}\n- 날짜: ${latestSignal.date}\n- 가격: ${price ? `$${price.toFixed(2)}` : '-'}\n- 수익률: ${profitRate ? `${profitRate.toFixed(2)}%` : '-'}`,
+            link: { web_url: `${process.env.NEXTAUTH_URL}/kis-stock`, mobile_web_url: `${process.env.NEXTAUTH_URL}/kis-stock` },
+            button_title: '포트폴리오 바로가기'
+          };
 
-              await sendKakaoMessage(template);
-              lastSentSignals[ticker] = signalId;
-              anyNewSignalFound = true;
-            }
-          }
-        } catch (error) {
-          const axiosError = error as AxiosError;
-          console.error(`[${ticker}] 신호 확인 중 에러 발생:`, axiosError.message);
+          await sendKakaoMessage(template);
+          lastSentSignals[ticker] = signalId;
+          anyNewSignalFound = true;
         }
       }
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error(`[${ticker}] 신호 확인 중 에러 발생:`, axiosError.message);
+    }
+  }
 
-      console.log(`순회 완료. 새로운 신호 발견 여부: ${anyNewSignalFound}, '신호 없음' 메시지 발송 여부: ${noSignalMessageSent}`);
+  console.log(`순회 완료. 새로운 신호 발견 여부: ${anyNewSignalFound}, '신호 없음' 메시지 발송 여부: ${noSignalMessageSent}`);
 
-      if (anyNewSignalFound) {
-        noSignalMessageSent = false;
-      } else {
-        if (!noSignalMessageSent) {
-          console.log("새로운 매매 신호가 없어 '신호 없음' 메시지를 전송합니다.");
-          await sendNoSignalNotification();
-          noSignalMessageSent = true;
-        } else {
-          console.log("'신호 없음' 상태이나, 중복 발송을 방지하기 위해 이번에는 메시지를 보내지 않습니다.");
-        }
-      }
-      console.log('--------------------');
+  if (anyNewSignalFound) {
+    noSignalMessageSent = false;
+  } else {
+    if (!noSignalMessageSent) {
+      console.log("새로운 매매 신호가 없어 '신호 없음' 메시지를 전송합니다.");
+      await sendNoSignalNotification();
+      noSignalMessageSent = true;
+    } else {
+      console.log("'신호 없음' 상태이나, 중복 발송을 방지하기 위해 이번에는 메시지를 보내지 않습니다.");
+    }
+  }
+  console.log('--------------------');
     });
   }
