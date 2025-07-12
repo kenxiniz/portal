@@ -13,6 +13,8 @@ export default function Home() {
   return (
     <div className={styles.page}>
     <main className={styles.main}>
+    {/* [수정] 로고를 div로 감싸 원형 마스크를 적용합니다. */}
+    <div className={styles.logoContainer}>
     <Image
     className={styles.logo}
     src="/logo.png"
@@ -21,6 +23,7 @@ export default function Home() {
     height={500}
     priority
     />
+    </div>
     <div className="text-center">
     <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100">
     깐부 자산 포트폴리오
@@ -39,7 +42,6 @@ export default function Home() {
     <Link href="/kis-stock" className={styles.primary}>
     주식 (한투)
     </Link>
-    {/* [추가] 한국투자증권 K-Stock 페이지로 연결되는 버튼 */}
     <Link href="/k-stock" className={styles.primary}>
     한국 주식
     </Link>
