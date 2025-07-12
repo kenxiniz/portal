@@ -5,13 +5,17 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useThemeDetector } from '@/hooks/useThemeDetector';
 import { TickerState, StockDataPoint, TradingSignal } from '@/lib/stockUtils';
-import allTickers from '@/lib/stock.json';
+import stockConfig from '@/lib/stock.json'; /* [수정] import 이름 변경 */
 import { StockCollapsibleCard } from '@/components/StockCollapsibleCard';
+
+/* [수정] stock.json 구조 변경에 따라 티커 목록 추출 방식 변경 */
+const tickers = stockConfig.tickers.map(t => t.ticker);
 
 export default function KisStockPage() {
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(() => {
     const initialState: Record<string, TickerState> = {};
-    allTickers.tickers.forEach(ticker => {
+    /* [수정] 변경된 tickers 배열 사용 */
+    tickers.forEach(ticker => {
       initialState[ticker] = { data: null, loading: false, error: null, signals: [] };
     });
     return initialState;
@@ -27,7 +31,6 @@ export default function KisStockPage() {
     }
 
     try {
-      /* 한국투자증권 API 라우트 호출 */
       const response = await fetch(`/api/kisStock/${ticker}`);
       if (!response.ok) {
         const errorData = await response.json();
@@ -51,13 +54,13 @@ export default function KisStockPage() {
 
   useEffect(() => {
     const loadAllTickersSequentially = async () => {
-      if (allTickers.tickers.length > 0) {
-        const firstTicker = allTickers.tickers[0];
+      if (tickers.length > 0) {
+        const firstTicker = tickers[0];
         setOpenedTicker(firstTicker);
         await fetchStockData(firstTicker, true);
 
-        for (let i = 1; i < allTickers.tickers.length; i++) {
-          const ticker = allTickers.tickers[i];
+        for (let i = 1; i < tickers.length; i++) {
+          const ticker = tickers[i];
           await fetchStockData(ticker, false);
         }
       }
@@ -80,20 +83,21 @@ export default function KisStockPage() {
     주식 포트폴리오 (한투)
     </h1>
     <div className="w-full max-w-7xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-    {allTickers.tickers.map((ticker) => {
-      const state = tickerStates[ticker];
-      return (
-        <StockCollapsibleCard
-        key={ticker}
-        ticker={ticker}
-        tickerState={state}
-        gridStrokeColor={gridStrokeColor}
-        isOpen={openedTicker === ticker}
-        onOpenChange={() => handleOpenChange(ticker)}
-        />
-      );
-    })}
-    </div>
-    </div>
+    {/* [수정] 변경된 tickers 배열 사용 */
+      tickers.map((ticker) => {
+        const state = tickerStates[ticker];
+        return (
+          <StockCollapsibleCard
+          key={ticker}
+          ticker={ticker}
+          tickerState={state}
+          gridStrokeColor={gridStrokeColor}
+          isOpen={openedTicker === ticker}
+          onOpenChange={() => handleOpenChange(ticker)}
+          />
+        );
+      })}
+      </div>
+      </div>
   );
 }

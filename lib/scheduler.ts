@@ -2,8 +2,10 @@
 
 import cron from 'node-cron';
 import axios, { AxiosError } from 'axios';
-import allTickers from '@/lib/stock.json';
+import stockConfig from './stock.json';
 import { TradingSignal } from './stockUtils';
+
+const tickers = stockConfig.tickers.map(t => t.ticker);
 
 declare global {
   var isSchedulerRunning: boolean | undefined;
@@ -70,20 +72,15 @@ if (global.isSchedulerRunning) {
       await axios.post(url, data.toString(), { headers });
       console.log('카카오톡 메시지 전송 성공');
     } catch (error) {
-      /* [핵심 수정] 에러 처리 로직을 강화하여 모든 종류의 에러를 상세히 로그로 남깁니다. */
       const axiosError = error as AxiosError<{ code?: number; msg?: string }>;
-
-      /* [디버깅 로그] 어떤 에러 응답이 왔는지 확인합니다. */
       if (axiosError.response) {
         console.error('[DEBUG] 카카오 API 에러 응답 데이터:', axiosError.response.data);
       }
-
-      if (axiosError.response && axiosError.response.data && axiosError.response.data.code === -401 && attempt === 1) {
+      if (axiosError.response?.data?.code === -401 && attempt === 1) {
         console.warn('메시지 전송 실패, 토큰 만료 의심. 갱신 후 재시도합니다.');
         const refreshed = await refreshAccessToken();
         if (refreshed) await sendKakaoMessage(template_object, 2);
       } else {
-        /* [핵심 수정] 에러의 원인을 명확하게 출력합니다. */
         const errorMessage = axiosError.response ? JSON.stringify(axiosError.response.data) : axiosError.message;
         console.error('카카오톡 메시지 전송 최종 실패:', errorMessage);
       }
@@ -94,10 +91,10 @@ if (global.isSchedulerRunning) {
   async function sendNoSignalNotification() {
     const template = {
       object_type: 'text',
-      text: `모니터링 중인 모든 종목(${allTickers.tickers.join(', ')})에 새로운 매매 신호가 없습니다.`,
+      text: `모니터링 중인 모든 종목(${tickers.join(', ')})에 새로운 매매 신호가 없습니다.`,
       link: {
-        web_url: `${process.env.NEXTAUTH_URL}/stock`,
-        mobile_web_url: `${process.env.NEXTAUTH_URL}/stock`,
+        web_url: `${process.env.NEXTAUTH_URL}/kis-stock`,
+        mobile_web_url: `${process.env.NEXTAUTH_URL}/kis-stock`,
       },
       button_title: '포트폴리오 확인하기'
     };
@@ -105,15 +102,33 @@ if (global.isSchedulerRunning) {
   }
 
   /* 주식 데이터 캐시 업데이트 (매일 오전 7시) */
-  cron.schedule('0 8 * * *', async () => {
+  cron.schedule('0 7 * * *', async () => {
     console.log('매일 오전 7시: 주식 데이터 캐시 업데이트를 시작합니다...');
-    for (const ticker of allTickers.tickers) {
+    for (const ticker of tickers) {
+      /* [수정] 한투(KIS) API 캐시 업데이트 */
       try {
-        await axios.get(`${process.env.NEXTAUTH_URL}/api/stock/${ticker}`);
-        console.log(`[${ticker}] 캐시 업데이트 완료`);
+        console.log(`[${ticker}] 한투(KIS) API 캐시 업데이트 중...`);
+        await axios.get(`${process.env.NEXTAUTH_URL}/api/kisStock/${ticker}`);
+        console.log(`[${ticker}] 한투(KIS) 캐시 업데이트 완료`);
       } catch (error) {
         const axiosError = error as AxiosError;
-        console.error(`[${ticker}] 캐시 업데이트 실패:`, axiosError.message);
+        console.error(`[${ticker}] 한투(KIS) 캐시 업데이트 실패:`, axiosError.message);
+      }
+
+      /* [추가]
+       * 기존(Alpha
+       * Vantage)
+       * API
+       * 캐시
+       * 업데이트
+       * */
+      try {
+        console.log(`[${ticker}] 기존(Alpha Vantage) API 캐시 업데이트 중...`);
+        await axios.get(`${process.env.NEXTAUTH_URL}/api/stock/${ticker}`);
+        console.log(`[${ticker}] 기존(Alpha Vantage) 캐시 업데이트 완료`);
+      } catch (error) {
+        const axiosError = error as AxiosError;
+        console.error(`[${ticker}] 기존(Alpha Vantage) 캐시 업데이트 실패:`, axiosError.message);
       }
     }
   }, { timezone: "Asia/Seoul" });
@@ -125,61 +140,64 @@ if (global.isSchedulerRunning) {
    * 알림
    * (매
    * 1분)
-   * */
-  cron.schedule('* 9 * * *', async () => {
-    console.log('--------------------');
-    console.log(`[${new Date().toLocaleTimeString()}] 매매 신호를 확인합니다...`);
-    let anyNewSignalFound = false;
+   * - 한투
+   *   API
+   *   기준
+   *   */
+  cron.schedule('* * * * *', async () => {
+      console.log('--------------------');
+      console.log(`[${new Date().toLocaleTimeString()}] 매매 신호를 확인합니다...`);
+      let anyNewSignalFound = false;
 
-    for (const ticker of allTickers.tickers) {
-      try {
-        console.log(`[${ticker}] 신호 확인 중...`);
-        const response = await axios.get(`${process.env.NEXTAUTH_URL}/api/stock/${ticker}`);
-        const { signals }: { signals: TradingSignal[] } = response.data;
-        const latestSignal = signals.at(-1);
+      for (const ticker of tickers) {
+        try {
+          console.log(`[${ticker}] 신호 확인 중...`);
+          const response = await axios.get(`${process.env.NEXTAUTH_URL}/api/kisStock/${ticker}`);
+          const { signals }: { signals: TradingSignal[] } = response.data;
+          const latestSignal = signals.at(-1);
 
-        console.log(`[${ticker}] 최신 신호:`, latestSignal ?? '없음');
+          console.log(`[${ticker}] 최신 신호:`, latestSignal ?? '없음');
 
-        if (latestSignal && latestSignal.type !== 'hold') {
-          const signalId = `${ticker}-${latestSignal.type}-${latestSignal.date}`;
+          if (latestSignal && latestSignal.type !== 'hold') {
+            const signalId = `${ticker}-${latestSignal.type}-${latestSignal.date}`;
 
-          console.log(`[${ticker}] 신호 비교: (이전: ${lastSentSignals[ticker] || '없음'}) vs (현재: ${signalId})`);
-          if (lastSentSignals[ticker] !== signalId) {
-            const signalType = latestSignal.type.includes('buy') ? '📈 매수' : '📉 매도';
-            const price = latestSignal.entryPrice ?? latestSignal.realizedPrice;
-            const profitRate = latestSignal.profitRate;
+            console.log(`[${ticker}] 신호 비교: (이전: ${lastSentSignals[ticker] || '없음'}) vs (현재: ${signalId})`);
+            if (lastSentSignals[ticker] !== signalId) {
+              const signalType = latestSignal.type.includes('buy') ? '📈 매수' : '📉 매도';
+              const price = latestSignal.entryPrice ?? latestSignal.realizedPrice;
+              const profitRate = latestSignal.profitRate;
 
-            const template = {
-              object_type: 'text',
-              text: `[${ticker}] ${signalType} 신호\n\n- 전략: ${latestSignal.reason}\n- 날짜: ${latestSignal.date}\n- 가격: ${price ? `$${price.toFixed(2)}` : '-'}\n- 수익률: ${profitRate ? `${profitRate.toFixed(2)}%` : '-'}`,
-              link: { web_url: `${process.env.NEXTAUTH_URL}/stock`, mobile_web_url: `${process.env.NEXTAUTH_URL}/stock` },
-              button_title: '포트폴리오 바로가기'
-            };
+              const template = {
+                object_type: 'text',
+                text: `[${ticker}] ${signalType} 신호\n\n- 전략: ${latestSignal.reason}\n- 날짜: ${latestSignal.date}\n- 가격: ${price ? `$${price.toFixed(2)}` : '-'}\n- 수익률: ${profitRate ? `${profitRate.toFixed(2)}%` : '-'}`,
+                link: { web_url: `${process.env.NEXTAUTH_URL}/kis-stock`, mobile_web_url: `${process.env.NEXTAUTH_URL}/kis-stock` },
+                button_title: '포트폴리오 바로가기'
+              };
 
-            await sendKakaoMessage(template);
-            lastSentSignals[ticker] = signalId;
-            anyNewSignalFound = true;
+              await sendKakaoMessage(template);
+              lastSentSignals[ticker] = signalId;
+              anyNewSignalFound = true;
+            }
           }
+        } catch (error) {
+          const axiosError = error as AxiosError;
+          console.error(`[${ticker}] 신호 확인 중 에러 발생:`, axiosError.message);
         }
-      } catch (error) {
-        const axiosError = error as AxiosError;
-        console.error(`[${ticker}] 신호 확인 중 에러 발생:`, axiosError.message);
       }
-    }
 
-    console.log(`순회 완료. 새로운 신호 발견 여부: ${anyNewSignalFound}, '신호 없음' 메시지 발송 여부: ${noSignalMessageSent}`);
+      console.log(`순회 완료. 새로운 신호 발견 여부: ${anyNewSignalFound}, '신호 없음' 메시지 발송 여부: ${noSignalMessageSent}`);
 
-    if (anyNewSignalFound) {
-      noSignalMessageSent = false;
-    } else {
-      if (!noSignalMessageSent) {
-        console.log("새로운 매매 신호가 없어 '신호 없음' 메시지를 전송합니다.");
-        await sendNoSignalNotification();
-        noSignalMessageSent = true;
+      if (anyNewSignalFound) {
+        noSignalMessageSent = false;
       } else {
-        console.log("'신호 없음' 상태이나, 중복 발송을 방지하기 위해 이번에는 메시지를 보내지 않습니다.");
+        if (!noSignalMessageSent) {
+          console.log("새로운 매매 신호가 없어 '신호 없음' 메시지를 전송합니다.");
+          await sendNoSignalNotification();
+          noSignalMessageSent = true;
+        } else {
+          console.log("'신호 없음' 상태이나, 중복 발송을 방지하기 위해 이번에는 메시지를 보내지 않습니다.");
+        }
       }
-    }
-    console.log('--------------------');
-  });
-}
+      console.log('--------------------');
+    });
+  }

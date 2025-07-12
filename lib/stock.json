@@ -1,3 +1,12 @@
 {
-  "tickers": ["TSLA", "NVDA", "TMV", "TMF", "SOXL", "SOXS", "YINN", "YANG"]
+  "tickers": [
+    { "ticker": "TSLA", "exchange": "NAS" },
+    { "ticker": "NVDA", "exchange": "NAS" },
+    { "ticker": "TMV",  "exchange": "AMS" },
+    { "ticker": "TMF",  "exchange": "AMS" },
+    { "ticker": "SOXL", "exchange": "AMS" },
+    { "ticker": "SOXS", "exchange": "AMS" },
+    { "ticker": "YINN", "exchange": "AMS" },
+    { "ticker": "YANG", "exchange": "AMS" }
+  ]
 }

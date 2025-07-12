@@ -2,6 +2,7 @@
 
 import axios from 'axios';
 import { StockDataPoint } from './stockUtils';
+import stockConfig from './stock.json'; /* stock.json 파일 import */
 
 const KIS_API_URL = 'https://openapi.koreainvestment.com:9443';
 const KIS_APP_KEY = process.env.KIS_APP_KEY;
@@ -43,29 +44,10 @@ async function getAccessToken(): Promise<string> {
 }
 
 /*
- *  * 종목별 거래소 코드를 반환하는 헬퍼 함수
- *   */
-const getExchangeCode = (ticker: string): string => {
-  const tickerExchangeMap: Record<string, string> = {
-    'TSLA': 'NAS', /* 나스닥 */
-    'NVDA': 'NAS', /* 나스닥 */
-    'TMV': 'AMS',  /* 아멕스 */
-    'TMF': 'AMS',  /* 아멕스 */
-    'SOXL': 'AMS', /* 아멕스 */
-    'SOXS': 'AMS', /* 아멕스 */
-    'YINN': 'AMS', /* 아멕스 */
-    'YANG': 'AMS', /* 아멕스 */
-  };
-  return tickerExchangeMap[ticker.toUpperCase()] || 'NAS'; /* 기본값으로 나스닥 설정 */
-};
-
-/*
  *  * [수정] 페이지네이션을 구현하여 2년치 데이터를 모두 가져오는 함수
  *   */
-async function getDailyOverseasStockData(ticker: string): Promise<StockDataPoint[]> {
+async function getDailyOverseasStockData(ticker: string, exchange: string): Promise<StockDataPoint[]> {
   const token = await getAccessToken();
-  const exchange = getExchangeCode(ticker);
-
   let allData: StockDataPoint[] = [];
   let currentBymd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   let continueFetching = true;
@@ -86,7 +68,7 @@ async function getDailyOverseasStockData(ticker: string): Promise<StockDataPoint
     const url = `${KIS_API_URL}/uapi/overseas-price/v1/quotations/dailyprice?${params}`;
 
     try {
-      console.log(`Fetching data for ${ticker} until ${currentBymd}...`);
+      console.log(`Fetching data for ${ticker} (EXCD: ${exchange}) until ${currentBymd}...`);
       const response = await axios.get(url, {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
@@ -123,16 +105,6 @@ async function getDailyOverseasStockData(ticker: string): Promise<StockDataPoint
       if (lastDate <= twoYearsAgo) {
         continueFetching = false;
       } else {
-        /* 다음
-         * 요청을
-         * 위해
-         * 마지막
-         * 날짜의
-         * 하루
-         * 전으로
-         * 기준일
-         * 변경
-         * */
         const nextDate = new Date(lastDate);
         nextDate.setDate(nextDate.getDate() - 1);
         currentBymd = nextDate.toISOString().slice(0, 10).replace(/-/g, '');
@@ -146,19 +118,19 @@ async function getDailyOverseasStockData(ticker: string): Promise<StockDataPoint
     }
   }
 
-  /* 중복
-   * 제거
-   * 및
-   * 최종
-   * 정렬
-   * */
   const uniqueData = Array.from(new Map(allData.map(item => [item.date, item])).values());
   return uniqueData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 }
 
 /*
- *  * 종목 코드를 확인하여 국내/해외 API를 선택적으로 호출하는 통합 함수
+ *  * [수정] 종목 정보를 stock.json에서 찾아 API를 호출하는 통합 함수
  *   */
-        export async function getDailyStockData(ticker: string): Promise<StockDataPoint[]> {
-          return getDailyOverseasStockData(ticker);
-        }
+export async function getDailyStockData(ticker: string): Promise<StockDataPoint[]> {
+  const stockInfo = stockConfig.tickers.find(t => t.ticker.toUpperCase() === ticker.toUpperCase());
+
+  if (stockInfo) {
+    return getDailyOverseasStockData(stockInfo.ticker, stockInfo.exchange);
+  } else {
+    throw new Error(`Ticker ${ticker} is not defined in stock.json.`);
+  }
+}
