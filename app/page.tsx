@@ -2,7 +2,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./page.module.css";
-import { KeyRound, Users, Building2, LineChart, TrendingUp, BarChart3 } from "lucide-react";
+import { KeyRound, Users, Building2, LineChart, TrendingUp, BarChart3, Ticket } from "lucide-react";
 
 export const metadata = {
   title: "깐부 프로젝트",
@@ -50,6 +50,11 @@ export default function Home() {
     <BarChart3 className={styles.ctaIcon} />
     K-주식
     </Link>
+    {/* [추가] 로또 추첨 페이지로 가는 링크 */}
+    <Link href="/lotto" className={styles.primary}>
+    <Ticket className={styles.ctaIcon} />
+    로또 추첨
+    </Link>
     </div>
     </main>
 
@@ -66,4 +71,3 @@ export default function Home() {
     </div>
   );
 }
-
