@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       const response = NextResponse.json({ success: true });
 
       response.cookies.set({
-        name: process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME!,
+        name: 'app-auth-token',
         value: 'true',
         expires: expires,
         path: '/',

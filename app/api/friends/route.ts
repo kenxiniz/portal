@@ -3,6 +3,15 @@
 import { NextResponse } from 'next/server';
 import axios, { AxiosError } from 'axios';
 
+/* 사용자 정보와 친구 정보의 타입을 정의합니다. */
+interface UserProfile {
+  id: number;
+  uuid?: string; /* uuid는 친구 목록에만 존재할 수 있습니다. */
+  profile_nickname: string;
+  profile_thumbnail_image: string;
+  favorite?: boolean;
+}
+
 export async function GET() {
   const KAKAO_ACCESS_TOKEN = process.env.KAKAO_ACCESS_TOKEN;
 
@@ -13,45 +22,53 @@ export async function GET() {
     );
   }
 
-  const url = 'https://kapi.kakao.com/v1/api/talk/friends';
   const headers = {
     'Authorization': `Bearer ${KAKAO_ACCESS_TOKEN}`,
   };
 
   try {
-    const response = await axios.get(url, { headers });
-    const friends = response.data.elements;
+    /* --- 1. 본인 정보 가져오기 --- */
+    const meResponse = await axios.get('https://kapi.kakao.com/v2/user/me', { headers });
 
-    /* [수정] 친구 목록이 비어있을 경우 안내 페이지를 보여줍니다. */
-    if (!friends || friends.length === 0) {
+    /* ✅ [수정] 카카오 API 응답 구조 변경에 따라 올바른 경로에서 프로필 정보를 가져옵니다. */
+    /* optional chaining(?.)을 사용하여 profile 객체가 없는 경우에도 오류가 발생하지 않도록 합니다. */
+    const me: UserProfile = {
+      id: meResponse.data.id,
+      profile_nickname: meResponse.data.kakao_account?.profile?.nickname || '이름 없음',
+      profile_thumbnail_image: meResponse.data.kakao_account?.profile?.thumbnail_image_url || '',
+      favorite: true, /* 본인은 항상 즐겨찾기처럼 최상단에 표시 */
+    };
+
+    /* --- 2. 친구 목록 가져오기 --- */
+    const friendsResponse = await axios.get('https://kapi.kakao.com/v1/api/talk/friends', { headers });
+    const friends: UserProfile[] = friendsResponse.data.elements;
+
+    /* 본인 정보에 친구 목록에만 있는 uuid를 찾아 추가합니다. */
+    const myFriendProfile = friends.find(friend => friend.id === me.id);
+    if (myFriendProfile) {
+      me.uuid = myFriendProfile.uuid;
+    }
+
+    /* 최종 목록에 본인 정보를 가장 앞에 추가합니다. */
+    const combinedList = [me, ...friends];
+
+    /* 친구 목록이 비어있을 경우 안내 페이지를 보여줍니다. */
+    if (combinedList.length === 1 && friends.length === 0) {
       const emptyHtmlResponse = `
-      <div style="font-family: sans-serif; padding: 2em; text-align: center;">
-      <h1 style="color: #ff4757;">친구 목록이 비어있습니다.</h1>
-      <p style="color: #596275; line-height: 1.6;">
-      카카오 정책에 따라, 내 친구 중 <strong>이 앱에 로그인하고 '친구 목록' 정보 제공에 동의한 친구</strong>만 목록에 표시됩니다.
-        </p>
-      <div style="background-color: #f1f2f6; padding: 1.5em; border-radius: 8px; margin-top: 2em; text-align: left;">
-      <h2 style="margin-top: 0; color: #1e272e;">✅ 해결 방법</h2>
-      <ol style="padding-left: 1.5em;">
-      <li style="margin-bottom: 0.5em;">메시지를 받을 친구에게 이 사이트 주소를 알려주세요.</li>
-      <li style="margin-bottom: 0.5em;">친구가 사이트 하단의 <strong>'토큰 발급'</strong> 링크를 통해 카카오 로그인을 진행해야 합니다.</li>
-      <li style="margin-bottom: 0.5em;"><strong>(중요!)</strong> 로그인 과정에서 <strong>'[선택] 친구 목록'</strong> 항목을 반드시 체크하고 동의해야 합니다.</li>
-      <li>친구가 로그인을 완료한 후, 다시 이 페이지를 새로고침하면 친구가 목록에 나타납니다.</li>
-      </ol>
-      </div>
-      </div>
-      `;
+      <div style="font-family: sans-serif; padding: 2em;">
+      <h1>내 정보만 조회되었습니다.</h1>
+      <p>친구에게 알림을 보내려면, 친구가 이 앱에 로그인하여 정보 제공에 동의해야 합니다.</p>
+      <pre style="background-color: #f0f0f0; padding: 1em; border-radius: 5px;">${JSON.stringify([me], null, 2)}</pre>
+      </div>`;
       return new NextResponse(emptyHtmlResponse, {
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
       });
     }
 
-    console.log("--- 친구 목록 (UUID) ---", friends);
-
     const htmlResponse = `
     <h1>친구 목록 조회 성공</h1>
-    <p>메시지를 보낼 친구의 id 값을 복사하여 .env 파일의 KAKAO_FRIEND_UUIDS 변수에 추가하세요. 여러 명일 경우 쉼표(,)로 구분합니다.</p>
-    <pre style="background-color: #f0f0f0; padding: 1em; border-radius: 5px;">${JSON.stringify(friends, null, 2)}</pre>
+    <p>메시지를 보낼 친구의 UUID(uuid) 값을 복사하여 .env 파일의 KAKAO_FRIEND_UUIDS 변수에 추가하세요.</p>
+    <pre style="background-color: #f0f0f0; padding: 1em; border-radius: 5px;">${JSON.stringify(combinedList, null, 2)}</pre>
     `;
 
     return new NextResponse(htmlResponse, {

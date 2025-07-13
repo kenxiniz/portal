@@ -1,34 +1,36 @@
 /* middleware.ts */
-
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 /* 보호할 페이지 경로 목록 */
-const protectedRoutes = ['/my-properties', '/stock', '/kis-stock', '/k-stock']; /* [수정] /k-stock 추가 */
+const protectedRoutes = ['/my-properties', '/stock', '/kis-stock', '/k-stock']
+
+// ❗ Edge Runtime (middleware)는 process.env 직접 사용 불가 → 상수로 미리 읽어서 빌드 시 포함
+const COOKIE_NAME = 'app-auth-token'
+const NEXTAUTH_URL = process.env.NEXTAUTH_URL
+
+if (!NEXTAUTH_URL) {
+  console.error('Middleware Error: NEXTAUTH_URL is not set.')
+  // Edge Runtime 에서는 throw 도 가능
+  throw new Error('NEXTAUTH_URL environment variable is not set.')
+}
 
 export function middleware(request: NextRequest) {
-  /* 보호된 페이지에 접근하는 경우에만 쿠키를 확인합니다. */
-  if (protectedRoutes.some(path => request.nextUrl.pathname.startsWith(path))) {
-    const cookieName = process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME!;
-    const authToken = request.cookies.get(cookieName);
+  // 보호된 경로에만 동작
+  if (protectedRoutes.some((path) => request.nextUrl.pathname.startsWith(path))) {
+    const authToken = request.cookies.get(COOKIE_NAME)
 
-    /* 쿠키가 없거나, 값이 'true'가 아니면 로그인 페이지로 보냅니다. */
+    // 쿠키가 없거나 값이 'true' 가 아닌 경우 → 로그인 페이지로 리다이렉트
     if (!authToken || authToken.value !== 'true') {
-      const baseUrl = process.env.NEXTAUTH_URL;
+      const loginUrl = new URL('/login', NEXTAUTH_URL)
 
-      if (!baseUrl) {
-        console.error("Middleware Error: NEXTAUTH_URL environment variable is not set.");
-        return new Response("Configuration error: NEXTAUTH_URL is not set.", { status: 500 });
-      }
+      // callbackUrl: 사용자가 가려던 페이지 (쿼리 스트링 포함 가능)
+      loginUrl.searchParams.set('callbackUrl', request.nextUrl.pathname)
 
-      const loginUrl = new URL('/login', baseUrl);
-      const targetUrl = new URL(request.nextUrl.pathname, baseUrl);
-      loginUrl.searchParams.set('callbackUrl', targetUrl.href);
-
-      return NextResponse.redirect(loginUrl);
+      return NextResponse.redirect(loginUrl)
     }
   }
 
-  /* 그 외의 경우는 정상적으로 페이지를 보여줍니다. */
-  return NextResponse.next();
+  // 보호 경로 외: 계속 진행
+  return NextResponse.next()
 }
