@@ -16,7 +16,7 @@
     { "ticker": "261220", "name": "KODEX WTI원유선물" },
     { "ticker": "261240", "name": "KODEX 미국달러선물" },
     { "ticker": "292560", "name": "TIGER 일본엔선물" },
-    { "ticker": "411106", "name": "ACE KRX금현물" },
+    { "ticker": "411060", "name": "ACE KRX금현물" },
     { "ticker": "486450", "name": "SOL 미국AI전력인프라" },
     { "ticker": "371160", "name": "TIGER 차이나항셍테크" },
     { "ticker": "381180", "name": "TIGER 필라델피아반도체" },
