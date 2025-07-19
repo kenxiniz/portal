@@ -22,7 +22,7 @@ async function readLottoDb(): Promise<Record<string, LottoWeek>> {
   try {
     const data = await fs.readFile(lottoDbPath, 'utf8');
     return JSON.parse(data);
-  } catch { // [수정] 사용하지 않는 error 변수 제거
+  } catch {
     return {};
   }
 }
@@ -35,6 +35,7 @@ export async function POST() {
   const week = getCurrentWeek();
   const db = await readLottoDb();
 
+  /* 해당 주차 데이터가 없으면 초기화 */
   if (!db[week]) {
     const [year, weekNum] = week.split('-').map(Number);
     const firstDayOfYear = new Date(year, 0, 1);
@@ -48,24 +49,37 @@ export async function POST() {
     };
   }
 
-  const dayOfWeek = new Date().getDay();
-  const currentSetsCount = db[week].generatedSets.length;
+  const dayOfWeek = new Date().getDay(); /* 일요일=0, 월요일=1 */
+  const weekData = db[week];
+  const hasUnusedSets = weekData.generatedSets.some(set => !set.used);
 
-  if (dayOfWeek >= 1 && dayOfWeek <= 5 && currentSetsCount < dayOfWeek * 5) {
-    const newSets = generateLottoSets(5);
-    db[week].generatedSets.push(...newSets);
+  /* 월요일이고, 아직 생성된 번호가 없을 때만 실행 */
+  if (dayOfWeek === 1 && weekData.generatedSets.length === 0) {
+    const newSets = generateLottoSets(25);
+    weekData.generatedSets = newSets;
     await writeLottoDb(db);
 
     return NextResponse.json({ 
-      message: `${week} 주차에 5개 번호 세트 추가.`, 
+      message: `${week} 주차에 25개 번호 세트 생성.`, 
       week: week,
-      setsToSend: newSets 
+      setsToSend: newSets /* 새로 생성된 번호 전체를 반환 */
     }, { status: 201 });
-  } else {
+  } 
+
+  /* 월요일인데, 아직 사용되지 않은(알림이 가지 않은) 번호가 있다면, 해당 번호를 반환하여 알림을 보낼 수 있도록 함 */
+  if (dayOfWeek === 1 && hasUnusedSets) {
+    const unusedSets = weekData.generatedSets.filter(set => !set.used);
     return NextResponse.json({ 
-      message: '오늘은 번호를 생성하는 날이 아니거나, 이미 생성되었습니다.',
+      message: `${week} 주차에 아직 사용 처리되지 않은 ${unusedSets.length}개의 세트가 있습니다.`, 
       week: week,
-      setsToSend: [] 
+      setsToSend: unusedSets
     }, { status: 200 });
   }
+
+  /* 그 외의 경우 (월요일이 아니거나, 이미 모든 번호가 사용 처리된 경우) */
+  return NextResponse.json({ 
+    message: '오늘은 번호를 생성하는 날이 아니거나, 이미 생성 및 발송 완료되었습니다.',
+    week: week,
+    setsToSend: [] 
+  }, { status: 200 });
 }
