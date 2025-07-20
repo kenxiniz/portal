@@ -109,21 +109,19 @@ if (global.isSchedulerRunning) {
     }
   }
 
-  /* 주 1회 발송될 알림 템플릿 */
-  const createLottoWeeklyGenerationTemplate = (): object => {
+  /* 생성된 번호를 보여주는 알림 템플릿 */
+  const createLottoSetsNotificationTemplate = (sets: LottoSet[]): object => {
     return {
       "object_type": "list",
-      "header_title": "🎟️ 이번 주 로또 번호 생성 완료!",
+      "header_title": `🎟️ 이번 주 로또 번호 생성!`,
       "header_link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` },
-      "contents": [
-        {
-          "title": "모든 번호가 생성되었습니다.",
-          "description": "웹사이트에서 이번 주에 생성된 25개의 번호 조합을 모두 확인하세요.",
-          "image_url": "https://mud-kage.kakao.com/dn/bA4hH/btsA5Z03f6D/N5mIIHR9Ypqkj9eO24tVF0/kakaolink40_original.png",
-          "link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` }
-        }
-      ],
-      "buttons": [{ "title": "내 번호 확인하기", "link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` } }]
+      "contents": sets.map((set, index) => ({
+        "title": `${index + 1}번째 조합`,
+        "description": set.numbers.join(', '),
+        "image_url": "https://mud-kage.kakao.com/dn/bA4hH/btsA5Z03f6D/N5mIIHR9Ypqkj9eO24tVF0/kakaolink40_original.png",
+        "link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` }
+      })),
+      "buttons": [{ "title": "전체 번호 확인하기", "link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` } }]
     };
   };
 
@@ -164,82 +162,66 @@ if (global.isSchedulerRunning) {
     }));
   };
 
-  /* [수정]
-   * 매주
-   * 월요일
-   * 오전
-   * 9시에만
-   * 실행
-   * */
   cron.schedule('0 9 * * 1', async () => {
-      console.log(`매주 월요일 오전 9시: 로또 번호 생성을 시작합니다...`);
-      try {
+    console.log(`매주 월요일 오전 9시: 로또 번호 생성을 시작합니다...`);
+    try {
       const response = await axios.post(`${process.env.NEXTAUTH_URL}/api/lotto/generate-daily`);
       const { week, setsToSend } = response.data;
 
-  if (setsToSend && setsToSend.length > 0) {
-    console.log('✅ 새로 생성된 로또 번호가 있어 알림을 발송합니다.');
-    const template = createLottoWeeklyGenerationTemplate();
-    await sendKakaoNotifications(template);
+      if (setsToSend && setsToSend.length > 0) {
+        console.log('✅ 새로 생성되어 발송할 로또 번호:', setsToSend.map((s: LottoSet) => s.numbers));
+        const template = createLottoSetsNotificationTemplate(setsToSend);
+        await sendKakaoNotifications(template);
 
-    /* 알림
-     * 보낸
-     * 번호들을
-     * 'used'로
-     * 표시하여
-     * 중복
-     * 발송
-     * 방지
-     * */
-    const usedSetsNumbers = setsToSend.map((s: LottoSet) => s.numbers);
-    await axios.post(`${process.env.NEXTAUTH_URL}/api/lotto/mark-as-used`, { week: week, usedSets: usedSetsNumbers });
-    console.log(`✅ ${week} 주차의 ${usedSetsNumbers.length}개 세트 발송 및 사용 처리 완료.`);
-  } else {
-    console.log('ℹ️ 이미 이번 주 번호가 생성 및 발송되어 작업을 건너뜁니다.');
-  }
-      } catch (error) {
-        const axiosError = error as AxiosError;
-        console.error('❌ 로또 번호 생성 또는 알림 실패:', axiosError.response?.data || axiosError.message);
+        const usedSetsNumbers = setsToSend.map((s: LottoSet) => s.numbers);
+        await axios.post(`${process.env.NEXTAUTH_URL}/api/lotto/mark-as-used`, { week: week, usedSets: usedSetsNumbers });
+        console.log(`✅ ${week} 주차의 ${usedSetsNumbers.length}개 세트 발송 및 사용 처리 완료.`);
+      } else {
+        console.log('ℹ️ 이미 이번 주 번호가 생성 및 발송되어 작업을 건너뜁니다.');
       }
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      console.error('❌ 로또 번호 생성 또는 알림 실패:', axiosError.response?.data || axiosError.message);
+    }
   }, { timezone: "Asia/Seoul" });
 
   cron.schedule('0 7 * * *', async () => {
-      console.log('매일 오전 7시: 주식 데이터 캐시 업데이트를 시작합니다...');
-      for (const ticker of tickers) {
+    console.log('매일 오전 7시: 주식 데이터 캐시 업데이트를 시작합니다...');
+    for (const ticker of tickers) {
       try {
-      console.log(`[${ticker}] 한투(KIS) API 캐시 업데이트 중...`);
-      await axios.get(`${process.env.NEXTAUTH_URL}/api/kisStock/${ticker}`);
-      console.log(`[${ticker}] 한투(KIS) 캐시 업데이트 완료`);
+        console.log(`[${ticker}] 한투(KIS) API 캐시 업데이트 중...`);
+        await axios.get(`${process.env.NEXTAUTH_URL}/api/kisStock/${ticker}`);
+        console.log(`[${ticker}] 한투(KIS) 캐시 업데이트 완료`);
       } catch (error) {
-      const axiosError = error as AxiosError;
-      console.error(`[${ticker}] 한투(KIS) 캐시 업데이트 실패:`, axiosError.message);
+        const axiosError = error as AxiosError;
+        console.error(`[${ticker}] 한투(KIS) 캐시 업데이트 실패:`, axiosError.message);
       }
       try {
-      console.log(`[${ticker}] 기존(Alpha Vantage) API 캐시 업데이트 중...`);
-      await axios.get(`${process.env.NEXTAUTH_URL}/api/stock/${ticker}`);
-      console.log(`[${ticker}] 기존(Alpha Vantage) 캐시 업데이트 완료`);
+        console.log(`[${ticker}] 기존(Alpha Vantage) API 캐시 업데이트 중...`);
+        await axios.get(`${process.env.NEXTAUTH_URL}/api/stock/${ticker}`);
+        console.log(`[${ticker}] 기존(Alpha Vantage) 캐시 업데이트 완료`);
       } catch (error) {
-      const axiosError = error as AxiosError;
-      console.error(`[${ticker}] 기존(Alpha Vantage) 캐시 업데이트 실패:`, axiosError.message);
+        const axiosError = error as AxiosError;
+        console.error(`[${ticker}] 기존(Alpha Vantage) 캐시 업데이트 실패:`, axiosError.message);
       }
-      }
-      }, { timezone: "Asia/Seoul" });
+    }
+  }, { timezone: "Asia/Seoul" });
 
   cron.schedule('5 21 * * 6', async () => {
-      console.log('매주 토요일 21:05: 로또 당첨 번호 업데이트를 시작합니다...');
-      try {
+    console.log('매주 토요일 21:05: 로또 당첨 번호 업데이트를 시작합니다...');
+    try {
       const response = await axios.get(`${process.env.NEXTAUTH_URL}/api/lotto/update-result`);
       console.log('✅ 로또 당첨 번호 업데이트 성공:', response.data.message);
-      } catch (error) {
+    } catch (error) {
       const axiosError = error as AxiosError;
       console.error('❌ 로또 당첨 번호 업데이트 실패:', axiosError.response?.data || axiosError.message);
-      }
-      }, { timezone: "Asia/Seoul" });
+    }
+  }, { timezone: "Asia/Seoul" });
 
   cron.schedule('* * * * *', async () => {
-      console.log('--------------------');
-      console.log(`[${new Date().toLocaleTimeString()}] 매매 신호를 확인합니다...`);
-      let anyNewSignalFound = false;
+    console.log('--------------------');
+    console.log(`[${new Date().toLocaleTimeString()}] 매매 신호를 확인합니다...`);
+    let anyNewSignalFound = false;
 
     for (const ticker of tickers) {
       try {

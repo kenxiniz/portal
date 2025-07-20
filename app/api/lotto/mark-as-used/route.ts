@@ -5,13 +5,16 @@ import path from 'path';
 import fs from 'fs/promises';
 import { LottoWeek } from '@/types/lotto';
 
-const lottoDbPath = path.join(process.cwd(), 'lib', 'lotto.json');
+/* [수정] 데이터베이스 경로를 .cache 폴더로 변경합니다. */
+const cacheDir = path.join(process.cwd(), '.cache');
+const lottoDbPath = path.join(cacheDir, 'lotto.json');
 
 async function readLottoDb(): Promise<Record<string, LottoWeek>> {
   try {
     const data = await fs.readFile(lottoDbPath, 'utf8');
     return JSON.parse(data);
-  } catch { // [수정] 사용하지 않는 error 변수 제거
+  } catch {
+    /* 이 API는 데이터가 반드시 존재할 때 호출되므로, 오류 발생 시 빈 객체 반환 */
     return {};
   }
 }

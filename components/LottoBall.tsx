@@ -16,14 +16,13 @@ const getBallColor = (number: number) => {
   return "bg-green-500";
 };
 
-export const LottoBall: React.FC<LottoBallProps> = ({ number, isWinning, isBonus }) => {
+/* [수정] 함수의 인자에서 사용하지 않는 isWinning, isBonus를 제거합니다. */
+export const LottoBall: React.FC<LottoBallProps> = ({ number }) => {
   return (
     <div
     className={cn(
-      "flex items-center justify-center h-10 w-10 rounded-full text-white font-bold text-lg shadow-md transition-transform transform",
-      getBallColor(number),
-      isWinning && "ring-4 ring-offset-2 ring-yellow-400 dark:ring-yellow-300 scale-110",
-      isBonus && "ring-4 ring-offset-2 ring-green-400 dark:ring-green-300 scale-110"
+      "flex items-center justify-center h-10 w-10 rounded-full text-white font-bold text-lg shadow-md",
+      getBallColor(number)
     )}
     >
     {number}

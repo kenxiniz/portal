@@ -6,7 +6,8 @@ import fs from 'fs/promises';
 import { LottoWeek } from '@/types/lotto';
 import { generateLottoSets } from '@/lib/lottoUtils';
 
-const lottoDbPath = path.join(process.cwd(), 'lib', 'lotto.json');
+const cacheDir = path.join(process.cwd(), '.cache');
+const lottoDbPath = path.join(cacheDir, 'lotto.json');
 
 const getCurrentWeek = (): string => {
   const now = new Date();
@@ -20,9 +21,12 @@ const getCurrentWeek = (): string => {
 
 async function readLottoDb(): Promise<Record<string, LottoWeek>> {
   try {
+    await fs.access(lottoDbPath);
     const data = await fs.readFile(lottoDbPath, 'utf8');
     return JSON.parse(data);
   } catch {
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.writeFile(lottoDbPath, JSON.stringify({}, null, 2), 'utf8');
     return {};
   }
 }
@@ -35,51 +39,42 @@ export async function POST() {
   const week = getCurrentWeek();
   const db = await readLottoDb();
 
-  /* 해당 주차 데이터가 없으면 초기화 */
-  if (!db[week]) {
+  /* [수정] 해당 주차 데이터가 없거나, 있어도 생성된 세트가 없는 경우에만 신규 생성 */
+  if (!db[week] || db[week].generatedSets.length === 0) {
     const [year, weekNum] = week.split('-').map(Number);
     const firstDayOfYear = new Date(year, 0, 1);
     const days = (weekNum - 1) * 7 + (6 - firstDayOfYear.getDay() + 1);
     const drawDate = new Date(year, 0, days);
 
+    const newSets = generateLottoSets(5); // 5세트 생성
+
     db[week] = {
       week,
       drawDate: drawDate.toISOString().split('T')[0],
-      generatedSets: [],
+      generatedSets: newSets,
     };
-  }
-
-  const dayOfWeek = new Date().getDay(); /* 일요일=0, 월요일=1 */
-  const weekData = db[week];
-  const hasUnusedSets = weekData.generatedSets.some(set => !set.used);
-
-  /* 월요일이고, 아직 생성된 번호가 없을 때만 실행 */
-  if (dayOfWeek === 1 && weekData.generatedSets.length === 0) {
-    const newSets = generateLottoSets(25);
-    weekData.generatedSets = newSets;
     await writeLottoDb(db);
 
-    return NextResponse.json({ 
-      message: `${week} 주차에 25개 번호 세트 생성.`, 
+    return NextResponse.json({
+      message: `${week} 주차에 5개 세트를 새로 생성했습니다.`,
       week: week,
-      setsToSend: newSets /* 새로 생성된 번호 전체를 반환 */
+      setsToSend: newSets, // 스케줄러가 발송할 수 있도록 번호 반환
     }, { status: 201 });
-  } 
+  }
 
-  /* 월요일인데, 아직 사용되지 않은(알림이 가지 않은) 번호가 있다면, 해당 번호를 반환하여 알림을 보낼 수 있도록 함 */
-  if (dayOfWeek === 1 && hasUnusedSets) {
-    const unusedSets = weekData.generatedSets.filter(set => !set.used);
-    return NextResponse.json({ 
-      message: `${week} 주차에 아직 사용 처리되지 않은 ${unusedSets.length}개의 세트가 있습니다.`, 
+  /* 이미 생성된 번호가 있는 경우 */
+  const unusedSets = db[week].generatedSets.filter(set => !set.used);
+  if (unusedSets.length > 0) {
+    return NextResponse.json({
+      message: `${week} 주차에 아직 사용 처리되지 않은 ${unusedSets.length}개의 세트가 있습니다.`,
       week: week,
-      setsToSend: unusedSets
+      setsToSend: unusedSets,
     }, { status: 200 });
   }
 
-  /* 그 외의 경우 (월요일이 아니거나, 이미 모든 번호가 사용 처리된 경우) */
-  return NextResponse.json({ 
-    message: '오늘은 번호를 생성하는 날이 아니거나, 이미 생성 및 발송 완료되었습니다.',
+  return NextResponse.json({
+    message: '이미 이번 주 번호가 생성 및 발송 완료되었습니다.',
     week: week,
-    setsToSend: [] 
+    setsToSend: [],
   }, { status: 200 });
 }
