@@ -62,7 +62,7 @@ export async function GET() {
           const winningNumbers = await getWinningNumbers(i);
           cache[i] = winningNumbers;
           await new Promise(resolve => setTimeout(resolve, 50));
-        } catch (e) {
+        } catch {
           console.error(`Failed to fetch draw #${i}, skipping...`);
         }
       }

@@ -20,11 +20,8 @@ COPY ./public ./public
 COPY ./.next/standalone ./
 COPY ./.next/static ./.next/static
 
-# ✅ [수정] 복사된 모든 파일의 소유권을 appuser에게 한 번에 부여하여 권한 문제를 방지합니다.
-RUN mkdir -p /app/lib /app/.cache && chown -R appuser:appgroup /app/lib /app/.cache
-
 # non-root 유저로 전환
-USER appuser
+USER node
 
 # 외부로 노출할 포트
 EXPOSE 3000
