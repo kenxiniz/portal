@@ -2,7 +2,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./page.module.css";
-import { KeyRound, Users, Building2, LineChart, TrendingUp, BarChart3, Ticket } from "lucide-react";
+/* [수정] Wallet 아이콘 추가 */
+import { KeyRound, Users, Building2, LineChart, TrendingUp, BarChart3, Ticket, Wallet } from "lucide-react";
 
 export const metadata = {
   title: "깐부 프로젝트",
@@ -50,7 +51,6 @@ export default function Home() {
     <BarChart3 className={styles.ctaIcon} />
     K-주식
     </Link>
-    {/* [추가] 로또 추첨 페이지로 가는 링크 */}
     <Link href="/lotto" className={styles.primary}>
     <Ticket className={styles.ctaIcon} />
     로또 추첨
@@ -59,6 +59,11 @@ export default function Home() {
     </main>
 
     <footer className={styles.footer}>
+    {/* [추가] AWS 비용 페이지로 가는 링크 */}
+    <Link href="/aws-cost" className={styles.footerLink}>
+    <Wallet className={styles.footerIcon} />
+    운영  비용
+    </Link>
     <Link href="/get-token" className={styles.footerLink}>
     <KeyRound className={styles.footerIcon} />
     토큰 발급
