@@ -51,6 +51,7 @@ export const getWinningNumbers = async (drawNo: number) => {
   }
 };
 
+/* [수정] 함수의 반환 및 인자 타입을 명확히 지정합니다. */
 async function readJsonFile(filePath: string): Promise<Record<string, unknown>> {
   try {
     await fs.access(filePath);
@@ -106,6 +107,5 @@ const generateSingleLottoSet = (): number[] => {
 export const generateLottoSets = (count: number): LottoSet[] => {
   return Array.from({ length: count }, () => ({
     numbers: generateSingleLottoSet(),
-    used: false,
   }));
 };
