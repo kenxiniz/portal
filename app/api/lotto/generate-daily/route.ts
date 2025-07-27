@@ -8,17 +8,33 @@ import { generateLottoSets } from '@/lib/lottoUtils';
 
 const cacheDir = path.join(process.cwd(), '.cache');
 const lottoDbPath = path.join(cacheDir, 'lotto.json');
+const firstDrawDate = new Date('2002-12-07T21:00:00+09:00');
 
-const getCurrentWeek = (): string => {
+/* 다음 추첨일의 정보를 계산하는 함수 */
+const getNextDrawInfo = (): { week: string, drawNo: number, drawDate: string } => {
   const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 1);
-  const diff = (now.getTime() - start.getTime() + (start.getTimezoneOffset() - now.getTimezoneOffset()) * 60 * 1000);
-  const oneDay = 1000 * 60 * 60 * 24;
-  const day = Math.floor(diff / oneDay);
-  const week = Math.ceil((day + start.getDay() + 1) / 7);
-  return `${now.getFullYear()}-${String(week).padStart(2, '0')}`;
+  /* 오늘로부터 가장 가까운 다음 토요일을 찾습니다. */
+  const daysUntilSaturday = (6 - now.getDay() + 7) % 7;
+  const nextSaturday = new Date(now);
+  nextSaturday.setDate(now.getDate() + daysUntilSaturday);
+  nextSaturday.setHours(21, 0, 0, 0);
+
+  /* 다음 토요일을 기준으로 회차를 계산합니다. */
+  const diff = nextSaturday.getTime() - firstDrawDate.getTime();
+  const drawNo = Math.floor(diff / (1000 * 60 * 60 * 24 * 7)) + 1;
+
+  const startOfYear = new Date(nextSaturday.getFullYear(), 0, 1);
+  const dayOfYear = Math.floor((nextSaturday.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
+  const weekNo = Math.ceil((dayOfYear + startOfYear.getDay() + 1) / 7);
+
+  return {
+    week: `${nextSaturday.getFullYear()}-${String(weekNo).padStart(2, '0')}`,
+    drawNo: drawNo,
+    drawDate: nextSaturday.toISOString().split('T')[0]
+  };
 };
 
+/* ... (readLottoDb, writeLottoDb 함수는 기존과 동일) ... */
 async function readLottoDb(): Promise<Record<string, LottoWeek>> {
   try {
     await fs.access(lottoDbPath);
@@ -36,45 +52,31 @@ async function writeLottoDb(data: Record<string, LottoWeek>): Promise<void> {
 }
 
 export async function POST() {
-  const week = getCurrentWeek();
+  const { week, drawNo, drawDate } = getNextDrawInfo();
   const db = await readLottoDb();
 
-  /* [수정] 해당 주차 데이터가 없거나, 있어도 생성된 세트가 없는 경우에만 신규 생성 */
-  if (!db[week] || db[week].generatedSets.length === 0) {
-    const [year, weekNum] = week.split('-').map(Number);
-    const firstDayOfYear = new Date(year, 0, 1);
-    const days = (weekNum - 1) * 7 + (6 - firstDayOfYear.getDay() + 1);
-    const drawDate = new Date(year, 0, days);
+  const existingData = Object.values(db).find(w => w.drawNo === drawNo);
 
-    const newSets = generateLottoSets(5); // 5세트 생성
-
+  if (!existingData) {
+    const newSets = generateLottoSets(5);
     db[week] = {
       week,
-      drawDate: drawDate.toISOString().split('T')[0],
+      drawDate,
+      drawNo,
       generatedSets: newSets,
     };
     await writeLottoDb(db);
 
     return NextResponse.json({
-      message: `${week} 주차에 5개 세트를 새로 생성했습니다.`,
+      message: `${drawNo}회차(${week}) 신규 번호 생성 완료.`,
       week: week,
-      setsToSend: newSets, // 스케줄러가 발송할 수 있도록 번호 반환
+      setsToSend: newSets
     }, { status: 201 });
   }
 
-  /* 이미 생성된 번호가 있는 경우 */
-  const unusedSets = db[week].generatedSets.filter(set => !set.used);
-  if (unusedSets.length > 0) {
-    return NextResponse.json({
-      message: `${week} 주차에 아직 사용 처리되지 않은 ${unusedSets.length}개의 세트가 있습니다.`,
-      week: week,
-      setsToSend: unusedSets,
-    }, { status: 200 });
-  }
-
   return NextResponse.json({
-    message: '이미 이번 주 번호가 생성 및 발송 완료되었습니다.',
+    message: `이미 ${drawNo}회차(${week}) 번호가 존재합니다.`,
     week: week,
-    setsToSend: [],
+    setsToSend: []
   }, { status: 200 });
 }

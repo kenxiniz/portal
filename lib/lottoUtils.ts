@@ -1,44 +1,33 @@
 /* lib/lottoUtils.ts */
 
 import axios from 'axios';
+import path from 'path';
+import fs from 'fs/promises';
 import { LottoSet } from '@/types/lotto';
 
-/**
- *  * * 로또 추첨과 동일한 방식으로, 중복 없이 6개의 숫자를 순차적으로 뽑습니다.
- *   * * 1. 1부터 45까지의 숫자가 담긴 '공' 배열을 생성합니다.
- *    * * 2. 배열에서 무작위로 하나의 인덱스를 선택해 숫자를 뽑고, 그 숫자는 배열에서 제거합니다.
- *     * * 3. 이 과정을 6번 반복하여 완벽한 비복원추출을 구현합니다.
- *      * * @returns 6개의 고유한 숫자로 이루어진 배열
- *       * */
-const generateSingleLottoSet = (): number[] => {
-  const balls = Array.from({ length: 45 }, (_, i) => i + 1);
-  const pickedNumbers: number[] = [];
-  for (let i = 0; i < 6; i++) {
-    const randomIndex = Math.floor(Math.random() * balls.length);
-    const pickedBall = balls.splice(randomIndex, 1)[0];
-    pickedNumbers.push(pickedBall);
+const firstDrawDate = new Date('2002-12-07T21:00:00+09:00');
+const cacheDir = path.join(process.cwd(), '.cache');
+const pastWinningNumbersPath = path.join(cacheDir, 'past-winning-numbers.json');
+
+export const getDrawNoForDate = (date: Date): number => {
+  const diff = date.getTime() - firstDrawDate.getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24 * 7)) + 1;
+};
+
+export const getLatestDrawNo = (): number => {
+  const now = new Date();
+  const todayAt21 = new Date(now);
+  todayAt21.setHours(21, 0, 0, 0);
+
+  const targetDate = new Date(now);
+  if (now.getDay() === 6 && now < todayAt21) {
+    targetDate.setDate(now.getDate() - 1);
   }
-  return pickedNumbers.sort((a, b) => a - b);
+
+  const diff = targetDate.getTime() - firstDrawDate.getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24 * 7)) + 1;
 };
 
-/**
- *  * * 지정된 개수만큼 로또 번호 세트를 생성합니다.
- *   * * [수정] 생성된 각 세트에 used: false 속성을 추가합니다.
- *    * * @param count 생성할 로또 번호 세트의 개수
- *     * * @returns LottoSet 객체 배열
- *      * */
-export const generateLottoSets = (count: number): LottoSet[] => {
-  return Array.from({ length: count }, () => ({
-    numbers: generateSingleLottoSet(),
-    used: false, /* 메시지 발송 추적을 위해 기본값 false로 설정 */
-  }));
-};
-
-/**
- *  * * 동행복권 API를 통해 특정 회차의 당첨 번호를 가져옵니다.
- *   * * @param drawNo 조회할 로또 회차
- *    * * @returns 당첨 번호와 보너스 번호가 담긴 객체
- *     * */
 export const getWinningNumbers = async (drawNo: number) => {
   try {
     const url = `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${drawNo}`;
@@ -47,22 +36,76 @@ export const getWinningNumbers = async (drawNo: number) => {
 
     if (data.returnValue === 'success') {
       const numbers = [
-        data.drwtNo1,
-        data.drwtNo2,
-        data.drwtNo3,
-        data.drwtNo4,
-        data.drwtNo5,
-        data.drwtNo6,
+        data.drwtNo1, data.drwtNo2, data.drwtNo3,
+        data.drwtNo4, data.drwtNo5, data.drwtNo6,
       ];
       const bonus = data.bnusNo;
       return { numbers, bonus };
     } else {
-      /* [수정] 조회 실패 시 에러를 던져서 호출한 쪽에서 처리하도록 변경 */
-      throw new Error(`[${drawNo}회차] 당첨 번호 조회 실패: ${data.returnValue || '알 수 없는 오류'}`);
+      if (data.returnValue === 'fail') return null;
+      throw new Error(`[${drawNo}회차] 당첨 번호 조회 실패: ${data.returnValue}`);
     }
   } catch (error) {
     console.error(`Error fetching winning numbers for draw #${drawNo}:`, error);
-    /* [수정] 에러를 다시 던져서 상위에서 인지할 수 있도록 함 */
-    throw error;
+    return null;
   }
+};
+
+async function readJsonFile(filePath: string): Promise<Record<string, unknown>> {
+  try {
+    await fs.access(filePath);
+    const data = await fs.readFile(filePath, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+async function writeJsonFile(filePath: string, data: Record<string, unknown>): Promise<void> {
+  await fs.mkdir(cacheDir, { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+export const checkAndUpdateLatestWinningNumbers = async () => {
+  try {
+    const latestDrawNo = getLatestDrawNo();
+    console.log(`[로또 로그] 동행복권 API로 최신 ${latestDrawNo}회차 당첨 번호 조회를 시도합니다...`);
+
+    const winningNumbers = await getWinningNumbers(latestDrawNo);
+
+    if (winningNumbers) {
+      console.log(`[로또 로그] ✅ 조회 성공: ${latestDrawNo}회차 당첨 번호는 [${winningNumbers.numbers.join(', ')}] + 보너스 ${winningNumbers.bonus} 입니다.`);
+
+      const pastNumbers = await readJsonFile(pastWinningNumbersPath);
+      if (!pastNumbers[latestDrawNo]) {
+        console.log(`[로또 로그] ⚠️ ${latestDrawNo}회차 번호가 .cache/past-winning-numbers.json에 없어 새로 추가합니다.`);
+        pastNumbers[latestDrawNo] = winningNumbers;
+        await writeJsonFile(pastWinningNumbersPath, pastNumbers);
+      } else {
+        console.log(`[로또 로그] ℹ️ ${latestDrawNo}회차 번호는 이미 파일에 존재합니다.`);
+      }
+
+    } else {
+      console.log(`[로또 로그] ℹ️ 아직 ${latestDrawNo}회차 당첨 번호가 발표되지 않았습니다.`);
+    }
+  } catch (error) {
+    console.error('[로또 로그] ❌ 최신 당첨 번호 확인/업데이트 중 오류 발생:', error);
+  }
+};
+
+const generateSingleLottoSet = (): number[] => {
+  const balls = Array.from({ length: 45 }, (_, i) => i + 1);
+  const pickedNumbers: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    const pickedBall = balls.splice(Math.floor(Math.random() * balls.length), 1)[0];
+    pickedNumbers.push(pickedBall);
+  }
+  return pickedNumbers.sort((a, b) => a - b);
+};
+
+export const generateLottoSets = (count: number): LottoSet[] => {
+  return Array.from({ length: count }, () => ({
+    numbers: generateSingleLottoSet(),
+    used: false,
+  }));
 };

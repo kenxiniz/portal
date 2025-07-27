@@ -51,6 +51,20 @@
   }
 }
 
+/* [추가] 로또 당첨 번호 하이라이트 애니메이션 */
+@keyframes neon-glow {
+  0%, 100% {
+    box-shadow: 0 0 2px #fff, 0 0 5px #fff, 0 0 8px #0ea5e9, 0 0 12px #0ea5e9;
+  }
+  50% {
+    box-shadow: 0 0 4px #fff, 0 0 8px #fff, 0 0 12px #0ea5e9, 0 0 18px #0ea5e9;
+  }
+}
+
+.winning-match-glow {
+  animation: neon-glow 1.5s ease-in-out infinite;
+}
+
 @layer base {
   body {
     @apply bg-background text-foreground;

@@ -1,70 +1,66 @@
 /* app/api/lotto/winning-numbers/[drawNo]/route.ts */
 
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import path from 'path';
 import fs from 'fs/promises';
 import { getWinningNumbers } from '@/lib/lottoUtils';
 
-/* [수정] 당첨 번호 전용 캐시 파일 경로를 지정합니다. */
 const cacheDir = path.join(process.cwd(), '.cache');
-const winningNumbersCachePath = path.join(cacheDir, 'winning-numbers.json');
+const pastWinningNumbersPath = path.join(cacheDir, 'past-winning-numbers.json');
 
-interface WinningNumbersCache {
-  [drawNo: number]: {
-    numbers: number[];
-    bonus: number;
-  };
+interface WinningNumbers {
+  numbers: number[];
+  bonus: number;
 }
 
-/* [수정] 당첨 번호 캐시 파일을 읽고 쓰는 함수들입니다. */
-async function readWinningNumbersCache(): Promise<WinningNumbersCache> {
+async function readWinningNumbersCache(): Promise<Record<string, WinningNumbers>> {
   try {
-    await fs.access(winningNumbersCachePath);
-    const data = await fs.readFile(winningNumbersCachePath, 'utf8');
+    await fs.access(pastWinningNumbersPath);
+    const data = await fs.readFile(pastWinningNumbersPath, 'utf8');
     return JSON.parse(data);
   } catch {
-    await fs.mkdir(cacheDir, { recursive: true });
-    await fs.writeFile(winningNumbersCachePath, JSON.stringify({}, null, 2), 'utf8');
     return {};
   }
 }
 
-async function writeWinningNumbersCache(data: WinningNumbersCache): Promise<void> {
-  await fs.writeFile(winningNumbersCachePath, JSON.stringify(data, null, 2), 'utf8');
+async function writeWinningNumbersCache(data: Record<string, WinningNumbers>): Promise<void> {
+  await fs.mkdir(cacheDir, { recursive: true });
+  await fs.writeFile(pastWinningNumbersPath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-export async function GET(
-  request: Request,
-) {
-  const url = new URL(request.url);
-  const pathParts = url.pathname.split('/');
-  const drawNoString = pathParts[pathParts.length - 1];
-  const drawNo = parseInt(drawNoString, 10);
+export async function GET(request: NextRequest) {
+  /*
+   *    * [수정] 문제가 되던 두 번째 인자를 제거하고, request 객체에서 직접 URL을 파싱하여 drawNo를 추출합니다.
+   *       */
+  const { pathname } = request.nextUrl;
+  const pathSegments = pathname.split('/');
+  const drawNo = pathSegments[pathSegments.length - 1];
 
-  if (isNaN(drawNo) || drawNo <= 0) {
-    return NextResponse.json({ error: 'Invalid draw number' }, { status: 400 });
+  if (!drawNo || isNaN(Number(drawNo))) {
+    return NextResponse.json({ error: '유효한 회차 번호가 필요합니다.' }, { status: 400 });
   }
 
-  try {
-    /* 1. 캐시에서 먼저 조회 */
-    const cache = await readWinningNumbersCache();
-    if (cache[drawNo]) {
-      console.log(`✅ [Draw #${drawNo}] CACHE HIT: Loading winning numbers from cache.`);
-      return NextResponse.json(cache[drawNo]);
-    }
-
-    /* 2. 캐시에 없으면 API 호출 */
-    console.log(`❌ [Draw #${drawNo}] CACHE MISS: Fetching new winning numbers from API.`);
-    const winningNumbers = await getWinningNumbers(drawNo);
-
-    /* 3. API 결과를 캐시에 저장 */
-    cache[drawNo] = winningNumbers;
-    await writeWinningNumbersCache(cache);
-
-    return NextResponse.json(winningNumbers);
-
-  } catch (error) {
-    console.error(`API Error fetching winning numbers for draw #${drawNo}:`, error);
-    return NextResponse.json({ error: 'Failed to fetch winning numbers' }, { status: 500 });
+  /* 1. 캐시에서 먼저 찾아봅니다. */
+  const cache = await readWinningNumbersCache();
+  if (cache[drawNo]) {
+    console.log(`[Cache HIT] Draw #${drawNo}`);
+    return NextResponse.json(cache[drawNo]);
   }
+
+  console.log(`[Cache MISS] Draw #${drawNo}. Fetching from API...`);
+
+  /* 2. 캐시에 없으면 API를 호출합니다. */
+  const winningNumbers = await getWinningNumbers(Number(drawNo));
+
+  if (!winningNumbers) {
+    return NextResponse.json({
+      error: `${drawNo}회차의 당첨 번호를 가져올 수 없거나 아직 발표되지 않았습니다.`
+    }, { status: 404 });
+  }
+
+  /* 3. API 결과를 캐시에 저장합니다. */
+  cache[drawNo] = winningNumbers;
+  await writeWinningNumbersCache(cache);
+
+  return NextResponse.json(winningNumbers);
 }

@@ -3,77 +3,70 @@
 import { NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs/promises';
-import { getWinningNumbers } from '@/lib/lottoUtils';
+import { getLatestDrawNo, getWinningNumbers } from '@/lib/lottoUtils';
 
 const cacheDir = path.join(process.cwd(), '.cache');
-const pastWinningNumbersCachePath = path.join(cacheDir, 'past-winning-numbers.json');
+const pastWinningNumbersPath = path.join(cacheDir, 'past-winning-numbers.json');
 
-interface PastWinningNumbersCache {
-  [drawNo: number]: {
-    numbers: number[];
-    bonus: number;
-  };
+interface WinningNumbers {
+  numbers: number[];
+  bonus: number;
 }
 
-async function readPastWinningNumbersCache(): Promise<PastWinningNumbersCache> {
+async function readWinningNumbersCache(): Promise<Record<string, WinningNumbers>> {
   try {
-    await fs.access(pastWinningNumbersCachePath);
-    const data = await fs.readFile(pastWinningNumbersCachePath, 'utf8');
+    await fs.access(pastWinningNumbersPath);
+    const data = await fs.readFile(pastWinningNumbersPath, 'utf8');
     return JSON.parse(data);
   } catch {
-    await fs.mkdir(cacheDir, { recursive: true });
-    await fs.writeFile(pastWinningNumbersCachePath, JSON.stringify({}, null, 2), 'utf8');
     return {};
   }
 }
 
-async function writePastWinningNumbersCache(data: PastWinningNumbersCache): Promise<void> {
-  await fs.writeFile(pastWinningNumbersCachePath, JSON.stringify(data, null, 2), 'utf8');
+async function writeWinningNumbersCache(data: Record<string, WinningNumbers>): Promise<void> {
+  await fs.mkdir(cacheDir, { recursive: true });
+  await fs.writeFile(pastWinningNumbersPath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-const firstDrawDate = new Date('2002-12-07T12:00:00Z');
-const getLatestDrawNo = (currentDate: Date): number => {
-  const diff = currentDate.getTime() - firstDrawDate.getTime();
-  let weeks = Math.ceil(diff / (1000 * 60 * 60 * 24 * 7));
-  const dayOfWeek = currentDate.getDay();
-  const hours = currentDate.getHours();
-  if (dayOfWeek === 6 && hours < 21) {
-    weeks -= 1;
-  }
-  return weeks;
-};
-
 export async function GET() {
-  try {
-    const cache = await readPastWinningNumbersCache();
-    const latestDrawNo = getLatestDrawNo(new Date());
+  const latestDrawNo = getLatestDrawNo();
+  const cache = await readWinningNumbersCache();
+  const cachedDraws = Object.keys(cache).map(Number);
+  const latestCachedDraw = cachedDraws.length > 0 ? Math.max(...cachedDraws) : 0;
 
-    if (Object.keys(cache).length >= latestDrawNo) {
-      console.log(`✅ CACHE HIT: Loading all past winning numbers from cache.`);
-      return NextResponse.json(cache);
-    }
-
-    console.log(`❌ CACHE MISS or OUTDATED: Fetching all past winning numbers from API up to draw #${latestDrawNo}.`);
-    for (let i = 1; i <= latestDrawNo; i++) {
-      if (!cache[i]) {
-        try {
-          /* [추가] 동행복권 API 호출 시 서버 콘솔에 로그를 남깁니다. */
-          console.log(`[API Call] Fetching winning numbers for draw #${i}...`);
-          const winningNumbers = await getWinningNumbers(i);
-          cache[i] = winningNumbers;
-          await new Promise(resolve => setTimeout(resolve, 50));
-        } catch {
-          console.error(`Failed to fetch draw #${i}, skipping...`);
-        }
-      }
-    }
-
-    await writePastWinningNumbersCache(cache);
-    console.log('✅ Successfully updated and saved all past winning numbers to cache.');
-    return NextResponse.json(cache);
-
-  } catch (error) {
-    console.error(`API Error fetching all past winning numbers:`, error);
-    return NextResponse.json({ error: 'Failed to fetch all past winning numbers' }, { status: 500 });
+  if (latestDrawNo <= latestCachedDraw) {
+    return NextResponse.json({
+      message: `이미 최신(${latestCachedDraw}회)까지의 당첨 번호가 저장되어 있습니다.`,
+      latestDrawNo: latestDrawNo,
+      latestCachedDraw: latestCachedDraw
+    });
   }
+
+  console.log(`[past-wins] Missing draws found. Fetching from draw #${latestCachedDraw + 1} to #${latestDrawNo}...`);
+
+  for (let i = latestCachedDraw + 1; i <= latestDrawNo; i++) {
+    try {
+      console.log(`[API Call] Fetching winning numbers for draw #${i}...`);
+      const winningNumbers = await getWinningNumbers(i);
+
+      /* [수정] winningNumbers가 null이 아닐 때만 cache에 저장합니다. */
+      if (winningNumbers) {
+        cache[i] = winningNumbers;
+      } else {
+        console.warn(`[API Call] No data for draw #${i}, skipping...`);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+    } catch {
+      console.error(`Failed to fetch draw #${i}, skipping...`);
+    }
+  }
+
+  await writeWinningNumbersCache(cache);
+
+  return NextResponse.json({
+    message: `성공적으로 ${latestDrawNo}회차까지 당첨 번호를 업데이트했습니다.`,
+    updatedFrom: latestCachedDraw + 1,
+    updatedTo: latestDrawNo
+  });
 }
