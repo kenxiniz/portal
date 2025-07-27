@@ -117,10 +117,13 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
 
         if (data.length > 1) {
           const lastDate = data.at(-1)!.date;
-          const twoMonthsAgoDate = new Date(lastDate);
-          twoMonthsAgoDate.setMonth(twoMonthsAgoDate.getMonth() - 2);
+          const fromDate = new Date(lastDate);
+
+          const isTabletOrWider = window.innerWidth >= 768;
+          fromDate.setMonth(fromDate.getMonth() - (isTabletOrWider ? 4 : 2));
+
           mainChart.timeScale().setVisibleRange({
-            from: twoMonthsAgoDate.toISOString().split('T')[0] as Time,
+            from: fromDate.toISOString().split('T')[0] as Time,
             to: lastDate as Time,
           });
         }

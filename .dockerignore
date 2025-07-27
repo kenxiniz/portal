@@ -1,10 +1,7 @@
-# .dockerignore.docker
+# .dockerignore.local
 
 # 의존성
 node_modules
-
-# Next.js 빌드 결과물
-.next
 
 # 캐시 파일
 .cache
