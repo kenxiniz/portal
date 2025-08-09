@@ -113,11 +113,11 @@ if (global.isSchedulerRunning) {
     return {
       "object_type": "list",
       "header_title": `🎟️ ${drawNo}회차 로또 번호`,
-      "header link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` },
+      "header_link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` },
       "contents": sets.map((set, index) => ({
         "title": `${index + 1}번째 조합`,
         "description": set.numbers.join(', '),
-        "image_url": "https://mud-kage.kakao.com/dn/bA4hH/btsA5Z03f6D/N5mIIHR9Ypqkj9eO24tVF0/kakaolink40_original.png",
+        "image_url": `${process.env.NEXTAUTH_URL}/lotto.jpg`,
         "link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` }
       })),
       "buttons": [{ "title": "전체 번호 확인하기", "link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` } }]

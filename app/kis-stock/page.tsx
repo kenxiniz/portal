@@ -80,7 +80,8 @@ export default function KisStockPage() {
     <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-8">
     한투 주식
     </h1>
-    <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6">
+    {/* [수정] max-w-7xl 클래스를 제거하여 PC 화면에서도 좌우로 꽉 차게 만듭니다. */}
+    <div className="w-full grid grid-cols-1 gap-6">
     {tickers.map((ticker) => {
       const state = tickerStates[ticker];
       return (
@@ -91,7 +92,7 @@ export default function KisStockPage() {
         gridStrokeColor={gridStrokeColor}
         isOpen={openedTicker === ticker}
         onOpenChange={() => handleOpenChange(ticker)}
-        currency="USD" /* [수정] 통화 속성 전달 */
+        currency="USD"
         />
       );
     })}

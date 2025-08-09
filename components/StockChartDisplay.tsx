@@ -119,8 +119,14 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
           const lastDate = data.at(-1)!.date;
           const fromDate = new Date(lastDate);
 
-          const isTabletOrWider = window.innerWidth >= 768;
-          fromDate.setMonth(fromDate.getMonth() - (isTabletOrWider ? 4 : 2));
+          const screenWidth = window.innerWidth;
+          if (screenWidth >= 1024) { /* PC */
+            fromDate.setMonth(fromDate.getMonth() - 8);
+          } else if (screenWidth >= 768) { /* 태블릿 */
+            fromDate.setMonth(fromDate.getMonth() - 4);
+          } else { /* 모바일 */
+            fromDate.setMonth(fromDate.getMonth() - 2);
+          }
 
           mainChart.timeScale().setVisibleRange({
             from: fromDate.toISOString().split('T')[0] as Time,
