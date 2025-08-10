@@ -6,8 +6,9 @@ import { LottoSet, LottoWeek } from '@/types/lotto';
 import { getDrawNoForDate } from './lottoUtils';
 import path from 'path';
 import fs from 'fs/promises';
+import stockConfig from './stock.json'; // 주식 종목 정보를 가져오기 위해 import 추가
+import { TradingSignal } from './stockUtils'; // TradingSignal 타입을 가져오기 위해 import 추가
 
-/* [삭제] 더 이상 사용하지 않는 변수를 제거합니다. */
 const cacheDir = path.join(process.cwd(), '.cache');
 const lottoDbPath = path.join(cacheDir, 'lotto.json');
 
@@ -53,10 +54,15 @@ if (global.isSchedulerRunning) {
     }
   }
 
-  async function sendKakaoNotifications(template_object: object) {
-    await sendKakaoMessageToMe(template_object);
-    if (KAKAO_FRIEND_UUIDS_STRING) {
-      await sendKakaoMessageToFriends(template_object);
+  /* [수정] 제네릭을 사용하여 'any' 타입 오류를 해결합니다. */
+  async function sendKakaoNotificationsInChunks<T>(createTemplate: (chunk: T[]) => object, items: T[], chunkSize: number) {
+    for (let i = 0; i < items.length; i += chunkSize) {
+      const chunk = items.slice(i, i + chunkSize);
+      const template = createTemplate(chunk);
+      await sendKakaoMessageToMe(template);
+      if (KAKAO_FRIEND_UUIDS_STRING) {
+        await sendKakaoMessageToFriends(template);
+      }
     }
   }
 
@@ -109,7 +115,7 @@ if (global.isSchedulerRunning) {
     }
   }
 
-  const createLottoSetsNotificationTemplate = (drawNo: number, sets: LottoSet[]): object => {
+  const createLottoSetsNotificationTemplate = (drawNo: number) => (sets: LottoSet[]): object => {
     return {
       "object_type": "list",
       "header_title": `🎟️ ${drawNo}회차 로또 번호`,
@@ -117,10 +123,25 @@ if (global.isSchedulerRunning) {
       "contents": sets.map((set, index) => ({
         "title": `${index + 1}번째 조합`,
         "description": set.numbers.join(', '),
-        "image_url": `${process.env.NEXTAUTH_URL}/lotto.jpg`,
+        "image_url": `${process.env.NEXTAUTH_URL}/lotto.png`,
         "link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` }
       })),
       "buttons": [{ "title": "전체 번호 확인하기", "link": { "web_url": `${process.env.NEXTAUTH_URL}/lotto`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/lotto` } }]
+    };
+  };
+
+  const createAllStockStatusNotificationTemplate = (signals: { name: string, signal: TradingSignal }[]): object => {
+    return {
+      "object_type": "list",
+      "header_title": "🇺🇸 미국 주식 현재 상태",
+      "header_link": { "web_url": `${process.env.NEXTAUTH_URL}/stock`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/stock` },
+      "contents": signals.map(item => ({
+        "title": `[${item.name}] ${item.signal.reason}`,
+        "description": item.signal.details || `현재 상태: ${item.signal.type}`,
+        "image_url": `${process.env.NEXTAUTH_URL}/lotto.png`, // TODO: 적절한 아이콘으로 변경
+        "link": { "web_url": `${process.env.NEXTAUTH_URL}/stock`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/stock` }
+      })),
+      "buttons": [{ "title": "미국 주식 페이지로 이동", "link": { "web_url": `${process.env.NEXTAUTH_URL}/stock`, "mobile_web_url": `${process.env.NEXTAUTH_URL}/stock` } }]
     };
   };
 
@@ -140,18 +161,45 @@ if (global.isSchedulerRunning) {
     try {
       const lottoDb: Record<string, LottoWeek> = JSON.parse(await fs.readFile(lottoDbPath, 'utf8'));
       const currentDrawNo = getDrawNoForDate(new Date());
-
       const currentWeekData = Object.values(lottoDb).find(w => w.drawNo === currentDrawNo);
 
       if (currentWeekData && currentWeekData.generatedSets.length > 0) {
         console.log(`[로또 알림] ${currentDrawNo}회차 생성된 번호 ${currentWeekData.generatedSets.length}세트를 발송합니다.`);
-        const template = createLottoSetsNotificationTemplate(currentDrawNo, currentWeekData.generatedSets);
-        await sendKakaoNotifications(template);
+        const templateFn = createLottoSetsNotificationTemplate(currentDrawNo);
+        await sendKakaoNotificationsInChunks(templateFn, currentWeekData.generatedSets, 3);
       } else {
         console.log(`[로또 알림] ${currentDrawNo}회차에 해당하는 생성된 번호가 없어 발송을 건너뜁니다.`);
       }
     } catch (error) {
       console.error('[로또 알림] 번호 발송 중 오류 발생:', error);
+    }
+  }, { timezone: "Asia/Seoul" });
+
+  cron.schedule('0 9 * * *', async () => {
+    console.log('[매매 신호 알림] 매일 오전 9시: 미국 주식 전체 상태 확인을 시작합니다...');
+    const usStocks = stockConfig.us_stocks;
+    const allLatestSignals: { name: string, signal: TradingSignal }[] = [];
+
+    for (const stock of usStocks) {
+      try {
+        const response = await axios.get(`${process.env.NEXTAUTH_URL}/api/stock/${stock.ticker}`);
+        const { signals }: { signals: TradingSignal[] } = response.data;
+
+        if (signals && signals.length > 0) {
+          const latestSignal = signals[signals.length - 1];
+          allLatestSignals.push({ name: stock.ticker, signal: latestSignal });
+        }
+      } catch (error) {
+        const axiosError = error as AxiosError;
+        console.error(`[매매 신호 알림] ${stock.ticker} 상태 확인 중 오류 발생:`, axiosError.response?.data || axiosError.message);
+      }
+    }
+
+    if (allLatestSignals.length > 0) {
+      console.log(`[매매 신호 알림] ${allLatestSignals.length}개의 미국 주식 종목 상태를 확인하여 알림을 발송합니다.`);
+      await sendKakaoNotificationsInChunks(createAllStockStatusNotificationTemplate, allLatestSignals, 3);
+    } else {
+      console.log('[매매 신호 알림] 조회할 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.');
     }
   }, { timezone: "Asia/Seoul" });
 }
