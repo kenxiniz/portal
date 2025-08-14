@@ -34,15 +34,8 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
             if (logicalRange) {
               const lastIndex = data.length - 1;
               const barsVisible = logicalRange.to - logicalRange.from;
-
-              /*
-               *                * [핵심 수정] 올바른 위치 계산:
-               *                               * 1. 오른쪽 끝을 기준으로 한 상대 위치(음수)를 계산합니다.
-               *                                              * 2. 선택한 날짜를 '중앙'에 위치시키기 위해, 현재 보이는 막대 수의 '절반'만큼만 추가로 빼줍니다.
-               *                                                             */
               const positionFromRight = -(lastIndex - targetIndex);
               const finalPosition = positionFromRight + Math.floor(barsVisible / 2);
-
               chartRef.current.main.timeScale().scrollToPosition(finalPosition, true);
             }
           }
@@ -56,11 +49,20 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
         return;
       }
 
+      /* [수정] 화면 너비에 따라 차트 높이를 동적으로 결정합니다. */
+      const isPcScreen = window.innerWidth >= 1024;
+      const mainChartHeight = isPcScreen ? 400 : 250;
+      const rsiChartHeight = isPcScreen ? 120 : 100;
+
+      /* [수정] 차트를 감싸는 div의 높이도 동적으로 설정합니다. */
+      chartContainerRef.current.style.height = `${mainChartHeight}px`;
+      rsiChartContainerRef.current.style.height = `${rsiChartHeight}px`;
+
       const mainChart = createChart(chartContainerRef.current, {
         layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: gridStrokeColor },
         grid: { vertLines: { color: 'rgba(70, 130, 180, 0.1)' }, horzLines: { color: 'rgba(70, 130, 180, 0.1)' } },
         width: chartContainerRef.current.clientWidth,
-        height: 250,
+        height: mainChartHeight, /* [수정] 동적으로 계산된 높이를 적용합니다. */
         timeScale: { timeVisible: true, secondsVisible: false, rightBarStaysOnScroll: false },
         crosshair: { mode: CrosshairMode.Normal },
         localization: { locale: 'ko-KR', timeFormatter: (time: Time) => new Date(time as string).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' }) },
@@ -70,7 +72,7 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
           layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: gridStrokeColor },
           grid: { vertLines: { color: 'rgba(70, 130, 180, 0.1)' }, horzLines: { color: 'rgba(70, 130, 180, 0.1)' } },
           width: rsiChartContainerRef.current.clientWidth,
-          height: 100,
+          height: rsiChartHeight, /* [수정] 동적으로 계산된 높이를 적용합니다. */
           timeScale: { visible: false },
           crosshair: { mode: CrosshairMode.Normal },
           handleScroll: false,
@@ -90,14 +92,11 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
 
         const candlestickChartData: CandlestickData[] = data.map((d) => {
           let color: string | undefined = undefined;
-
           const buySignalPeriod = signals.find(s => s.startDate && s.date && d.date >= s.startDate && d.date <= s.date && s.type.includes('buy'));
           const sellSignalDay = signals.find(s => s.date === d.date && s.type === 'sell');
-
           if (buySignalPeriod || sellSignalDay) {
             color = '#FFEB3B';
           }
-
           return { time: d.date as Time, open: d.open, high: d.high, low: d.low, close: d.close, color: color };
         });
 
@@ -118,16 +117,14 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
         if (data.length > 1) {
           const lastDate = data.at(-1)!.date;
           const fromDate = new Date(lastDate);
-
           const screenWidth = window.innerWidth;
-          if (screenWidth >= 1024) { /* PC */
+          if (screenWidth >= 1024) {
             fromDate.setMonth(fromDate.getMonth() - 8);
-          } else if (screenWidth >= 768) { /* 태블릿 */
+          } else if (screenWidth >= 768) {
             fromDate.setMonth(fromDate.getMonth() - 4);
-          } else { /* 모바일 */
+          } else {
             fromDate.setMonth(fromDate.getMonth() - 2);
           }
-
           mainChart.timeScale().setVisibleRange({
             from: fromDate.toISOString().split('T')[0] as Time,
             to: lastDate as Time,
@@ -156,8 +153,9 @@ export const StockChartDisplay = forwardRef<StockChartDisplayHandles, StockChart
 
     return (
       <div className="flex flex-col gap-1">
-      <div ref={chartContainerRef} style={{ width: '100%', height: '250px' }} />
-      <div ref={rsiChartContainerRef} style={{ width: '100%', height: '100px' }} />
+      {/* [수정] 초기 높이는 CSS/Tailwind로 관리하거나 비워두고 useEffect에서 동적으로 설정합니다. */}
+      <div ref={chartContainerRef} style={{ width: '100%' }} />
+      <div ref={rsiChartContainerRef} style={{ width: '100%' }} />
       </div>
     );
   }
