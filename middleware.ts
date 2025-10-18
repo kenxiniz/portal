@@ -11,7 +11,8 @@ const getBaseUrl = () => {
   if (process.env.APP_ENV === 'docker') {
     return 'https://kenxin.org';
   }
-  return 'https://dev.kenxin.org';
+  return 'https://kenxin.org';
+  //return 'https://dev.kenxin.org';
 }
 
 export function middleware(request: NextRequest) {

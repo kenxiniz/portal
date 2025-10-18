@@ -1,5 +1,7 @@
 {
   "us_stocks": [
+    { "ticker": "DPST", "exchange": "AMS" },
+    { "ticker": "SBIT", "exchange": "AMS" },
     { "ticker": "TSLA", "exchange": "NAS" },
     { "ticker": "NVDA", "exchange": "NAS" },
     { "ticker": "TMV",  "exchange": "AMS" },

@@ -84,26 +84,26 @@ export async function GET(request: Request) {
         const response = await fetch(
           `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&outputsize=full&apikey=${apiKey}`
         );
-          if (!response.ok) throw new Error(`API 서버 오류! Status: ${response.status}`);
+        if (!response.ok) throw new Error(`API 서버 오류! Status: ${response.status}`);
 
-          const data: AlphaVantageResponse = await response.json();
+        const data: AlphaVantageResponse = await response.json();
 
-          if (data["Note"] && data["Note"].includes("API call frequency")) {
-            lastError = `API 키(...${apiKey.slice(-4)})의 사용량을 초과했습니다.`;
-            console.warn(`[${ticker}] ${lastError} 다음 키로 재시도합니다.`);
-            continue; 
-          }
+        if (data["Note"] && data["Note"].includes("API call frequency")) {
+          lastError = `API 키(...${apiKey.slice(-4)})의 사용량을 초과했습니다.`;
+          console.warn(`[${ticker}] ${lastError} 다음 키로 재시도합니다.`);
+          continue;
+        }
 
-          if (data["Error Message"]) {
-            lastError = `API 오류: ${data["Error Message"]}`;
-            throw new Error(lastError);
-          }
+        if (data["Error Message"]) {
+          lastError = `API 오류: ${data["Error Message"]}`;
+          throw new Error(lastError);
+        }
 
-          if (data['Time Series (Daily)']) {
-            console.log(`✅ [${ticker}] Key ...${apiKey.slice(-4)}로 데이터 조회 성공!`);
-            successfulData = data;
-            break; 
-          }
+        if (data['Time Series (Daily)']) {
+          console.log(`✅ [${ticker}] Key ...${apiKey.slice(-4)}로 데이터 조회 성공!`);
+          successfulData = data;
+          break;
+        }
 
       } catch (e: unknown) {
         lastError = e instanceof Error ? e.message : '알 수 없는 오류 발생';

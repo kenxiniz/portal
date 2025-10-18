@@ -20,6 +20,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# [ADDED] Accept the APP_ENV build argument
+ARG APP_ENV
+# [ADDED] Make it available as an environment variable for the build process
+ENV APP_ENV=${APP_ENV}
+
 # 'deps' 스테이지에서 설치된 node_modules를 그대로 복사
 COPY --from=deps /app/node_modules ./node_modules
 
