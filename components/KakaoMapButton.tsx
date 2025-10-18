@@ -19,4 +19,3 @@ export default function KakaoMapButton({ address }: Props) {
     </button>
   );
 }
-

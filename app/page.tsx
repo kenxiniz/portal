@@ -3,7 +3,16 @@ import Image from "next/image";
 import Link from "next/link";
 import styles from "./page.module.css";
 /* [수정] Wallet 아이콘 추가 */
-import { KeyRound, Users, Building2, LineChart, TrendingUp, BarChart3, Ticket, Wallet } from "lucide-react";
+import {
+  KeyRound,
+  Users,
+  Building2,
+  LineChart,
+  TrendingUp,
+  BarChart3,
+  Ticket,
+  Wallet,
+} from "lucide-react";
 
 export const metadata = {
   title: "깐부 프로젝트",
@@ -13,66 +22,65 @@ export const metadata = {
 export default function Home() {
   return (
     <div className={styles.page}>
-    <main className={styles.main}>
-    <div className={styles.logoContainer}>
-    <Image
-    className={styles.logo}
-    src="/logo.png"
-    alt="Next.js logo"
-    width={500}
-    height={500}
-    priority
-    />
-    </div>
+      <main className={styles.main}>
+        <div className={styles.logoContainer}>
+          <Image
+            className={styles.logo}
+            src="/logo.png"
+            alt="Next.js logo"
+            width={500}
+            height={500}
+            priority
+          />
+        </div>
 
-    <div className="text-center">
-    <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100">
-    깐부 자산 포트폴리오
-    </h1>
-    <p className="mt-2 text-lg text-slate-600 dark:text-slate-400">
-    당신의 포트폴리오를 스마트하게 분석하세요
-    </p>
-    </div>
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100">
+            깐부 자산 포트폴리오
+          </h1>
+          <p className="mt-2 text-lg text-slate-600 dark:text-slate-400">
+            당신의 포트폴리오를 스마트하게 분석하세요
+          </p>
+        </div>
 
-    <div className={styles.ctas}>
-    <Link href="/my-properties" className={styles.primary}>
-    <Building2 className={styles.ctaIcon} />
-    내 부동산
-    </Link>
-    <Link href="/stock" className={styles.primary}>
-    <LineChart className={styles.ctaIcon} />
-    미국 주식
-    </Link>
-    <Link href="/kis-stock" className={styles.primary}>
-    <TrendingUp className={styles.ctaIcon} />
-    한투 주식
-    </Link>
-    <Link href="/k-stock" className={styles.primary}>
-    <BarChart3 className={styles.ctaIcon} />
-    K-주식
-    </Link>
-    <Link href="/lotto" className={styles.primary}>
-    <Ticket className={styles.ctaIcon} />
-    로또 추첨
-    </Link>
-    </div>
-    </main>
+        <div className={styles.ctas}>
+          <Link href="/my-properties" className={styles.primary}>
+            <Building2 className={styles.ctaIcon} />내 부동산
+          </Link>
+          <Link href="/stock" className={styles.primary}>
+            <LineChart className={styles.ctaIcon} />
+            미국 주식
+          </Link>
+          <Link href="/kis-stock" className={styles.primary}>
+            <TrendingUp className={styles.ctaIcon} />
+            한투 주식
+          </Link>
+          <Link href="/k-stock" className={styles.primary}>
+            <BarChart3 className={styles.ctaIcon} />
+            K-주식
+          </Link>
+          <Link href="/lotto" className={styles.primary}>
+            <Ticket className={styles.ctaIcon} />
+            로또 추첨
+          </Link>
+        </div>
+      </main>
 
-    <footer className={styles.footer}>
-    {/* [추가] AWS 비용 페이지로 가는 링크 */}
-    <Link href="/aws-cost" className={styles.footerLink}>
-    <Wallet className={styles.footerIcon} />
-    운영  비용
-    </Link>
-    <Link href="/get-token" className={styles.footerLink}>
-    <KeyRound className={styles.footerIcon} />
-    토큰 발급
-    </Link>
-    <Link href="/api/friends" className={styles.footerLink} target="_blank">
-    <Users className={styles.footerIcon} />
-    친구 UUID 확인
-    </Link>
-    </footer>
+      <footer className={styles.footer}>
+        {/* [추가] AWS 비용 페이지로 가는 링크 */}
+        <Link href="/aws-cost" className={styles.footerLink}>
+          <Wallet className={styles.footerIcon} />
+          운영 비용
+        </Link>
+        <Link href="/get-token" className={styles.footerLink}>
+          <KeyRound className={styles.footerIcon} />
+          토큰 발급
+        </Link>
+        <Link href="/api/friends" className={styles.footerLink} target="_blank">
+          <Users className={styles.footerIcon} />
+          친구 UUID 확인
+        </Link>
+      </footer>
     </div>
   );
 }
