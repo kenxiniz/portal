@@ -1,5 +1,6 @@
 /* lib/stockUtils.ts */
 
+// --- Existing StockDataPoint & TradingSignal Interfaces (Keep as is) ---
 export interface StockDataPoint {
   date: string /* YYYY-MM-DD 형식의 문자열 */;
   open: number;
@@ -7,8 +8,9 @@ export interface StockDataPoint {
   low: number;
   close: number;
   volume: number;
-  rsi?: number;
+  rsi?: number; // Optional
   bollingerBands?: {
+    // Optional
     middle: number;
     upper: number;
     lower: number;
@@ -26,18 +28,32 @@ export interface TradingSignal {
   realizedPrice?: number;
 }
 
+// --- ✅ [수정] 아래 타입을 추가하고 인터페이스를 수정합니다 ---
+/**
+ * Represents the structure for storing Gemini AI advice, including error status.
+ */
+export interface AdviceObject {
+  error: boolean; // True if generation failed, false otherwise
+  message: string; // The advice text or the error details
+}
+
 export interface TickerState {
   data: StockDataPoint[] | null;
   loading: boolean;
   error: string | null;
   signals: TradingSignal[];
+  advice: AdviceObject | null; // Changed from string | null
 }
 
 export interface CachedStockData {
   lastFetch: string;
   data: StockDataPoint[];
+  advice?: AdviceObject | null; // Changed from string | null (optional)
 }
+// --- ✅ [수정] 여기까지 수정 ---
 
+// --- Existing functions (calculateRSI, calculateBollingerBands, analyzeAllTradingSignals) ---
+// (Keep existing function code with previous fixes)
 export const calculateRSI = (
   data: StockDataPoint[],
   period: number = 14,
@@ -46,23 +62,46 @@ export const calculateRSI = (
   const rsiData = [...data];
   let avgGain = 0,
     avgLoss = 0;
+  // Initialize avgGain and avgLoss for the first period
   for (let i = 1; i <= period; i++) {
+    // Add checks for data existence
+    if (!rsiData[i] || !rsiData[i - 1]) continue;
     const diff = rsiData[i].close - rsiData[i - 1].close;
     if (diff > 0) avgGain += diff;
     else avgLoss += Math.abs(diff);
   }
-  avgGain /= period;
-  avgLoss /= period;
-  rsiData[period].rsi =
-    100 - 100 / (1 + (avgLoss === 0 ? Infinity : avgGain / avgLoss));
+  // Avoid division by zero if period is 0 or less (though unlikely with default)
+  if (period > 0) {
+    avgGain /= period;
+    avgLoss /= period;
+  }
+
+  // Calculate first RSI value
+  if (rsiData[period]) {
+    // Check if rsiData[period] exists
+    rsiData[period].rsi =
+      100 - 100 / (1 + (avgLoss === 0 ? Infinity : avgGain / avgLoss));
+  }
+
+  // Calculate subsequent RSI values using Wilder's smoothing method
   for (let i = period + 1; i < rsiData.length; i++) {
+    // Add checks for data existence
+    if (!rsiData[i] || !rsiData[i - 1]) continue;
     const diff = rsiData[i].close - rsiData[i - 1].close;
     const gain = diff > 0 ? diff : 0;
     const loss = diff < 0 ? Math.abs(diff) : 0;
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-    rsiData[i].rsi =
-      100 - 100 / (1 + (avgLoss === 0 ? Infinity : avgGain / avgLoss));
+
+    // Avoid division by zero if period is 0 or less
+    if (period > 0) {
+      avgGain = (avgGain * (period - 1) + gain) / period;
+      avgLoss = (avgLoss * (period - 1) + loss) / period;
+    }
+
+    if (rsiData[i]) {
+      // Check if rsiData[i] exists
+      rsiData[i].rsi =
+        100 - 100 / (1 + (avgLoss === 0 ? Infinity : avgGain / avgLoss));
+    }
   }
   return rsiData;
 };
@@ -72,21 +111,41 @@ export const calculateBollingerBands = (
   period: number = 20,
   stdDev: number = 2,
 ): StockDataPoint[] => {
-  if (data.length < period) return data;
-  const bbData = [...data];
+  if (data.length < period) return data; // Not enough data for calculation
+
+  const bbData = [...data]; // Create a copy to avoid mutating original data
+
   for (let i = period - 1; i < bbData.length; i++) {
+    // Get the slice of data for the current period
     const slice = bbData.slice(i - period + 1, i + 1);
+
+    // Calculate the sum of closing prices in the slice
     const sum = slice.reduce((acc, val) => acc + val.close, 0);
-    const middle = sum / period;
+
+    // Calculate the middle band (Simple Moving Average)
+    // Avoid division by zero
+    const middle = period > 0 ? sum / period : 0;
+
+    // Calculate the variance
+    // Avoid division by zero
     const variance =
-      slice.reduce((acc, val) => acc + Math.pow(val.close - middle, 2), 0) /
-      period;
+      period > 0
+        ? slice.reduce((acc, val) => acc + Math.pow(val.close - middle, 2), 0) /
+          period
+        : 0;
+
+    // Calculate the standard deviation
     const standardDeviation = Math.sqrt(variance);
-    bbData[i].bollingerBands = {
-      middle: middle,
-      upper: middle + standardDeviation * stdDev,
-      lower: middle - standardDeviation * stdDev,
-    };
+
+    if (bbData[i]) {
+      // Check if bbData[i] exists
+      // Calculate upper and lower bands
+      bbData[i].bollingerBands = {
+        middle: middle,
+        upper: middle + standardDeviation * stdDev,
+        lower: middle - standardDeviation * stdDev,
+      };
+    }
   }
   return bbData;
 };
@@ -94,7 +153,7 @@ export const calculateBollingerBands = (
 export const analyzeAllTradingSignals = (
   data: StockDataPoint[],
 ): TradingSignal[] => {
-  if (data.length === 0) return [];
+  if (data.length === 0) return []; // Return empty if no data
 
   const signals: TradingSignal[] = [];
   let lastBuySignal: TradingSignal | null = null;
@@ -113,6 +172,16 @@ export const analyzeAllTradingSignals = (
   for (let i = 1; i < data.length; i++) {
     const currentPoint = data[i];
     const prevPoint = data[i - 1];
+
+    // Ensure RSI exists for *both* points before proceeding
+    // Also check if points themselves exist
+    if (
+      !currentPoint ||
+      !prevPoint ||
+      currentPoint.rsi === undefined ||
+      prevPoint.rsi === undefined
+    )
+      continue;
 
     /* --- 쌍바닥 (매수) 신호 로직 --- */
     if (potentialSecondTrough && firstTrough) {
@@ -137,22 +206,34 @@ export const analyzeAllTradingSignals = (
 
     if (!potentialSecondTrough) {
       if (!firstTrough) {
-        if (prevPoint.rsi! < 30 && currentPoint.rsi! > prevPoint.rsi!) {
+        if (prevPoint.rsi < 30 && currentPoint.rsi > prevPoint.rsi) {
           firstTrough = prevPoint;
           firstTroughIndex = i - 1;
         }
       } else {
-        const daysSinceFirstTrough = i - firstTroughIndex!;
-        if (currentPoint.rsi! < firstTrough.rsi!) {
+        // Ensure firstTroughIndex is not null before calculating daysSinceFirstTrough
+        if (firstTroughIndex === null) {
+          firstTrough = null; // Should not happen if firstTrough is set, but defensive check
+          continue;
+        }
+        const daysSinceFirstTrough = i - firstTroughIndex;
+
+        // Check if firstTrough.rsi is defined before comparing
+        if (
+          firstTrough.rsi !== undefined &&
+          currentPoint.rsi < firstTrough.rsi
+        ) {
           firstTrough = null;
           firstTroughIndex = null;
         } else if (daysSinceFirstTrough > 90) {
           firstTrough = null;
           firstTroughIndex = null;
         } else if (daysSinceFirstTrough > 5) {
+          // Check if firstTrough.rsi is defined before comparing
           if (
+            firstTrough.rsi !== undefined &&
             currentPoint.close < firstTrough.close &&
-            currentPoint.rsi! > firstTrough.rsi!
+            currentPoint.rsi > firstTrough.rsi // Bullish Divergence
           ) {
             potentialSecondTrough = currentPoint;
           }
@@ -183,22 +264,31 @@ export const analyzeAllTradingSignals = (
 
     if (!potentialSecondPeak) {
       if (!firstPeak) {
-        if (prevPoint.rsi! > 70 && currentPoint.rsi! < prevPoint.rsi!) {
+        if (prevPoint.rsi > 70 && currentPoint.rsi < prevPoint.rsi) {
           firstPeak = prevPoint;
           firstPeakIndex = i - 1;
         }
       } else {
-        const daysSinceFirstPeak = i - firstPeakIndex!;
-        if (currentPoint.rsi! > firstPeak.rsi!) {
+        // Ensure firstPeakIndex is not null
+        if (firstPeakIndex === null) {
+          firstPeak = null;
+          continue;
+        }
+        const daysSinceFirstPeak = i - firstPeakIndex;
+
+        // Check if firstPeak.rsi is defined before comparing
+        if (firstPeak.rsi !== undefined && currentPoint.rsi > firstPeak.rsi) {
           firstPeak = null;
           firstPeakIndex = null;
         } else if (daysSinceFirstPeak > 90) {
           firstPeak = null;
           firstPeakIndex = null;
         } else if (daysSinceFirstPeak > 5) {
+          // Check if firstPeak.rsi is defined before comparing
           if (
+            firstPeak.rsi !== undefined &&
             currentPoint.close > firstPeak.close &&
-            currentPoint.rsi! < firstPeak.rsi!
+            currentPoint.rsi < firstPeak.rsi // Bearish Divergence
           ) {
             potentialSecondPeak = currentPoint;
           }
@@ -206,21 +296,18 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* ---
-     * 수익
-     * 실현
-     * 신호
-     * 로직
-     * ---
-     *  */
+    /* --- 수익 실현 (Sell) 신호 로직 --- */
     if (currentPoint.bollingerBands) {
+      // Check if bands exist
+      // Check lastBuySignal and its entryPrice before using them
       if (
         lastBuySignal &&
+        lastBuySignal.entryPrice !== undefined &&
         currentPoint.close >= currentPoint.bollingerBands.upper
       ) {
         const profitRate =
-          ((currentPoint.close - lastBuySignal.entryPrice!) /
-            lastBuySignal.entryPrice!) *
+          ((currentPoint.close - lastBuySignal.entryPrice) /
+            lastBuySignal.entryPrice) *
           100;
         signals.push({
           date: currentPoint.date,
@@ -231,13 +318,16 @@ export const analyzeAllTradingSignals = (
           details: `BB상단: ${currentPoint.bollingerBands.upper.toFixed(2)}`,
         });
         lastBuySignal = null;
-      } else if (
+      }
+      // Check lastInverseBuySignal and its entryPrice before using them
+      else if (
         lastInverseBuySignal &&
+        lastInverseBuySignal.entryPrice !== undefined &&
         currentPoint.close <= currentPoint.bollingerBands.lower
       ) {
         const profitRate =
-          ((lastInverseBuySignal.entryPrice! - currentPoint.close) /
-            lastInverseBuySignal.entryPrice!) *
+          ((lastInverseBuySignal.entryPrice - currentPoint.close) /
+            lastInverseBuySignal.entryPrice) *
           100;
         signals.push({
           date: currentPoint.date,
@@ -252,23 +342,34 @@ export const analyzeAllTradingSignals = (
     }
   }
 
-  const uniqueSignals = Array.from(
-    new Map(signals.map((s) => [`${s.date}-${s.reason}`, s])).values(),
-  );
+  // Ensure signals are unique per date and reason
+  const uniqueSignalsMap = new Map<string, TradingSignal>();
+  signals.forEach((s) => {
+    uniqueSignalsMap.set(`${s.date}-${s.reason}`, s);
+  });
+  const uniqueSignals = Array.from(uniqueSignalsMap.values());
 
+  // Add a final 'hold' signal if needed
   if (data.length > 0) {
+    // Safely access the last element's date
+    const lastDataPointDate = data[data.length - 1]?.date;
     const lastSignalDate =
-      uniqueSignals.length > 0 ? uniqueSignals.at(-1)!.date : null;
-    if (lastSignalDate !== data.at(-1)!.date) {
+      uniqueSignals.length > 0
+        ? uniqueSignals[uniqueSignals.length - 1]?.date
+        : null;
+
+    if (lastDataPointDate && lastSignalDate !== lastDataPointDate) {
       uniqueSignals.push({
-        date: data.at(-1)!.date,
+        date: lastDataPointDate,
         type: "hold",
         reason: "관망 (중립 구간)",
       });
     }
   }
 
+  // Sort signals chronologically
   return uniqueSignals.sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
   );
 };
+// --- End of analyzeAllTradingSignals function ---
