@@ -1,21 +1,17 @@
 /* /app/api/kisStock/[ticker]/route.ts */
+// NOTE: This file ONLY returns data and signals. Advice is handled by /api/advice
 
 import { NextResponse } from "next/server";
 import path from "path";
 import fs from "fs/promises";
-// Remove GoogleGenerativeAI imports if no longer needed here
-// import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 import {
   StockDataPoint,
   CachedStockData,
-  AdviceObject, // Import AdviceObject type
   calculateRSI,
   calculateBollingerBands,
   analyzeAllTradingSignals,
 } from "@/lib/stockUtils";
 import { getDailyStockData } from "@/lib/kisApi";
-// ✅ [추가] Import the function from the new file
-import { getGeminiAdvice } from "@/lib/geminiUtils";
 
 const cacheDir = path.join(process.cwd(), ".cache");
 const stockCachePath = path.join(cacheDir, "kis-stock-cache.json");
@@ -24,7 +20,6 @@ interface StockCache {
   [key: string]: CachedStockData;
 }
 
-// --- Existing read/writeStockCache functions (Keep as is) ---
 async function readStockCache(): Promise<StockCache> {
   try {
     const fileContent = await fs.readFile(stockCachePath, "utf-8");
@@ -41,11 +36,10 @@ async function writeStockCache(data: StockCache): Promise<void> {
     console.error("Error writing KIS stock cache file:", error);
   }
 }
-// --- End of read/writeStockCache functions ---
 
-// --- ❌ [삭제] getGeminiAdvice function is now moved to lib/geminiUtils.ts ---
-
+// FIXED: Kept the original function signature (request: Request)
 export async function GET(request: Request) {
+  // FIXED: Kept the original URL parsing logic
   const url = new URL(request.url);
   const pathParts = url.pathname.split("/");
   const ticker = pathParts[pathParts.length - 1];
@@ -59,58 +53,24 @@ export async function GET(request: Request) {
   const today = new Date().toISOString().split("T")[0];
 
   let rawData: StockDataPoint[];
-  let adviceResult: AdviceObject | null = null;
-  let isKisCacheMiss = false;
-  let regenerateAdvice = false;
+  let signals;
 
-  console.log(`[${ticker}] Starting GET request handler (KIS Stock).`);
-  // 1. Load or Fetch KIS Data
+  console.log(
+    `[${ticker}] Starting GET request handler (KIS Stock - DATA ONLY).`,
+  );
+
   if (cachedTickerData && cachedTickerData.lastFetch === today) {
     console.log(
-      `✅ [${ticker}] KIS CACHE HIT: Loading raw data from cache file.`,
+      `✅ [${ticker}] KIS CACHE HIT: Loading raw data and signals from cache file.`,
     );
     rawData = cachedTickerData.data;
-    adviceResult = cachedTickerData.advice || null; // Load cached advice object (or null)
-    console.log(`[${ticker}] Loaded from cache - Advice value:`, adviceResult); // Log the loaded value
-
-    // --- ✅ [수정] Regeneration condition ---
-    // Regenerate if advice is missing, is a string (old format), or is an error object
-    if (
-      !adviceResult ||
-      typeof adviceResult === "string" ||
-      adviceResult.error === true
-    ) {
-      if (!adviceResult) {
-        console.log(
-          `⚠️ [${ticker}] GEMINI CACHE INFO: Advice is missing from cache. Will generate.`,
-        );
-      } else if (typeof adviceResult === "string") {
-        console.warn(
-          `🔄 [${ticker}] GEMINI REGENERATION NEEDED: Cached advice is in old string format. Will regenerate.`,
-        ); // New log for string format
-      } else {
-        // adviceResult.error === true
-        console.warn(
-          `🔄 [${ticker}] GEMINI REGENERATION NEEDED: Cached advice indicates a previous error. Will regenerate.`,
-        );
-      }
-      regenerateAdvice = true; // Mark for regeneration in all these cases
-    } else {
-      // adviceResult exists and adviceResult.error is false
-      console.log(
-        `✅ [${ticker}] GEMINI CACHE HIT: Using valid cached advice object.`,
-      );
-      regenerateAdvice = false; // Do not regenerate
-    }
-    // --- ✅ [수정] End Regeneration condition ---
+    signals =
+      cachedTickerData.signals ||
+      analyzeAllTradingSignals(calculateBollingerBands(calculateRSI(rawData)));
   } else {
-    // KIS Cache Miss: Fetch new KIS data
     console.log(
       `❌ [${ticker}] KIS CACHE MISS: Fetching new data from KIS API.`,
     );
-    isKisCacheMiss = true;
-    regenerateAdvice = true; // Always regenerate advice on KIS cache miss
-    // ... (rest of the else block remains the same) ...
     try {
       console.log(`[${ticker}] Calling getDailyStockData...`);
       rawData = await getDailyStockData(ticker);
@@ -124,66 +84,25 @@ export async function GET(request: Request) {
         { status: 500 },
       );
     }
+
+    console.log(`[${ticker}] Calculating indicators and signals...`);
+    rawData = calculateBollingerBands(calculateRSI(rawData));
+    signals = analyzeAllTradingSignals(rawData);
+    console.log(`[${ticker}] Indicators and signals calculated.`);
+
+    stockCache[ticker] = {
+      lastFetch: today,
+      data: rawData,
+      signals: signals,
+      advice: cachedTickerData?.advice || null, // Preserve old advice
+    };
+    await writeStockCache(stockCache);
+    console.log(`💾 [${ticker}] CACHE WRITE: Saved new KIS data and signals.`);
   }
 
-  // 2. Calculate Indicators and Signals
-  console.log(`[${ticker}] Calculating indicators and signals...`);
-  const dataWithIndicators = calculateBollingerBands(calculateRSI(rawData));
-  const signals = analyzeAllTradingSignals(dataWithIndicators);
-  console.log(`[${ticker}] Indicators and signals calculated.`);
-
-  // 3. Generate or Regenerate Advice if needed
-  console.log(
-    `[${ticker}] Checking if advice regeneration is needed. regenerateAdvice = ${regenerateAdvice}`,
-  );
-  if (regenerateAdvice) {
-    if (isKisCacheMiss) {
-      console.log(
-        `🤖 [${ticker}] GEMINI ADVICE: Generating new advice from Gemini due to KIS cache miss.`,
-      );
-    } else {
-      console.log(
-        `🤖 [${ticker}] GEMINI ADVICE: Regenerating advice from Gemini due to ${!adviceResult ? "missing advice" : "previous error"} in cache.`,
-      );
-    }
-
-    // ✅ [수정] Call the imported function, passing 'us' for market type
-    adviceResult = await getGeminiAdvice(signals, ticker, "us");
-    console.log(
-      `[${ticker}] Gemini advice generation function returned:`,
-      adviceResult,
-    );
-
-    if (adviceResult !== null) {
-      console.log(
-        `[${ticker}] Preparing to write cache with new adviceResult...`,
-      );
-      stockCache[ticker] = {
-        lastFetch: today,
-        data: rawData,
-        advice: adviceResult,
-      };
-      await writeStockCache(stockCache);
-      console.log(
-        `💾 [${ticker}] CACHE WRITE: Saved ${isKisCacheMiss ? "new KIS data and" : "updated"} advice result.`,
-      );
-    } else {
-      console.warn(
-        `[${ticker}] Advice generation returned null unexpectedly. Not updating cache.`,
-      );
-    }
-  } else {
-    console.log(
-      `[${ticker}] No regeneration needed. Using existing adviceResult from cache:`,
-      adviceResult,
-    );
-  }
-
-  // --- Response ---
-  console.log(`[${ticker}] Sending API response with advice:`, adviceResult);
+  console.log(`[${ticker}] Sending API response (data and signals only).`);
   return NextResponse.json({
-    data: dataWithIndicators,
+    data: rawData,
     signals: signals,
-    advice: adviceResult,
   });
 }

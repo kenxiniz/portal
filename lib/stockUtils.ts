@@ -42,12 +42,13 @@ export interface TickerState {
   loading: boolean;
   error: string | null;
   signals: TradingSignal[];
-  advice: AdviceObject | null; // Changed from string | null
+  // [REMOVED] advice: AdviceObject | null;
 }
 
 export interface CachedStockData {
   lastFetch: string;
   data: StockDataPoint[];
+  signals?: TradingSignal[]; // [ADDED] Signals are now part of the cache
   advice?: AdviceObject | null; // Changed from string | null (optional)
 }
 // --- ✅ [수정] 여기까지 수정 ---

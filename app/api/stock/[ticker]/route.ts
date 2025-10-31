@@ -1,4 +1,5 @@
 /* app/api/stock/[ticker]/route.ts */
+// NOTE: This file ONLY returns data and signals. Advice is handled by /api/advice
 
 import { NextResponse } from "next/server";
 import path from "path";
@@ -57,7 +58,9 @@ async function writeStockCache(data: StockCache): Promise<void> {
   }
 }
 
+// FIXED: Kept the original function signature (request: Request)
 export async function GET(request: Request) {
+  // FIXED: Kept the original URL parsing logic
   const url = new URL(request.url);
   const pathParts = url.pathname.split("/");
   const ticker = pathParts[pathParts.length - 1];
@@ -70,13 +73,24 @@ export async function GET(request: Request) {
   const cachedTickerData = stockCache[ticker];
   const today = new Date().toISOString().split("T")[0];
   let rawData: StockDataPoint[];
+  let signals; // ADDED: Store signals
+
+  console.log(
+    `[${ticker}] Starting GET request handler (AlphaVantage - DATA ONLY).`,
+  );
 
   if (cachedTickerData && cachedTickerData.lastFetch === today) {
-    console.log(`✅ [${ticker}] CACHE HIT: Loading raw data from cache file.`);
+    console.log(
+      `✅ [${ticker}] AV CACHE HIT: Loading raw data and signals from cache file.`,
+    );
     rawData = cachedTickerData.data;
+    // MODIFIED: Load signals from cache or calculate if missing
+    signals =
+      cachedTickerData.signals ||
+      analyzeAllTradingSignals(calculateBollingerBands(calculateRSI(rawData)));
   } else {
     console.log(
-      `❌ [${ticker}] CACHE MISS: Fetching new data from Alpha Vantage API.`,
+      `❌ [${ticker}] AV CACHE MISS: Fetching new data from Alpha Vantage API.`,
     );
 
     if (API_KEYS.length === 0) {
@@ -109,12 +123,12 @@ export async function GET(request: Request) {
         if (data["Note"] && data["Note"].includes("API call frequency")) {
           lastError = `API 키(...${apiKey.slice(-4)})의 사용량을 초과했습니다.`;
           console.warn(`[${ticker}] ${lastError} 다음 키로 재시도합니다.`);
-          continue;
+          continue; // Try next key
         }
 
         if (data["Error Message"]) {
           lastError = `API 오류: ${data["Error Message"]}`;
-          throw new Error(lastError);
+          throw new Error(lastError); // Stop trying keys
         }
 
         if (data["Time Series (Daily)"]) {
@@ -122,7 +136,7 @@ export async function GET(request: Request) {
             `✅ [${ticker}] Key ...${apiKey.slice(-4)}로 데이터 조회 성공!`,
           );
           successfulData = data;
-          break;
+          break; // Success
         }
       } catch (e: unknown) {
         lastError = e instanceof Error ? e.message : "알 수 없는 오류 발생";
@@ -130,7 +144,6 @@ export async function GET(request: Request) {
           `[API Route - ${ticker}] 현재 키로 조회 실패:`,
           lastError,
         );
-        break;
       }
     }
 
@@ -155,8 +168,22 @@ export async function GET(request: Request) {
       const oneYearAgo = new Date();
       oneYearAgo.setFullYear(now.getFullYear() - 1);
       rawData = allDataPoints.filter((d) => new Date(d.date) >= oneYearAgo);
-      stockCache[ticker] = { lastFetch: today, data: rawData };
+
+      // MODIFIED: Calculate signals
+      console.log(`[${ticker}] Calculating indicators and signals...`);
+      rawData = calculateBollingerBands(calculateRSI(rawData));
+      signals = analyzeAllTradingSignals(rawData);
+      console.log(`[${ticker}] Indicators and signals calculated.`);
+
+      // MODIFIED: Save data AND signals to cache
+      stockCache[ticker] = {
+        lastFetch: today,
+        data: rawData,
+        signals: signals,
+        advice: cachedTickerData?.advice || null, // Preserve old advice
+      };
       await writeStockCache(stockCache);
+      console.log(`💾 [${ticker}] CACHE WRITE: Saved new AV data and signals.`);
     } else {
       console.error(
         `[API Route - ${ticker}] 모든 API 키 시도 실패. 최종 오류: ${lastError}`,
@@ -170,7 +197,6 @@ export async function GET(request: Request) {
     }
   }
 
-  const dataWithIndicators = calculateBollingerBands(calculateRSI(rawData));
-  const signals = analyzeAllTradingSignals(dataWithIndicators);
-  return NextResponse.json({ data: dataWithIndicators, signals: signals });
+  // MODIFIED: Send response with data and signals only
+  return NextResponse.json({ data: rawData, signals: signals });
 }

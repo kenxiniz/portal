@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useRef } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Collapsible,
@@ -19,8 +19,7 @@ import {
   Sparkles, // AI icon
   AlertTriangle, // Error icon
 } from "lucide-react";
-// Make sure TickerState and TradingSignal are imported
-import { TickerState, TradingSignal } from "@/lib/stockUtils"; // Keep AdviceObject import
+import { TickerState, TradingSignal, AdviceObject } from "@/lib/stockUtils";
 import {
   StockChartDisplay,
   StockChartDisplayHandles,
@@ -36,8 +35,10 @@ import {
 } from "@/components/ui/table";
 
 interface StockCollapsibleCardProps {
-  ticker: string;
-  tickerState: TickerState; // Ensure this includes 'advice: AdviceObject | null'
+  displayName: string;
+  tickerSymbol: string;
+  apiType: "kisStock" | "kStock" | "stock"; // This prop is now correct
+  tickerState: TickerState;
   gridStrokeColor: string;
   isOpen: boolean;
   onOpenChange: () => void;
@@ -73,8 +74,10 @@ const getSignalIcon = (signal: TradingSignal) => {
 // --- End of existing helper functions ---
 
 export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
-  ticker,
-  tickerState, // This now contains 'advice' object
+  displayName,
+  tickerSymbol,
+  apiType,
+  tickerState,
   gridStrokeColor,
   isOpen,
   onOpenChange,
@@ -85,6 +88,9 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
       ? tickerState.signals.at(-1)
       : null;
   const chartRef = useRef<StockChartDisplayHandles>(null);
+
+  const [advice, setAdvice] = useState<AdviceObject | null>(null);
+  const [isAdviceLoading, setIsAdviceLoading] = useState(false);
 
   const formatPrice = (price: number | undefined) => {
     if (price === undefined || price === null) return "-";
@@ -116,7 +122,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     return "";
   };
 
-  // Ensure signals is an array before filtering
   const historicalSignals = Array.isArray(tickerState.signals)
     ? tickerState.signals.filter((s) => s.type !== "hold")
     : [];
@@ -126,21 +131,92 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     chartRef.current?.moveToDate(targetDate);
   };
 
-  // Destructure advice object for easier access
-  const adviceObject = tickerState.advice;
+  // MODIFIED: fetchAdvice now uses POST to the common /api/advice route
+  const fetchAdvice = useCallback(async () => {
+    // Prevent fetching if signals aren't loaded yet
+    if (!tickerState.signals || tickerState.signals.length === 0) {
+      setAdvice({
+        error: true,
+        message: "매매 신호 데이터가 없어 조언을 생성할 수 없습니다.",
+      });
+      return;
+    }
+
+    setIsAdviceLoading(true);
+    try {
+      // NEW: Call the single /api/advice endpoint
+      const response = await fetch(`/api/advice`, {
+        method: "POST", // Use POST
+        headers: {
+          "Content-Type": "application/json",
+        },
+        // Send all necessary info in the body
+        body: JSON.stringify({
+          ticker: tickerSymbol,
+          apiType: apiType,
+          signals: tickerState.signals, // Send signals to API
+        }),
+      });
+
+      // The API will now wait, so we expect a full response (no null)
+      const adviceData: AdviceObject = await response.json();
+
+      if (!response.ok) {
+        // Throw an error to be caught below
+        throw new Error(adviceData.message || "Advice API failed");
+      }
+
+      setAdvice(adviceData);
+    } catch (e) {
+      setAdvice({
+        error: true,
+        message: `조언 로딩 실패: ${
+          e instanceof Error ? e.message : "Unknown error"
+        }`,
+      });
+    } finally {
+      setIsAdviceLoading(false); // Stop loading when done (success or fail)
+    }
+  }, [apiType, tickerSymbol, tickerState.signals]); // Depends on signals
+
+  // useEffect to trigger advice fetch when card is opened
+  useEffect(() => {
+    // Only fetch advice if:
+    // 1. The card is open
+    // 2. Main data is loaded (!tickerState.loading)
+    // 3. There is no main data error (!tickerState.error)
+    // 4. We don't already have advice (!advice)
+    // 5. We are not already loading advice (!isAdviceLoading)
+    if (
+      isOpen &&
+      !tickerState.loading &&
+      !tickerState.error &&
+      !advice &&
+      !isAdviceLoading
+    ) {
+      fetchAdvice();
+    }
+    // REMOVED: Polling logic is gone
+  }, [
+    isOpen,
+    tickerState.loading,
+    tickerState.error,
+    advice,
+    isAdviceLoading,
+    fetchAdvice,
+  ]);
+
+  const adviceObject = advice;
   const adviceMessage = adviceObject?.message;
   const hasAdviceError = adviceObject?.error === true;
-  // Determine if only advice is loading (data might already be there)
-  const isAdviceLoading = tickerState.loading && !adviceObject;
+  const isMainDataLoading = tickerState.loading && !tickerState.data;
 
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange} className="w-full">
-      {/* ✅ [수정] Card 컴포넌트의 기본 py-6 패딩을 py-0으로 제거하여 두께를 줄입니다. */}
       <Card className="w-full bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 shadow-lg rounded-lg overflow-hidden py-0">
         <CollapsibleTrigger asChild>
           <CardHeader
             className={cn(
-              // ✅ [수정] py-4 (1rem)를 py-2 (0.5rem)로 변경하여 접힌 상태의 높이(두께)를 절반으로 줄입니다.
               "flex flex-row justify-between items-center cursor-pointer transition-colors py-2 px-4 hover:bg-slate-50 dark:hover:bg-slate-800",
               isOpen
                 ? "bg-slate-50 dark:bg-slate-800 border-b dark:border-slate-700"
@@ -149,20 +225,18 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
           >
             <CardTitle
               className={cn(
-                "text-xl font-semibold truncate mr-2", // text-xl 유지 (종목명 크기)
+                "text-xl font-semibold truncate mr-2",
                 getCardTitleClassName(),
               )}
             >
-              {ticker}
+              {displayName}
             </CardTitle>
             <div className="flex items-center space-x-2 shrink-0">
-              {/* Show general loading only if data isn't loaded yet */}
-              {tickerState.loading && !tickerState.data && (
+              {isMainDataLoading && (
                 <span className="text-xs text-blue-500 animate-pulse whitespace-nowrap">
                   데이터 로딩 중...
                 </span>
               )}
-              {/* Display error only when not loading */}
               {tickerState.error && !tickerState.loading && (
                 <span
                   className="text-xs text-red-500 whitespace-nowrap"
@@ -180,11 +254,8 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
           </CardHeader>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          {/* ✅ [수정] Card의 py-0 변경에 따라 CardContent의 패딩을 px-4 (좌우) 및
-             pt-4 (상단), pb-4 (하단)로 재설정하여 펼쳤을 때의 내부 여백을 유지합니다.
-           */}
           <CardContent className="pt-4 pb-4 px-4">
-            {/* --- Existing Signals Table (Moved up) --- */}
+            {/* --- Signals Table --- */}
             {historicalSignals.length > 0 ? (
               <div className="my-4">
                 <h4 className="text-sm font-semibold mb-2 text-slate-600 dark:text-slate-400">
@@ -255,14 +326,14 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                   </Table>
                 </div>
               </div>
-            ) : !tickerState.loading && !tickerState.error ? (
+            ) : !isMainDataLoading && !tickerState.error ? (
               <p className="text-xs text-center text-gray-500 my-4">
                 지난 분석 기간 동안 유의미한 매매 신호가 없었습니다.
               </p>
             ) : null}
             {/* --- End Signals Table --- */}
 
-            {/* --- Gemini AI Advice Section (Moved below signals) --- */}
+            {/* --- Gemini AI Advice Section --- */}
             <div
               className={cn(
                 "my-4 p-3 rounded-lg shadow-inner border",
@@ -286,18 +357,26 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                 )}
                 Gemini AI 조언 {hasAdviceError ? "(오류)" : ""}
               </h4>
-              {/* Show advice loading state specifically */}
+
+              {/* MODIFIED: This logic now correctly handles waiting */}
               {isAdviceLoading ? (
                 <p className="text-xs text-center text-gray-500 animate-pulse">
                   AI 조언을 생성 중입니다...
+                </p>
+              ) : hasAdviceError ? (
+                <p
+                  className={cn(
+                    "text-xs whitespace-pre-line",
+                    "text-red-800 dark:text-red-300",
+                  )}
+                >
+                  {adviceMessage}
                 </p>
               ) : adviceMessage ? (
                 <p
                   className={cn(
                     "text-xs whitespace-pre-line",
-                    hasAdviceError
-                      ? "text-red-800 dark:text-red-300"
-                      : "text-slate-700 dark:text-slate-300",
+                    "text-slate-700 dark:text-slate-300",
                   )}
                 >
                   {adviceMessage}
@@ -306,20 +385,20 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                 <p className="text-xs text-center text-gray-500">
                   {tickerState.error
                     ? "데이터 오류로 조언을 생성할 수 없습니다."
-                    : "조언 데이터를 사용할 수 없습니다."}
+                    : "조언을 보려면 카드를 열어주세요."}
                 </p>
               )}
             </div>
             {/* --- End Gemini AI Advice Section --- */}
 
-            {/* --- Existing Chart Display --- */}
+            {/* --- Chart Display --- */}
             {tickerState.data && !tickerState.error && (
               <StockChartDisplay
                 ref={chartRef}
                 data={tickerState.data}
                 signals={tickerState.signals}
                 gridStrokeColor={gridStrokeColor}
-                loading={tickerState.loading && !tickerState.data}
+                loading={isMainDataLoading}
                 error={null}
               />
             )}
@@ -328,7 +407,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                 차트 데이터를 불러오지 못했습니다: {tickerState.error}
               </div>
             )}
-            {tickerState.loading && !tickerState.data && (
+            {isMainDataLoading && (
               <div className="text-center text-slate-500 text-sm my-4 h-[250px] flex items-center justify-center">
                 차트 로딩 중...
               </div>

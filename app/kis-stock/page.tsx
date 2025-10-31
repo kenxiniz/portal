@@ -4,13 +4,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useThemeDetector } from "@/hooks/useThemeDetector";
-// ✅ Import AdviceObject type
-import {
-  TickerState,
-  StockDataPoint,
-  TradingSignal,
-  AdviceObject,
-} from "@/lib/stockUtils";
+import { TickerState, StockDataPoint, TradingSignal } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
 
@@ -23,10 +17,9 @@ export default function KisStockPage() {
       tickers.forEach((ticker) => {
         initialState[ticker] = {
           data: null,
-          loading: true, // Start loading initially
+          loading: true,
           error: null,
           signals: [],
-          advice: null, // ✅ Initialize advice state as AdviceObject | null
         };
       });
       return initialState;
@@ -37,10 +30,8 @@ export default function KisStockPage() {
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
 
-  // Remove isInitialLoad parameter
   const fetchStockData = useCallback(
     async (ticker: string) => {
-      // Set loading state only if it's not already loading
       if (tickerStates[ticker]?.loading !== true) {
         setTickerStates((prev) => ({
           ...prev,
@@ -49,6 +40,7 @@ export default function KisStockPage() {
       }
 
       try {
+        // MODIFIED: Fetch path uses the user-requested data route
         const response = await fetch(`/api/kisStock/${ticker}`);
         if (!response.ok) {
           const errorData = await response.json();
@@ -57,15 +49,12 @@ export default function KisStockPage() {
           );
         }
 
-        // ✅ Destructure 'advice' as AdviceObject
         const {
           data,
           signals,
-          advice, // Destructure advice object
         }: {
           data: StockDataPoint[];
           signals: TradingSignal[];
-          advice: AdviceObject | null; // Expect AdviceObject (or null)
         } = await response.json();
 
         setTickerStates((prev) => ({
@@ -73,7 +62,6 @@ export default function KisStockPage() {
           [ticker]: {
             data: data,
             signals: signals,
-            advice: advice, // ✅ Save advice object to state
             loading: false,
             error: null,
           },
@@ -85,31 +73,27 @@ export default function KisStockPage() {
         setTickerStates((prev) => ({
           ...prev,
           [ticker]: {
-            ...prev[ticker], // Keep existing data/signals if any
+            ...prev[ticker],
             loading: false,
             error: `Failed to load data for ${ticker}. Error: ${errorMessage}`,
-            advice: null, // ✅ Ensure advice is null on error
           },
         }));
       }
     },
-    [tickerStates], // Include tickerStates as dependency
+    [tickerStates],
   );
 
   useEffect(() => {
     const loadAllTickersSequentially = async () => {
       if (tickers.length > 0) {
         const firstTicker = tickers[0];
-        setOpenedTicker(firstTicker); // Open the first card
-        // Remove isInitialLoad argument
-        await fetchStockData(firstTicker); // Fetch first
+        setOpenedTicker(firstTicker);
+        await fetchStockData(firstTicker);
 
-        // Fetch rest with delay
         for (let i = 1; i < tickers.length; i++) {
           await new Promise((resolve) => setTimeout(resolve, 500));
           const ticker = tickers[i];
-          // Remove isInitialLoad argument
-          await fetchStockData(ticker); // Fetch next
+          await fetchStockData(ticker);
         }
       }
     };
@@ -123,10 +107,6 @@ export default function KisStockPage() {
   const handleOpenChange = (ticker: string) => {
     const newOpenedTicker = openedTicker === ticker ? null : ticker;
     setOpenedTicker(newOpenedTicker);
-    // Optional: Fetch only when opening if not loaded
-    // if (newOpenedTicker && !tickerStates[newOpenedTicker]?.data) {
-    //   fetchStockData(newOpenedTicker);
-    // }
   };
 
   return (
@@ -137,13 +117,14 @@ export default function KisStockPage() {
       <div className="w-full grid grid-cols-1 gap-6">
         {tickers.map((ticker) => {
           const state = tickerStates[ticker];
-          // Ensure state exists before rendering card
           if (!state) return null;
           return (
             <StockCollapsibleCard
               key={ticker}
-              ticker={ticker} // Use ticker symbol
-              tickerState={state} // Pass the whole state including advice object
+              tickerSymbol={ticker}
+              displayName={ticker}
+              apiType="kisStock" // This is used to build the advice path
+              tickerState={state}
               gridStrokeColor={gridStrokeColor}
               isOpen={openedTicker === ticker}
               onOpenChange={() => handleOpenChange(ticker)}

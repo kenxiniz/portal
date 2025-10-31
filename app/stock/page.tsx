@@ -4,13 +4,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useThemeDetector } from "@/hooks/useThemeDetector";
-// ✅ Import AdviceObject type
-import {
-  TickerState,
-  StockDataPoint,
-  TradingSignal,
-  AdviceObject,
-} from "@/lib/stockUtils";
+import { TickerState, StockDataPoint, TradingSignal } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
 
@@ -21,13 +15,11 @@ export default function StockPage() {
     () => {
       const initialState: Record<string, TickerState> = {};
       tickers.forEach((ticker) => {
-        // ✅ Initialize with advice: null
         initialState[ticker] = {
           data: null,
-          loading: true, // Start loading initially
+          loading: true,
           error: null,
           signals: [],
-          advice: null, // Initialize advice state
         };
       });
       return initialState;
@@ -38,10 +30,8 @@ export default function StockPage() {
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
 
-  // ✅ Remove isInitialLoad parameter
   const fetchStockData = useCallback(
-    async (ticker: string /* , isInitialLoad: boolean <- Removed */) => {
-      // Set loading state only if not already loading
+    async (ticker: string) => {
       if (tickerStates[ticker]?.loading !== true) {
         setTickerStates((prev) => ({
           ...prev,
@@ -50,7 +40,7 @@ export default function StockPage() {
       }
 
       try {
-        // Assuming /api/stock/[ticker] endpoint ALSO returns 'advice' object
+        // MODIFIED: Fetch path uses the user-requested data route
         const response = await fetch(`/api/stock/${ticker}`);
         if (!response.ok) {
           const errorData = await response.json();
@@ -58,15 +48,13 @@ export default function StockPage() {
             errorData.error || `HTTP error! status: ${response.status}`,
           );
         }
-        // ✅ Destructure 'advice' as AdviceObject
+
         const {
           data,
           signals,
-          advice, // Assume API provides advice object
         }: {
           data: StockDataPoint[];
           signals: TradingSignal[];
-          advice: AdviceObject | null; // Expect AdviceObject from API
         } = await response.json();
 
         setTickerStates((prev) => ({
@@ -74,7 +62,6 @@ export default function StockPage() {
           [ticker]: {
             data: data,
             signals: signals,
-            advice: advice, // ✅ Save advice object to state
             loading: false,
             error: null,
           },
@@ -89,12 +76,11 @@ export default function StockPage() {
             ...prev[ticker],
             loading: false,
             error: `Failed to load data for ${ticker}. Error: ${errorMessage}`,
-            advice: null, // ✅ Reset advice on error
           },
         }));
       }
     },
-    [tickerStates], // Include tickerStates as dependency
+    [tickerStates],
   );
 
   useEffect(() => {
@@ -102,14 +88,12 @@ export default function StockPage() {
       if (tickers.length > 0) {
         const firstTicker = tickers[0];
         setOpenedTicker(firstTicker);
-        // ✅ Remove isInitialLoad argument
-        await fetchStockData(firstTicker /* , true <- Removed */);
+        await fetchStockData(firstTicker);
 
         for (let i = 1; i < tickers.length; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 500)); // Keep delay
+          await new Promise((resolve) => setTimeout(resolve, 500));
           const ticker = tickers[i];
-          // ✅ Remove isInitialLoad argument
-          await fetchStockData(ticker /* , true <- Removed */);
+          await fetchStockData(ticker);
         }
       }
     };
@@ -123,10 +107,6 @@ export default function StockPage() {
   const handleOpenChange = (ticker: string) => {
     const newOpenedTicker = openedTicker === ticker ? null : ticker;
     setOpenedTicker(newOpenedTicker);
-    // Optional: Fetch only when opening if not loaded
-    // if (newOpenedTicker && !tickerStates[newOpenedTicker]?.data) {
-    //   fetchStockData(newOpenedTicker); // Call without isInitialLoad
-    // }
   };
 
   return (
@@ -137,13 +117,14 @@ export default function StockPage() {
       <div className="w-full grid grid-cols-1 gap-6">
         {tickers.map((ticker) => {
           const state = tickerStates[ticker];
-          // Ensure state exists before rendering card
           if (!state) return null;
           return (
             <StockCollapsibleCard
               key={ticker}
-              ticker={ticker}
-              tickerState={state} // Pass the state including advice object
+              tickerSymbol={ticker}
+              displayName={ticker}
+              apiType="stock" // This is used to build the advice path
+              tickerState={state}
               gridStrokeColor={gridStrokeColor}
               isOpen={openedTicker === ticker}
               onOpenChange={() => handleOpenChange(ticker)}
