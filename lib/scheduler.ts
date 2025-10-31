@@ -24,8 +24,9 @@ const config = {
   },
   cronSchedules: {
     updateLottoWins: "0 9 * * 0", // 매주 일요일 오전 9시
-    sendDailyLotto: "0 8 * * *", // 매일 오전 8시
-    sendDailyStockSignals: "0 9 * * *", // 매일 오전 9시
+    // ✅ [수정] "0 8 * * *" (매일 오전 8시) -> "0 8 * * 5" (금요일 오전 8시)
+    sendDailyLotto: "0 8 * * 5", // 매주 금요일 오전 8시
+    sendDailyStockSignals: "0 9 * * *", // 매일 오전 9시 (이 스케줄은 유지)
   },
   notificationChunkSize: 3, // 한 번에 보낼 알림의 최대 개수
 };
@@ -166,26 +167,31 @@ class KakaoNotificationService {
     signals: { name: string; signal: TradingSignal }[],
   ): object => ({
     object_type: "list",
-    header_title: "🇺🇸 미국 주식 현재 상태",
+    // ✅ [수정] 헤더 타이틀 변경
+    header_title: "🇺🇸 KIS 미국 주식 신호",
     header_link: {
-      web_url: `${config.apiBaseUrl}/stock`,
-      mobile_web_url: `${config.apiBaseUrl}/stock`,
+      // ✅ [수정] kis-stock 페이지로 링크
+      web_url: `${config.apiBaseUrl}/kis-stock`,
+      mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
     },
     contents: signals.map((item) => ({
       title: `[${item.name}] ${item.signal.reason}`,
       description: item.signal.details || `현재 상태: ${item.signal.type}`,
       image_url: `${config.apiBaseUrl}/lotto.png`, // TODO: 적절한 아이콘으로 변경
       link: {
-        web_url: `${config.apiBaseUrl}/stock`,
-        mobile_web_url: `${config.apiBaseUrl}/stock`,
+        // ✅ [수정] kis-stock 페이지로 링크
+        web_url: `${config.apiBaseUrl}/kis-stock`,
+        mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
       },
     })),
     buttons: [
       {
-        title: "미국 주식 페이지로 이동",
+        // ✅ [수정] 버튼 텍스트 변경
+        title: "KIS 주식 페이지로 이동",
         link: {
-          web_url: `${config.apiBaseUrl}/stock`,
-          mobile_web_url: `${config.apiBaseUrl}/stock`,
+          // ✅ [수정] kis-stock 페이지로 링크
+          web_url: `${config.apiBaseUrl}/kis-stock`,
+          mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
         },
       },
     ],
@@ -209,7 +215,7 @@ class JobScheduler {
     );
     this._scheduleJob(
       "일일 로또 번호 발송",
-      config.cronSchedules.sendDailyLotto,
+      config.cronSchedules.sendDailyLotto, // This now uses the updated schedule
       this._sendDailyLottoNumbers,
     );
     this._scheduleJob(
@@ -244,6 +250,16 @@ class JobScheduler {
   }
 
   private async _sendDailyLottoNumbers(): Promise<void> {
+    // Check if today is Friday (cron schedule handles this, but as a safeguard)
+    const today = new Date();
+    if (today.getDay() !== 5) {
+      // 0=Sunday, 1=Monday, ..., 5=Friday
+      console.log(
+        `[일일 로또 번호 발송] 오늘은 금요일이 아니므로 작업을 건너뜁니다.`,
+      );
+      return; // Skip if not Friday
+    }
+
     const lottoDb: Record<string, LottoWeek> = JSON.parse(
       await fs.readFile(config.lottoDbPath, "utf8"),
     );
@@ -274,13 +290,14 @@ class JobScheduler {
   }
 
   private async _sendDailyStockSignals(): Promise<void> {
-    const usStocks = stockConfig.us_stocks;
+    const usStocks = stockConfig.us_stocks; // Iterate over us_stocks list
     const allLatestSignals: { name: string; signal: TradingSignal }[] = [];
 
     for (const stock of usStocks) {
       try {
+        // ✅ [수정] KIS 미국 주식 API 엔드포인트 사용
         const response = await axios.get(
-          `${config.apiBaseUrl}/api/stock/${stock.ticker}`,
+          `${config.apiBaseUrl}/api/kisStock/${stock.ticker}`,
         );
         const { signals }: { signals: TradingSignal[] } = response.data;
         if (signals?.length > 0) {
@@ -292,7 +309,7 @@ class JobScheduler {
       } catch (error) {
         const axiosError = error as AxiosError;
         console.error(
-          `${stock.ticker} 상태 확인 중 오류:`,
+          `${stock.ticker} (KIS) 상태 확인 중 오류:`, // ✅ [수정] 로그에 KIS 명시
           axiosError.response?.data || axiosError.message,
         );
       }
@@ -300,14 +317,14 @@ class JobScheduler {
 
     if (allLatestSignals.length > 0) {
       console.log(
-        `${allLatestSignals.length}개의 미국 주식 종목 상태를 확인하여 알림을 발송합니다.`,
+        `${allLatestSignals.length}개의 KIS 미국 주식 종목 상태를 확인하여 알림을 발송합니다.`, // ✅ [수정] 로그 메시지 변경
       );
       const template =
         this.kakaoService.createStockStatusTemplate(allLatestSignals);
       await this.kakaoService.notify(template);
     } else {
       console.log(
-        "조회할 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.",
+        "조회할 KIS 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.", // ✅ [수정] 로그 메시지 변경
       );
     }
   }
@@ -318,6 +335,7 @@ declare global {
   var isSchedulerRunning: boolean | undefined;
 }
 
+// Keep the existing startup logic from the file
 console.log("🚀 프로덕션 환경에서 스케줄러를 초기화합니다...");
 new JobScheduler();
 global.isSchedulerRunning = true;
