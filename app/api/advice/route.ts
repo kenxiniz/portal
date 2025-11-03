@@ -1,10 +1,15 @@
 /* /app/api/advice/route.ts */
-// NEW: This is the centralized POST endpoint for generating all AI advice.
+// MODIFIED: This endpoint now reads data/signals from cache, not from POST body.
 
 import { NextResponse } from "next/server";
 import path from "path";
 import fs from "fs/promises";
-import { CachedStockData, AdviceObject, TradingSignal } from "@/lib/stockUtils";
+import {
+  CachedStockData,
+  AdviceObject,
+  TradingSignal,
+  StockDataPoint, // MODIFIED: Import StockDataPoint
+} from "@/lib/stockUtils";
 import { getGeminiAdvice } from "@/lib/geminiUtils";
 import stockConfig from "@/lib/stock.json";
 
@@ -66,10 +71,10 @@ function getCachePath(apiType: ApiType): string {
   }
 }
 
+// MODIFIED: Function signature no longer needs signals
 async function generateAndCacheAdvice(
   apiType: ApiType,
   ticker: string,
-  signals: TradingSignal[],
   stockCache: StockCache,
   cachedTickerData: CachedStockData, // Pass the specific cache entry
 ): Promise<AdviceObject> {
@@ -77,14 +82,29 @@ async function generateAndCacheAdvice(
   console.log(
     `🤖 [${ticker}/${apiType}/advice] ADVICE CACHE MISS: Generating new advice...`,
   );
+
+  // MODIFIED: Extract data from cache
+  const signals: TradingSignal[] = cachedTickerData.signals || [];
+  const fullStockData: StockDataPoint[] = cachedTickerData.data || [];
+  // Get last 7 days of data
+  const recentStockData = fullStockData.slice(-7);
+
   try {
     let newAdvice: AdviceObject;
     if (apiType === "kStock") {
       const stockName = getStockName(ticker);
-      newAdvice = await getGeminiAdvice(signals, ticker, "kr", stockName);
+      // MODIFIED: Pass recentStockData to getGeminiAdvice
+      newAdvice = await getGeminiAdvice(
+        signals,
+        recentStockData,
+        ticker,
+        "kr",
+        stockName,
+      );
     } else {
       // "stock" (AV) and "kisStock" are both 'us' market
-      newAdvice = await getGeminiAdvice(signals, ticker, "us");
+      // MODIFIED: Pass recentStockData to getGeminiAdvice
+      newAdvice = await getGeminiAdvice(signals, recentStockData, ticker, "us");
     }
 
     // Save new advice to the specific cache file
@@ -116,13 +136,14 @@ export async function POST(request: Request) {
   let body: {
     ticker: string;
     apiType: ApiType;
-    signals: TradingSignal[];
+    // MODIFIED: signals is no longer needed in the body
+    // signals: TradingSignal[];
   };
 
   try {
     body = await request.json();
   } catch (error) {
-    // FIXED: Changed 'e' to 'error' and added a log
+    // FIXED: Use the 'error' variable
     console.error("[/api/advice] Failed to parse request body:", error);
     return NextResponse.json(
       { error: "Invalid request body" },
@@ -130,12 +151,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const { ticker, apiType, signals } = body;
+  // MODIFIED: Only ticker and apiType are needed
+  const { ticker, apiType } = body;
   const progressKey = `${apiType}-${ticker}`; // Composite key for the map
 
-  if (!ticker || !apiType || !signals) {
+  if (!ticker || !apiType) {
     return NextResponse.json(
-      { error: "Missing required fields: ticker, apiType, signals" },
+      { error: "Missing required fields: ticker, apiType" },
       { status: 400 },
     );
   }
@@ -144,26 +166,22 @@ export async function POST(request: Request) {
   const stockCache = await readStockCache(cachePath);
   const cachedTickerData = stockCache[ticker];
 
-  // 1. Check for valid data cache (signals should match)
-  // This ensures the advice is for the most recent data
+  // 1. Check for valid data cache
+  // MODIFIED: We MUST have data and signals in the cache to proceed
   if (
     !cachedTickerData ||
     !cachedTickerData.data ||
     !cachedTickerData.signals
   ) {
-    // This case shouldn't happen if the frontend fetches data first, but as a safeguard.
-    // We can proceed to generate advice using signals from the POST body.
-    console.warn(
-      `[${ticker}/${apiType}/advice] Cache miss on data/signals, proceeding with signals from POST body.`,
+    console.error(
+      `[${ticker}/${apiType}/advice] ERROR: Data or signals not found in cache. Cannot generate advice.`,
     );
-    // Ensure cache entry exists to write advice to
-    if (!stockCache[ticker]) {
-      stockCache[ticker] = {
-        lastFetch: new Date().toISOString().split("T")[0], // Mark as "fetched"
-        data: [], // Data is unknown here, but that's okay for advice gen
-        signals: signals,
-      };
-    }
+    return NextResponse.json(
+      {
+        error: "Cache miss. Data/signals not found. Please fetch data first.",
+      },
+      { status: 404 },
+    );
   }
 
   // 2. Check for valid advice cache
@@ -187,12 +205,12 @@ export async function POST(request: Request) {
   }
 
   // 4. Generate new advice (if missing or error)
+  // MODIFIED: No longer passing signals from body
   const generationPromise = generateAndCacheAdvice(
     apiType,
     ticker,
-    signals,
     stockCache,
-    stockCache[ticker], // Pass the specific cache entry
+    cachedTickerData, // Pass the specific cache entry
   );
   adviceGenerationInProgress.set(progressKey, generationPromise);
 

@@ -135,10 +135,9 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   const fetchAdvice = useCallback(async () => {
     // Prevent fetching if signals aren't loaded yet
     if (!tickerState.signals || tickerState.signals.length === 0) {
-      setAdvice({
-        error: true,
-        message: "매매 신호 데이터가 없어 조언을 생성할 수 없습니다.",
-      });
+      // Don't show an error, just wait for signals to be loaded
+      // This case might happen if the card is opened before data fetch completes
+      // The useEffect will re-trigger when tickerState.loading becomes false
       return;
     }
 

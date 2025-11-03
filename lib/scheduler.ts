@@ -319,9 +319,15 @@ class JobScheduler {
       console.log(
         `${allLatestSignals.length}개의 KIS 미국 주식 종목 상태를 확인하여 알림을 발송합니다.`, // ✅ [수정] 로그 메시지 변경
       );
-      const template =
-        this.kakaoService.createStockStatusTemplate(allLatestSignals);
-      await this.kakaoService.notify(template);
+
+      // --- MODIFICATION START ---
+      // MODIFIED: Use notifyInChunks to send all signals in batches
+      await this.kakaoService.notifyInChunks(
+        this.kakaoService.createStockStatusTemplate, // Pass the template creation function
+        allLatestSignals, // Pass all collected signals
+        config.notificationChunkSize, // Use the chunk size from config (3)
+      );
+      // --- MODIFICATION END ---
     } else {
       console.log(
         "조회할 KIS 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.", // ✅ [수정] 로그 메시지 변경
@@ -332,22 +338,19 @@ class JobScheduler {
 
 // --- 4. 스케줄러 실행 (Singleton Pattern) ---
 declare global {
+  //MODIFIED: Changed from var to let/const compatible declaration
   var isSchedulerRunning: boolean | undefined;
 }
 
-// Keep the existing startup logic from the file
-console.log("🚀 프로덕션 환경에서 스케줄러를 초기화합니다...");
-new JobScheduler();
-global.isSchedulerRunning = true;
-
-/*
-if (process.env.NODE_ENV === 'production' && !global.isSchedulerRunning) {
-  console.log('🚀 프로덕션 환경에서 스케줄러를 초기화합니다...');
+// MODIFIED: Removed environment check to run in both dev and prod
+// This ensures the scheduler runs, but only once per process
+if (!global.isSchedulerRunning) {
+  // MODIFIED: Added NODE_ENV to the log for clarity
+  console.log(
+    `🚀 스케줄러를 초기화합니다... (NODE_ENV: ${process.env.NODE_ENV || "unknown"})`,
+  );
   new JobScheduler();
   global.isSchedulerRunning = true;
-} else if (process.env.NODE_ENV !== 'production') {
-  console.log('ℹ️ 개발 환경에서는 스케줄러가 자동으로 실행되지 않습니다.');
 } else {
-  console.log('ℹ️ 스케줄러가 이미 실행 중입니다.');
+  console.log("ℹ️ 스케줄러가 이미 실행 중입니다.");
 }
-*/
