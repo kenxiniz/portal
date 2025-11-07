@@ -9,6 +9,13 @@ import { getDrawNoForDate } from "./lottoUtils";
 import stockConfig from "./stock.json";
 import { TradingSignal } from "./stockUtils";
 
+// NEW: Define the type for the enhanced signal object at the top level
+type StockSignalInfo = {
+  name: string;
+  currentSignal: TradingSignal;
+  lastMeaningfulSignal: TradingSignal | undefined;
+};
+
 // --- 1. 설정 (Configuration) ---
 const config = {
   cacheDir: path.join(process.cwd(), ".cache"),
@@ -164,7 +171,7 @@ class KakaoNotificationService {
     });
 
   public createStockStatusTemplate = (
-    signals: { name: string; signal: TradingSignal }[],
+    signals: StockSignalInfo[], // MODIFIED: Use new type
   ): object => ({
     object_type: "list",
     // ✅ [수정] 헤더 타이틀 변경
@@ -174,16 +181,49 @@ class KakaoNotificationService {
       web_url: `${config.apiBaseUrl}/kis-stock`,
       mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
     },
-    contents: signals.map((item) => ({
-      title: `[${item.name}] ${item.signal.reason}`,
-      description: item.signal.details || `현재 상태: ${item.signal.type}`,
-      image_url: `${config.apiBaseUrl}/lotto.png`, // TODO: 적절한 아이콘으로 변경
-      link: {
-        // ✅ [수정] kis-stock 페이지로 링크
-        web_url: `${config.apiBaseUrl}/kis-stock`,
-        mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
-      },
-    })),
+    // MODIFIED: Update contents generation logic
+    contents: signals.map((item) => {
+      const { name, currentSignal, lastMeaningfulSignal } = item;
+
+      // Default title is the current signal
+      let title = `[${name}] ${currentSignal.reason}`;
+      let description =
+        currentSignal.details || `현재 상태: ${currentSignal.type}`; // Default description
+
+      // If there's a last meaningful signal and it's different from the current one
+      if (
+        lastMeaningfulSignal &&
+        lastMeaningfulSignal.date !== currentSignal.date
+      ) {
+        // Main title is the CURRENT signal (e.g., Hold)
+        title = `[${name}] ${currentSignal.reason}`;
+        // Description becomes the LAST meaningful signal
+        description = `최근 신호: ${lastMeaningfulSignal.reason} (${lastMeaningfulSignal.date})`;
+      } else if (
+        lastMeaningfulSignal &&
+        lastMeaningfulSignal.date === currentSignal.date
+      ) {
+        // The current signal IS the meaningful signal (e.g., a new Buy signal today)
+        title = `[${name}] ${currentSignal.reason}`;
+        description =
+          currentSignal.details || `신호 발생일: ${currentSignal.date}`;
+      } else if (!lastMeaningfulSignal) {
+        // No meaningful signals found in history
+        title = `[${name}] ${currentSignal.reason}`; // e.g., "[TSLA] 관망 (중립 구간)"
+        description = "최근 1년간 매매 신호 없음";
+      }
+
+      return {
+        title: title,
+        description: description,
+        image_url: `${config.apiBaseUrl}/lotto.png`, // TODO: 적절한 아이콘으로 변경
+        link: {
+          // ✅ [수정] kis-stock 페이지로 링크
+          web_url: `${config.apiBaseUrl}/kis-stock`,
+          mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
+        },
+      };
+    }),
     buttons: [
       {
         // ✅ [수정] 버튼 텍스트 변경
@@ -289,9 +329,12 @@ class JobScheduler {
     }
   }
 
+  // NOTE: StockSignalInfo type is already defined at the top level
+
   private async _sendDailyStockSignals(): Promise<void> {
     const usStocks = stockConfig.us_stocks; // Iterate over us_stocks list
-    const allLatestSignals: { name: string; signal: TradingSignal }[] = [];
+    // MODIFIED: Use the StockSignalInfo type defined at the top
+    const allLatestSignals: StockSignalInfo[] = [];
 
     for (const stock of usStocks) {
       try {
@@ -301,10 +344,27 @@ class JobScheduler {
         );
         const { signals }: { signals: TradingSignal[] } = response.data;
         if (signals?.length > 0) {
+          // MODIFICATION START: Get both current and last meaningful signal
+          const currentSignal = signals.at(-1)!; // This is the 'hold' or latest signal
+          const lastMeaningfulSignal = signals
+            .filter((s) => s.type !== "hold")
+            .at(-1); // Last buy/sell/inverse-buy
+
+          // --- NEW: Filter out if the last meaningful signal was 'sell' ---
+          if (lastMeaningfulSignal && lastMeaningfulSignal.type === "sell") {
+            console.log(
+              `[${stock.ticker}] 알림 건너뛰기: 마지막 신호가 '수익 실현(sell)'입니다.`,
+            );
+            continue; // Skip this stock and go to the next one
+          }
+          // --- END NEW FILTER ---
+
           allLatestSignals.push({
             name: stock.ticker,
-            signal: signals.at(-1)!,
+            currentSignal: currentSignal,
+            lastMeaningfulSignal: lastMeaningfulSignal,
           });
+          // MODIFICATION END
         }
       } catch (error) {
         const axiosError = error as AxiosError;
@@ -330,7 +390,7 @@ class JobScheduler {
       // --- MODIFICATION END ---
     } else {
       console.log(
-        "조회할 KIS 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.", // ✅ [수정] 로그 메시지 변경
+        "알림을 보낼 KIS 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.", // MODIFIED: Updated log message
       );
     }
   }
@@ -339,6 +399,7 @@ class JobScheduler {
 // --- 4. 스케줄러 실행 (Singleton Pattern) ---
 declare global {
   //MODIFIED: Changed from var to let/const compatible declaration
+  // Allow 'var' for global declaration compatibility in Node.js modules
   var isSchedulerRunning: boolean | undefined;
 }
 
@@ -347,7 +408,9 @@ declare global {
 if (!global.isSchedulerRunning) {
   // MODIFIED: Added NODE_ENV to the log for clarity
   console.log(
-    `🚀 스케줄러를 초기화합니다... (NODE_ENV: ${process.env.NODE_ENV || "unknown"})`,
+    `🚀 스케줄러를 초기화합니다... (NODE_ENV: ${
+      process.env.NODE_ENV || "unknown"
+    })`,
   );
   new JobScheduler();
   global.isSchedulerRunning = true;
