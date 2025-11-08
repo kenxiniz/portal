@@ -7,7 +7,7 @@ import {
   KeyRound,
   Users,
   Building2,
-  LineChart,
+  //LineChart,
   TrendingUp,
   BarChart3,
   Ticket,
@@ -47,17 +47,18 @@ export default function Home() {
           <Link href="/my-properties" className={styles.primary}>
             <Building2 className={styles.ctaIcon} />내 부동산
           </Link>
-          <Link href="/stock" className={styles.primary}>
+          {/* MODIFIED: Temporarily commented out as requested */}
+          {/* <Link href="/stock" className={styles.primary}>
             <LineChart className={styles.ctaIcon} />
             미국 주식
-          </Link>
+          </Link> */}
           <Link href="/kis-stock" className={styles.primary}>
             <TrendingUp className={styles.ctaIcon} />
-            한투 주식
+            마국 주식
           </Link>
           <Link href="/k-stock" className={styles.primary}>
             <BarChart3 className={styles.ctaIcon} />
-            K-주식
+            한국 ETF
           </Link>
           <Link href="/lotto" className={styles.primary}>
             <Ticket className={styles.ctaIcon} />
