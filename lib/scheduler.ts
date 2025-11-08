@@ -170,72 +170,83 @@ class KakaoNotificationService {
       ],
     });
 
-  public createStockStatusTemplate = (
-    signals: StockSignalInfo[], // MODIFIED: Use new type
-  ): object => ({
-    object_type: "list",
-    // ✅ [수정] 헤더 타이틀 변경
-    header_title: "🇺🇸 KIS 미국 주식 신호",
-    header_link: {
-      // ✅ [수정] kis-stock 페이지로 링크
-      web_url: `${config.apiBaseUrl}/kis-stock`,
-      mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
-    },
-    // MODIFIED: Update contents generation logic
-    contents: signals.map((item) => {
-      const { name, currentSignal, lastMeaningfulSignal } = item;
+  // MODIFIED: This function now formats price instead of showing the reason
+  public createStockStatusTemplate = (signals: StockSignalInfo[]): object => {
+    // NEW: Helper function for formatting price
+    // KIS US stocks are in USD
+    const formatPrice = (price: number | undefined): string => {
+      if (price === undefined || price === null) return "가격 정보 없음";
+      return `$${price.toFixed(2)}`;
+    };
 
-      // Default title is the current signal
-      let title = `[${name}] ${currentSignal.reason}`;
-      let description =
-        currentSignal.details || `현재 상태: ${currentSignal.type}`; // Default description
-
-      // If there's a last meaningful signal and it's different from the current one
-      if (
-        lastMeaningfulSignal &&
-        lastMeaningfulSignal.date !== currentSignal.date
-      ) {
-        // Main title is the CURRENT signal (e.g., Hold)
-        title = `[${name}] ${currentSignal.reason}`;
-        // Description becomes the LAST meaningful signal
-        description = `최근 신호: ${lastMeaningfulSignal.reason} (${lastMeaningfulSignal.date})`;
-      } else if (
-        lastMeaningfulSignal &&
-        lastMeaningfulSignal.date === currentSignal.date
-      ) {
-        // The current signal IS the meaningful signal (e.g., a new Buy signal today)
-        title = `[${name}] ${currentSignal.reason}`;
-        description =
-          currentSignal.details || `신호 발생일: ${currentSignal.date}`;
-      } else if (!lastMeaningfulSignal) {
-        // No meaningful signals found in history
-        title = `[${name}] ${currentSignal.reason}`; // e.g., "[TSLA] 관망 (중립 구간)"
-        description = "최근 1년간 매매 신호 없음";
+    // NEW: Helper function to get signal text based on type and price
+    const getSignalText = (signal: TradingSignal): string => {
+      switch (signal.type) {
+        case "buy":
+          return `매수 (${formatPrice(signal.entryPrice)})`;
+        case "inverse-buy":
+          return `인버스 매수 (${formatPrice(signal.entryPrice)})`;
+        case "sell":
+          // This case is filtered out, but added for robustness
+          return `수익 실현 (${formatPrice(signal.realizedPrice)})`;
+        case "hold":
+        default:
+          return signal.reason; // e.g., "관망 (중립 구간)"
       }
+    };
 
-      return {
-        title: title,
-        description: description,
-        image_url: `${config.apiBaseUrl}/lotto.png`, // TODO: 적절한 아이콘으로 변경
-        link: {
-          // ✅ [수정] kis-stock 페이지로 링크
-          web_url: `${config.apiBaseUrl}/kis-stock`,
-          mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
-        },
-      };
-    }),
-    buttons: [
-      {
-        // ✅ [수정] 버튼 텍스트 변경
-        title: "KIS 주식 페이지로 이동",
-        link: {
-          // ✅ [수정] kis-stock 페이지로 링크
-          web_url: `${config.apiBaseUrl}/kis-stock`,
-          mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
-        },
+    return {
+      object_type: "list",
+      header_title: "🇺🇸 KIS 미국 주식 신호",
+      header_link: {
+        web_url: `${config.apiBaseUrl}/kis-stock`,
+        mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
       },
-    ],
-  });
+      // MODIFIED: Update contents generation logic
+      contents: signals.map((item) => {
+        const { name, currentSignal, lastMeaningfulSignal } = item;
+
+        let title = `[${name}] ${getSignalText(currentSignal)}`;
+        let description = `신호 발생일: ${currentSignal.date}`; // Default description
+
+        // If there's a last meaningful signal and it's different from the current one (e.g., current is "Hold")
+        if (
+          lastMeaningfulSignal &&
+          lastMeaningfulSignal.date !== currentSignal.date
+        ) {
+          title = `[${name}] ${getSignalText(currentSignal)}`; // e.g., "[TSLA] 관망 (중립 구간)"
+          // Description becomes the LAST meaningful signal
+          description = `최근 신호: ${getSignalText(lastMeaningfulSignal)} (${
+            lastMeaningfulSignal.date
+          })`;
+        } else if (!lastMeaningfulSignal) {
+          // No meaningful signals ever
+          title = `[${name}] ${getSignalText(currentSignal)}`;
+          description = "최근 1년간 매매 신호 없음";
+        }
+        // If current signal IS the last meaningful signal (e.g. new buy today), the defaults are correct.
+
+        return {
+          title: title,
+          description: description,
+          image_url: `${config.apiBaseUrl}/lotto.png`, // TODO: 적절한 아이콘으로 변경
+          link: {
+            web_url: `${config.apiBaseUrl}/kis-stock`,
+            mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
+          },
+        };
+      }),
+      buttons: [
+        {
+          title: "KIS 주식 페이지로 이동",
+          link: {
+            web_url: `${config.apiBaseUrl}/kis-stock`,
+            mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
+          },
+        },
+      ],
+    };
+  };
 }
 
 // --- 3. 작업 스케줄러 (JobScheduler) ---
