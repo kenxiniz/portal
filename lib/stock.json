@@ -1,6 +1,7 @@
 {
   "us_stocks": [
-    { "ticker": "DPST", "exchange": "AMS" },
+    { "ticker": "BNKU", "exchange": "AMS" },
+    { "ticker": "BNKD", "exchange": "AMS" },
     { "ticker": "SBIT", "exchange": "AMS" },
     { "ticker": "TSLA", "exchange": "NAS" },
     { "ticker": "NVDA", "exchange": "NAS" },
@@ -12,7 +13,7 @@
     { "ticker": "YANG", "exchange": "AMS" }
   ],
   "k_stocks": [
-    { "ticker": "530105", "name": "삼성 인버스 2X 코스" },
+    { "ticker": "Q530105", "name": "삼성 인버스 2X 코스피200" },
     { "ticker": "457480", "name": "ACE 테슬라벨류체인" },
     { "ticker": "483320", "name": "ACE 엔비디아벨류체인" },
     { "ticker": "400570", "name": "KODEX 유럽탄소배출권" },
