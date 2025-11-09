@@ -44,9 +44,6 @@ export default function Home() {
         </div>
 
         <div className={styles.ctas}>
-          <Link href="/my-properties" className={styles.primary}>
-            <Building2 className={styles.ctaIcon} />내 부동산
-          </Link>
           {/* MODIFIED: Temporarily commented out as requested */}
           {/* <Link href="/stock" className={styles.primary}>
             <LineChart className={styles.ctaIcon} />
@@ -63,6 +60,9 @@ export default function Home() {
           <Link href="/lotto" className={styles.primary}>
             <Ticket className={styles.ctaIcon} />
             로또 추첨
+          </Link>
+          <Link href="/my-properties" className={styles.primary}>
+            <Building2 className={styles.ctaIcon} />내 부동산
           </Link>
         </div>
       </main>

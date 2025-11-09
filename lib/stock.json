@@ -1,14 +1,14 @@
 {
   "us_stocks": [
-    { "ticker": "BNKU", "exchange": "AMS" },
-    { "ticker": "BNKD", "exchange": "AMS" },
     { "ticker": "SBIT", "exchange": "AMS" },
     { "ticker": "TSLA", "exchange": "NAS" },
     { "ticker": "NVDA", "exchange": "NAS" },
-    { "ticker": "TMV", "exchange": "AMS" },
-    { "ticker": "TMF", "exchange": "AMS" },
     { "ticker": "SOXL", "exchange": "AMS" },
     { "ticker": "SOXS", "exchange": "AMS" },
+    { "ticker": "BNKU", "exchange": "AMS" },
+    { "ticker": "BNKD", "exchange": "AMS" },
+    { "ticker": "TMV", "exchange": "AMS" },
+    { "ticker": "TMF", "exchange": "AMS" },
     { "ticker": "YINN", "exchange": "AMS" },
     { "ticker": "YANG", "exchange": "AMS" }
   ],
