@@ -340,9 +340,63 @@ class JobScheduler {
     }
   }
 
+  /**
+   * 캐시된 주식 데이터의 advice를 초기화(null)합니다.
+   * 이렇게 하면 클라이언트가 접속할 때 새로운 조언을 생성하도록 유도할 수 있습니다.
+   * 사용자의 요청에 따라 error를 true로 설정하는 대신 아예 객체를 비워(null) 갱신을 유도합니다.
+   */
+  private async _resetAdviceCache(): Promise<void> {
+    const cacheFiles = [
+      "kis-stock-cache.json",
+      "korean-stock-cache.json",
+      "stock-cache.json",
+    ];
+
+    for (const fileName of cacheFiles) {
+      const filePath = path.join(config.cacheDir, fileName);
+      try {
+        // 파일 존재 여부 확인
+        await fs.access(filePath);
+
+        const fileContent = await fs.readFile(filePath, "utf8");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cacheData: Record<string, any> = JSON.parse(fileContent);
+        let isModified = false;
+
+        for (const ticker in cacheData) {
+          // advice가 있으면 null로 초기화하여 갱신 유도
+          if (cacheData[ticker].advice) {
+            cacheData[ticker].advice = null;
+            isModified = true;
+          }
+        }
+
+        if (isModified) {
+          await fs.writeFile(
+            filePath,
+            JSON.stringify(cacheData, null, 2),
+            "utf8",
+          );
+          console.log(`[Scheduler] Advice cache cleared for ${fileName}`);
+        }
+      } catch (error) {
+        // 파일이 없거나(ENOENT) 파싱 에러 등은 로그만 남기고 진행
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          console.warn(
+            `[Scheduler] Failed to clear advice cache for ${fileName}:`,
+            error,
+          );
+        }
+      }
+    }
+  }
+
   // NOTE: StockSignalInfo type is already defined at the top level
 
   private async _sendDailyStockSignals(): Promise<void> {
+    // ✅ [수정] 알림 발송 직전에 advice 캐시 초기화
+    await this._resetAdviceCache();
+
     const usStocks = stockConfig.us_stocks; // Iterate over us_stocks list
     // MODIFIED: Use the StockSignalInfo type defined at the top
     const allLatestSignals: StockSignalInfo[] = [];

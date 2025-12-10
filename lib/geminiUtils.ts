@@ -18,7 +18,7 @@ if (!API_KEY) {
 const genAI = new GoogleGenerativeAI(API_KEY);
 // MODIFIED: Updated to a specific model and added safety settings
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-pro", // MODIFIED: Changed model name as requested by user
+  model: "gemini-2.5-flash", // MODIFIED: Changed model name as requested by user
   safetySettings: [
     {
       category: HarmCategory.HARM_CATEGORY_HARASSMENT,
