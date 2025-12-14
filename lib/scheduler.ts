@@ -34,6 +34,7 @@ const config = {
     sendDailyLotto: "0 8 * * 5", // 매주 금요일 오전 8시
     sendDailyStockSignals: "0 9 * * *", // 매일 오전 9시
     generateAdvice: "0 8 * * 1-5", // 평일 오전 8시
+    resetAdvice: "0 7 * * 1-5", // [NEW] 평일 오전 7시 리셋
   },
   notificationChunkSize: 3, // 한 번에 보낼 알림의 최대 개수
 };
@@ -59,10 +60,19 @@ export async function generateDailyAdvice(): Promise<void> {
       try {
         console.log(`Triggering advice generation for ${stock.ticker}...`);
         // Call the advice API endpoint.
-        await axios.post(`${config.apiBaseUrl}/api/advice`, {
+        // [NEW] Capture response to check for cache status
+        const response = await axios.post(`${config.apiBaseUrl}/api/advice`, {
           ticker: stock.ticker,
           apiType: "kisStock", // US stocks use kisStock apiType here
         });
+
+        // [NEW] If advice was cached, skip the wait
+        if (response.data && response.data.isCached) {
+          console.log(
+            `✅ [${stock.ticker}] Cached advice found. Skipping 1-minute wait.`,
+          );
+          continue;
+        }
       } catch (error) {
         const axiosError = error as AxiosError;
         console.error(
@@ -312,6 +322,12 @@ class JobScheduler {
       config.cronSchedules.generateAdvice,
       generateDailyAdvice, // Use the exported function
     );
+    // [NEW] Schedule advice reset
+    this._scheduleJob(
+      "평일 어드바이스 리셋",
+      config.cronSchedules.resetAdvice,
+      this._resetAdviceCache,
+    );
   }
 
   private _scheduleJob(
@@ -332,6 +348,43 @@ class JobScheduler {
       },
       { timezone: "Asia/Seoul" },
     );
+  }
+
+  // [NEW] Advice Reset Logic
+  private async _resetAdviceCache(): Promise<void> {
+    const cachePath = path.join(config.cacheDir, "kis-stock-cache.json");
+    try {
+      console.log("🧹 Starting advice cache reset...");
+      // Check if file exists first to avoid ENOENT
+      try {
+        await fs.access(cachePath);
+      } catch {
+        console.log("ℹ️ Cache file not found. Nothing to reset.");
+        return;
+      }
+
+      const fileContent = await fs.readFile(cachePath, "utf-8");
+      const cacheData = JSON.parse(fileContent);
+
+      let resetCount = 0;
+      for (const key in cacheData) {
+        if (cacheData[key].advice) {
+          cacheData[key].advice = null; // Clear the advice
+          resetCount++;
+        }
+      }
+
+      await fs.writeFile(
+        cachePath,
+        JSON.stringify(cacheData, null, 2),
+        "utf-8",
+      );
+      console.log(
+        `✅ Advice cache reset completed. Cleared ${resetCount} entries.`,
+      );
+    } catch (error) {
+      console.error("❌ Failed to reset advice cache:", error);
+    }
   }
 
   private async _updateLottoWinningNumbers(): Promise<void> {

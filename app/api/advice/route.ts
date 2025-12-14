@@ -189,7 +189,8 @@ export async function POST(request: Request) {
     console.log(
       `✅ [${ticker}/${apiType}/advice] ADVICE CACHE HIT: Returning cached advice.`,
     );
-    return NextResponse.json(cachedTickerData.advice);
+    // [NEW] Return isCached: true so scheduler can skip waiting
+    return NextResponse.json({ ...cachedTickerData.advice, isCached: true });
   }
 
   // 3. Check if generation is already in progress
@@ -226,7 +227,11 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json(advice, {
-    status: advice.error ? 500 : 200,
-  });
+  // [NEW] Return isCached: false
+  return NextResponse.json(
+    { ...advice, isCached: false },
+    {
+      status: advice.error ? 500 : 200,
+    },
+  );
 }
