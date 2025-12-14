@@ -130,9 +130,16 @@ async function performGeminiCall(
     stockIdentifier = `${stockName || ticker}(종목코드: ${ticker})`;
   }
 
+  // Get current date for the prompt
+  const now = new Date();
+  const todayString = `${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일`;
+
+  // Modified Prompt: Added instruction to include the date
   const prompt = `
 당신은 전문 ${marketContext} 애널리스트입니다.
 ${stockIdentifier} 주식에 대한 투자 조언을 생성해주세요.
+
+**작성 기준일:** ${todayString}
 
 **최근 1주일 가격 및 RSI 데이터:**
 ${recentDataString}
@@ -143,8 +150,10 @@ ${signalsString}
 **요구사항:**
 1.  위에 제공된 **최근 1주일 데이터**와 **최근 1년 매매 신호**를 모두 조합하여 분석합니다.
 2.  분석을 기반으로 투자 의견을 **한국어**로 간결하게 제공합니다.
-3.  응답은 2-3개의 핵심 불렛포인트(bullet point)로 요약하고, 그 전에 한 문장으로 된 굵은 글씨의 요약(예: "**단기 하락 추세, 관망 필요**")을 먼저 제시해야 합니다.
-4.  다른 설명 없이 요약과 불렛포인트만 제공해주세요.
+3.  **응답의 가장 첫 줄에 "[${todayString} 기준]"이라고 작성일을 명시해주세요.**
+4.  그 다음 줄에 한 문장으로 된 굵은 글씨의 요약(예: "**단기 하락 추세, 관망 필요**")을 제시하세요.
+5.  그 아래에 2-3개의 핵심 불렛포인트(bullet point)로 상세 내용을 요약하세요.
+6.  다른 설명 없이 위 형식(날짜, 요약, 불렛포인트)만 제공해주세요.
 `;
 
   const maxRetries = 3;
