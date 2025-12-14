@@ -1,5 +1,4 @@
 /* /app/api/k-stock/[ticker]/route.ts */
-// NOTE: This file ONLY returns data and signals. Advice is handled by /api/advice
 
 import { NextResponse } from "next/server";
 import path from "path";
@@ -37,9 +36,7 @@ async function writeStockCache(data: StockCache): Promise<void> {
   }
 }
 
-// FIXED: Kept the original function signature (request: Request)
 export async function GET(request: Request) {
-  // FIXED: Kept the original URL parsing logic
   const url = new URL(request.url);
   const pathParts = url.pathname.split("/");
   const ticker = pathParts[pathParts.length - 1];
@@ -54,10 +51,10 @@ export async function GET(request: Request) {
 
   let rawData: StockDataPoint[];
   let signals;
+  // [MODIFIED] advice 변수 추가
+  const advice = cachedTickerData?.advice || null;
 
-  console.log(
-    `[${ticker}] Starting GET request handler (K-Stock - DATA ONLY).`,
-  );
+  console.log(`[${ticker}] Starting GET request handler (K-Stock).`);
 
   if (cachedTickerData && cachedTickerData.lastFetch === today) {
     console.log(
@@ -94,7 +91,7 @@ export async function GET(request: Request) {
       lastFetch: today,
       data: rawData,
       signals: signals,
-      advice: cachedTickerData?.advice || null, // Preserve old advice
+      advice: advice, // Preserve old advice
     };
     await writeStockCache(stockCache);
     console.log(
@@ -102,9 +99,11 @@ export async function GET(request: Request) {
     );
   }
 
-  console.log(`[${ticker}] Sending API response (data and signals only).`);
+  console.log(`[${ticker}] Sending API response (including advice).`);
+  // [MODIFIED] Return advice
   return NextResponse.json({
     data: rawData,
     signals: signals,
+    advice: advice,
   });
 }

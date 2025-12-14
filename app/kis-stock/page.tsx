@@ -4,7 +4,13 @@
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useThemeDetector } from "@/hooks/useThemeDetector";
-import { TickerState, StockDataPoint, TradingSignal } from "@/lib/stockUtils";
+// [MODIFIED] AdviceObject import 추가
+import {
+  TickerState,
+  StockDataPoint,
+  TradingSignal,
+  AdviceObject,
+} from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
 
@@ -20,7 +26,7 @@ export default function KisStockPage() {
           loading: true,
           error: null,
           signals: [],
-          advice: null, // [FIXED] Initialize advice as null
+          advice: null,
         };
       });
       return initialState;
@@ -30,6 +36,7 @@ export default function KisStockPage() {
   const [openedTicker, setOpenedTicker] = useState<string | null>(null);
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
+  const adviceTriggered = useRef(false);
 
   const fetchStockData = useCallback(
     async (ticker: string) => {
@@ -41,7 +48,6 @@ export default function KisStockPage() {
       }
 
       try {
-        // MODIFIED: Fetch path uses the user-requested data route
         const response = await fetch(`/api/kisStock/${ticker}`);
         if (!response.ok) {
           const errorData = await response.json();
@@ -50,12 +56,15 @@ export default function KisStockPage() {
           );
         }
 
+        // [MODIFIED] 응답에서 advice 구조 분해 할당 및 타입 명시
         const {
           data,
           signals,
+          advice,
         }: {
           data: StockDataPoint[];
           signals: TradingSignal[];
+          advice: AdviceObject | null;
         } = await response.json();
 
         setTickerStates((prev) => ({
@@ -65,7 +74,8 @@ export default function KisStockPage() {
             signals: signals,
             loading: false,
             error: null,
-            advice: prev[ticker]?.advice || null, // Preserve existing advice if any
+            // [MODIFIED] API에서 받은 advice가 있으면 사용, 없으면 기존 값 유지
+            advice: advice || prev[ticker]?.advice || null,
           },
         }));
       } catch (e: unknown) {
@@ -84,6 +94,22 @@ export default function KisStockPage() {
     },
     [tickerStates],
   );
+
+  useEffect(() => {
+    const triggerAdviceGeneration = async () => {
+      if (adviceTriggered.current) return;
+      adviceTriggered.current = true;
+
+      try {
+        console.log("Triggering background advice generation...");
+        await fetch("/api/trigger-advice", { method: "POST" });
+      } catch (error) {
+        console.error("Failed to trigger advice generation:", error);
+      }
+    };
+
+    triggerAdviceGeneration();
+  }, []);
 
   useEffect(() => {
     const loadAllTickersSequentially = async () => {
@@ -125,7 +151,7 @@ export default function KisStockPage() {
               key={ticker}
               tickerSymbol={ticker}
               displayName={ticker}
-              apiType="kisStock" // This is used to build the advice path
+              apiType="kisStock"
               tickerState={state}
               gridStrokeColor={gridStrokeColor}
               isOpen={openedTicker === ticker}

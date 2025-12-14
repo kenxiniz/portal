@@ -4,7 +4,13 @@
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useThemeDetector } from "@/hooks/useThemeDetector";
-import { TickerState, StockDataPoint, TradingSignal } from "@/lib/stockUtils";
+// [MODIFIED] AdviceObject import 추가
+import {
+  TickerState,
+  StockDataPoint,
+  TradingSignal,
+  AdviceObject,
+} from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
 
@@ -20,7 +26,7 @@ export default function StockPage() {
           loading: true,
           error: null,
           signals: [],
-          advice: null, // [FIXED] Initialize advice as null
+          advice: null,
         };
       });
       return initialState;
@@ -41,7 +47,6 @@ export default function StockPage() {
       }
 
       try {
-        // MODIFIED: Fetch path uses the user-requested data route
         const response = await fetch(`/api/stock/${ticker}`);
         if (!response.ok) {
           const errorData = await response.json();
@@ -50,12 +55,15 @@ export default function StockPage() {
           );
         }
 
+        // [MODIFIED] advice 추가
         const {
           data,
           signals,
+          advice,
         }: {
           data: StockDataPoint[];
           signals: TradingSignal[];
+          advice: AdviceObject | null;
         } = await response.json();
 
         setTickerStates((prev) => ({
@@ -65,7 +73,7 @@ export default function StockPage() {
             signals: signals,
             loading: false,
             error: null,
-            advice: prev[ticker]?.advice || null, // Preserve existing advice if any
+            advice: advice || prev[ticker]?.advice || null,
           },
         }));
       } catch (e: unknown) {
@@ -125,7 +133,7 @@ export default function StockPage() {
               key={ticker}
               tickerSymbol={ticker}
               displayName={ticker}
-              apiType="stock" // This is used to build the advice path
+              apiType="stock"
               tickerState={state}
               gridStrokeColor={gridStrokeColor}
               isOpen={openedTicker === ticker}

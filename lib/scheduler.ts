@@ -20,7 +20,7 @@ type StockSignalInfo = {
 const config = {
   cacheDir: path.join(process.cwd(), ".cache"),
   lottoDbPath: path.join(process.cwd(), ".cache", "lotto.json"),
-  apiBaseUrl: process.env.NEXTAUTH_URL,
+  apiBaseUrl: process.env.NEXTAUTH_URL || "http://localhost:3000", // Fallback for local dev
   kakao: {
     authUrl: "https://kauth.kakao.com/oauth/token",
     apiUrl: "https://kapi.kakao.com",
@@ -31,14 +31,55 @@ const config = {
   },
   cronSchedules: {
     updateLottoWins: "0 9 * * 0", // 매주 일요일 오전 9시
-    // ✅ [수정] "0 8 * * *" (매일 오전 8시) -> "0 8 * * 5" (금요일 오전 8시)
     sendDailyLotto: "0 8 * * 5", // 매주 금요일 오전 8시
-    sendDailyStockSignals: "0 9 * * *", // 매일 오전 9시 (이 스케줄은 유지)
-    // New: Schedule for daily advice generation (Weekdays at 8:00 AM)
-    generateAdvice: "0 8 * * 1-5",
+    sendDailyStockSignals: "0 9 * * *", // 매일 오전 9시
+    generateAdvice: "0 8 * * 1-5", // 평일 오전 8시
   },
   notificationChunkSize: 3, // 한 번에 보낼 알림의 최대 개수
 };
+
+// --- Global Lock for Advice Generation ---
+let isAdviceRunning = false;
+
+// --- Exported Function for Manual Trigger ---
+export async function generateDailyAdvice(): Promise<void> {
+  if (isAdviceRunning) {
+    console.log("⚠️ Advice generation is already running. Skipping trigger.");
+    return;
+  }
+
+  isAdviceRunning = true;
+  const usStocks = stockConfig.us_stocks;
+  console.log(
+    `🚀 Starting advice generation for ${usStocks.length} US stocks...`,
+  );
+
+  try {
+    for (const stock of usStocks) {
+      try {
+        console.log(`Triggering advice generation for ${stock.ticker}...`);
+        // Call the advice API endpoint.
+        await axios.post(`${config.apiBaseUrl}/api/advice`, {
+          ticker: stock.ticker,
+          apiType: "kisStock", // US stocks use kisStock apiType here
+        });
+      } catch (error) {
+        const axiosError = error as AxiosError;
+        console.error(
+          `Failed to generate advice for ${stock.ticker}:`,
+          axiosError.response?.data || axiosError.message,
+        );
+      }
+
+      // Wait for 1 minute before the next request
+      console.log("Waiting 1 minute before next request...");
+      await new Promise((resolve) => setTimeout(resolve, 60000));
+    }
+    console.log("✅ Daily advice generation completed.");
+  } finally {
+    isAdviceRunning = false;
+  }
+}
 
 // --- 2. 카카오 알림 서비스 (KakaoNotificationService) ---
 class KakaoNotificationService {
@@ -142,7 +183,7 @@ class KakaoNotificationService {
     }
   }
 
-  // Template 생성 로직은 KakaoNotificationService 내부 책임
+  // Template 생성 로직 (생략 - 기존 유지)
   public createLottoSetsTemplate =
     (drawNo: number) =>
     (sets: LottoSet[]): object => ({
@@ -172,16 +213,12 @@ class KakaoNotificationService {
       ],
     });
 
-  // MODIFIED: This function now formats price instead of showing the reason
   public createStockStatusTemplate = (signals: StockSignalInfo[]): object => {
-    // NEW: Helper function for formatting price
-    // KIS US stocks are in USD
     const formatPrice = (price: number | undefined): string => {
       if (price === undefined || price === null) return "가격 정보 없음";
       return `$${price.toFixed(2)}`;
     };
 
-    // NEW: Helper function to get signal text based on type and price
     const getSignalText = (signal: TradingSignal): string => {
       switch (signal.type) {
         case "buy":
@@ -189,11 +226,10 @@ class KakaoNotificationService {
         case "inverse-buy":
           return `인버스 매수 (${formatPrice(signal.entryPrice)})`;
         case "sell":
-          // This case is filtered out, but added for robustness
           return `수익 실현 (${formatPrice(signal.realizedPrice)})`;
         case "hold":
         default:
-          return signal.reason; // e.g., "관망 (중립 구간)"
+          return signal.reason;
       }
     };
 
@@ -204,34 +240,29 @@ class KakaoNotificationService {
         web_url: `${config.apiBaseUrl}/kis-stock`,
         mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
       },
-      // MODIFIED: Update contents generation logic
       contents: signals.map((item) => {
         const { name, currentSignal, lastMeaningfulSignal } = item;
 
         let title = `[${name}] ${getSignalText(currentSignal)}`;
-        let description = `신호 발생일: ${currentSignal.date}`; // Default description
+        let description = `신호 발생일: ${currentSignal.date}`;
 
-        // If there's a last meaningful signal and it's different from the current one (e.g., current is "Hold")
         if (
           lastMeaningfulSignal &&
           lastMeaningfulSignal.date !== currentSignal.date
         ) {
-          title = `[${name}] ${getSignalText(currentSignal)}`; // e.g., "[TSLA] 관망 (중립 구간)"
-          // Description becomes the LAST meaningful signal
+          title = `[${name}] ${getSignalText(currentSignal)}`;
           description = `최근 신호: ${getSignalText(lastMeaningfulSignal)} (${
             lastMeaningfulSignal.date
           })`;
         } else if (!lastMeaningfulSignal) {
-          // No meaningful signals ever
           title = `[${name}] ${getSignalText(currentSignal)}`;
           description = "최근 1년간 매매 신호 없음";
         }
-        // If current signal IS the last meaningful signal (e.g. new buy today), the defaults are correct.
 
         return {
           title: title,
           description: description,
-          image_url: `${config.apiBaseUrl}/lotto.png`, // TODO: 적절한 아이콘으로 변경
+          image_url: `${config.apiBaseUrl}/lotto.png`,
           link: {
             web_url: `${config.apiBaseUrl}/kis-stock`,
             mobile_web_url: `${config.apiBaseUrl}/kis-stock`,
@@ -268,7 +299,7 @@ class JobScheduler {
     );
     this._scheduleJob(
       "일일 로또 번호 발송",
-      config.cronSchedules.sendDailyLotto, // This now uses the updated schedule
+      config.cronSchedules.sendDailyLotto,
       this._sendDailyLottoNumbers,
     );
     this._scheduleJob(
@@ -279,7 +310,7 @@ class JobScheduler {
     this._scheduleJob(
       "일일 주식 조언 생성",
       config.cronSchedules.generateAdvice,
-      this._generateDailyAdvice,
+      generateDailyAdvice, // Use the exported function
     );
   }
 
@@ -308,14 +339,12 @@ class JobScheduler {
   }
 
   private async _sendDailyLottoNumbers(): Promise<void> {
-    // Check if today is Friday (cron schedule handles this, but as a safeguard)
     const today = new Date();
     if (today.getDay() !== 5) {
-      // 0=Sunday, 1=Monday, ..., 5=Friday
       console.log(
         `[일일 로또 번호 발송] 오늘은 금요일이 아니므로 작업을 건너뜁니다.`,
       );
-      return; // Skip if not Friday
+      return;
     }
 
     const lottoDb: Record<string, LottoWeek> = JSON.parse(
@@ -347,47 +376,39 @@ class JobScheduler {
     }
   }
 
-  // NOTE: StockSignalInfo type is already defined at the top level
-
   private async _sendDailyStockSignals(): Promise<void> {
-    const usStocks = stockConfig.us_stocks; // Iterate over us_stocks list
-    // MODIFIED: Use the StockSignalInfo type defined at the top
+    const usStocks = stockConfig.us_stocks;
     const allLatestSignals: StockSignalInfo[] = [];
 
     for (const stock of usStocks) {
       try {
-        // ✅ [수정] KIS 미국 주식 API 엔드포인트 사용
         const response = await axios.get(
           `${config.apiBaseUrl}/api/kisStock/${stock.ticker}`,
         );
         const { signals }: { signals: TradingSignal[] } = response.data;
         if (signals?.length > 0) {
-          // MODIFICATION START: Get both current and last meaningful signal
-          const currentSignal = signals.at(-1)!; // This is the 'hold' or latest signal
+          const currentSignal = signals.at(-1)!;
           const lastMeaningfulSignal = signals
             .filter((s) => s.type !== "hold")
-            .at(-1); // Last buy/sell/inverse-buy
+            .at(-1);
 
-          // --- NEW: Filter out if the last meaningful signal was 'sell' ---
           if (lastMeaningfulSignal && lastMeaningfulSignal.type === "sell") {
             console.log(
               `[${stock.ticker}] 알림 건너뛰기: 마지막 신호가 '수익 실현(sell)'입니다.`,
             );
-            continue; // Skip this stock and go to the next one
+            continue;
           }
-          // --- END NEW FILTER ---
 
           allLatestSignals.push({
             name: stock.ticker,
             currentSignal: currentSignal,
             lastMeaningfulSignal: lastMeaningfulSignal,
           });
-          // MODIFICATION END
         }
       } catch (error) {
         const axiosError = error as AxiosError;
         console.error(
-          `${stock.ticker} (KIS) 상태 확인 중 오류:`, // ✅ [수정] 로그에 KIS 명시
+          `${stock.ticker} (KIS) 상태 확인 중 오류:`,
           axiosError.response?.data || axiosError.message,
         );
       }
@@ -395,68 +416,27 @@ class JobScheduler {
 
     if (allLatestSignals.length > 0) {
       console.log(
-        `${allLatestSignals.length}개의 KIS 미국 주식 종목 상태를 확인하여 알림을 발송합니다.`, // ✅ [수정] 로그 메시지 변경
+        `${allLatestSignals.length}개의 KIS 미국 주식 종목 상태를 확인하여 알림을 발송합니다.`,
       );
-
-      // --- MODIFICATION START ---
-      // MODIFIED: Use notifyInChunks to send all signals in batches
       await this.kakaoService.notifyInChunks(
-        this.kakaoService.createStockStatusTemplate, // Pass the template creation function
-        allLatestSignals, // Pass all collected signals
-        config.notificationChunkSize, // Use the chunk size from config (3)
+        this.kakaoService.createStockStatusTemplate,
+        allLatestSignals,
+        config.notificationChunkSize,
       );
-      // --- MODIFICATION END ---
     } else {
       console.log(
-        "알림을 보낼 KIS 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.", // MODIFIED: Updated log message
+        "알림을 보낼 KIS 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.",
       );
     }
-  }
-
-  // New method to generate advice for US stocks daily with delay
-  private async _generateDailyAdvice(): Promise<void> {
-    const usStocks = stockConfig.us_stocks;
-    console.log(
-      `Starting daily advice generation for ${usStocks.length} US stocks...`,
-    );
-
-    for (const stock of usStocks) {
-      try {
-        console.log(`Triggering advice generation for ${stock.ticker}...`);
-        // Call the advice API endpoint.
-        // We only send ticker and apiType, the endpoint handles reading signals from cache.
-        await axios.post(`${config.apiBaseUrl}/api/advice`, {
-          ticker: stock.ticker,
-          apiType: "kisStock", // US stocks use kisStock apiType here
-        });
-      } catch (error) {
-        const axiosError = error as AxiosError;
-        console.error(
-          `Failed to generate advice for ${stock.ticker}:`,
-          axiosError.response?.data || axiosError.message,
-        );
-      }
-
-      // Wait for 1 minute before the next request to avoid "Too Many Requests" error.
-      // We wait even after the last one to be consistent or just return, but simplest is to wait.
-      console.log("Waiting 1 minute before next request...");
-      await new Promise((resolve) => setTimeout(resolve, 60000));
-    }
-    console.log("Daily advice generation completed.");
   }
 }
 
 // --- 4. 스케줄러 실행 (Singleton Pattern) ---
 declare global {
-  //MODIFIED: Changed from var to let/const compatible declaration
-  // Allow 'var' for global declaration compatibility in Node.js modules
   var isSchedulerRunning: boolean | undefined;
 }
 
-// MODIFIED: Removed environment check to run in both dev and prod
-// This ensures the scheduler runs, but only once per process
 if (!global.isSchedulerRunning) {
-  // MODIFIED: Added NODE_ENV to the log for clarity
   console.log(
     `🚀 스케줄러를 초기화합니다... (NODE_ENV: ${
       process.env.NODE_ENV || "unknown"

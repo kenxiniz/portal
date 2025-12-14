@@ -1,5 +1,4 @@
 /* app/api/stock/[ticker]/route.ts */
-// NOTE: This file ONLY returns data and signals. Advice is handled by /api/advice
 
 import { NextResponse } from "next/server";
 import path from "path";
@@ -33,7 +32,6 @@ interface AlphaVantageResponse {
   "Error Message"?: string;
 }
 
-/* [수정] 모든 주석 형식을 통일합니다. */
 const API_KEYS = [
   process.env.ALPHA_VANTAGE_API_KEY_1,
   process.env.ALPHA_VANTAGE_API_KEY_2,
@@ -58,9 +56,7 @@ async function writeStockCache(data: StockCache): Promise<void> {
   }
 }
 
-// FIXED: Kept the original function signature (request: Request)
 export async function GET(request: Request) {
-  // FIXED: Kept the original URL parsing logic
   const url = new URL(request.url);
   const pathParts = url.pathname.split("/");
   const ticker = pathParts[pathParts.length - 1];
@@ -73,18 +69,17 @@ export async function GET(request: Request) {
   const cachedTickerData = stockCache[ticker];
   const today = new Date().toISOString().split("T")[0];
   let rawData: StockDataPoint[];
-  let signals; // ADDED: Store signals
+  let signals;
+  // [MODIFIED] advice 변수 추가
+  const advice = cachedTickerData?.advice || null;
 
-  console.log(
-    `[${ticker}] Starting GET request handler (AlphaVantage - DATA ONLY).`,
-  );
+  console.log(`[${ticker}] Starting GET request handler (AlphaVantage).`);
 
   if (cachedTickerData && cachedTickerData.lastFetch === today) {
     console.log(
       `✅ [${ticker}] AV CACHE HIT: Loading raw data and signals from cache file.`,
     );
     rawData = cachedTickerData.data;
-    // MODIFIED: Load signals from cache or calculate if missing
     signals =
       cachedTickerData.signals ||
       analyzeAllTradingSignals(calculateBollingerBands(calculateRSI(rawData)));
@@ -169,18 +164,16 @@ export async function GET(request: Request) {
       oneYearAgo.setFullYear(now.getFullYear() - 1);
       rawData = allDataPoints.filter((d) => new Date(d.date) >= oneYearAgo);
 
-      // MODIFIED: Calculate signals
       console.log(`[${ticker}] Calculating indicators and signals...`);
       rawData = calculateBollingerBands(calculateRSI(rawData));
       signals = analyzeAllTradingSignals(rawData);
       console.log(`[${ticker}] Indicators and signals calculated.`);
 
-      // MODIFIED: Save data AND signals to cache
       stockCache[ticker] = {
         lastFetch: today,
         data: rawData,
         signals: signals,
-        advice: cachedTickerData?.advice || null, // Preserve old advice
+        advice: advice, // Preserve advice
       };
       await writeStockCache(stockCache);
       console.log(`💾 [${ticker}] CACHE WRITE: Saved new AV data and signals.`);
@@ -197,6 +190,10 @@ export async function GET(request: Request) {
     }
   }
 
-  // MODIFIED: Send response with data and signals only
-  return NextResponse.json({ data: rawData, signals: signals });
+  // [MODIFIED] Return advice
+  return NextResponse.json({
+    data: rawData,
+    signals: signals,
+    advice: advice,
+  });
 }
