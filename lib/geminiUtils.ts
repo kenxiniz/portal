@@ -1,24 +1,25 @@
 /* /lib/geminiUtils.ts */
 
-// MODIFIED: Import GoogleGenerativeAI and Harm types
 import {
   GoogleGenerativeAI,
   HarmCategory,
   HarmBlockThreshold,
 } from "@google/generative-ai";
-// MODIFIED: Import StockDataPoint
-import { AdviceObject, TradingSignal, StockDataPoint } from "./stockUtils"; // Import necessary types
+import { AdviceObject, TradingSignal, StockDataPoint } from "./stockUtils";
 
 const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) {
-  // MODIFIED: Throw an error instead of just logging
   throw new Error("GEMINI_API_KEY is not set in environment variables.");
 }
 
 const genAI = new GoogleGenerativeAI(API_KEY);
-// MODIFIED: Updated to a specific model and added safety settings
+
+/**
+ * ✅ 모델 변경: gemini-2.5-flash (하루 20회 제한) -> gemini-2.0-flash (대용량 쿼터)
+ * 제공해주신 리스트에 있는 'gemini-2.0-flash'를 사용합니다.
+ */
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash", // MODIFIED: Changed model name as requested by user
+  model: "gemini-2.5-flash",
   safetySettings: [
     {
       category: HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -39,34 +40,63 @@ const model = genAI.getGenerativeModel({
   ],
 });
 
-/**
- * Fetches investment advice from the Gemini API based on technical signals.
- * Uses fetch API with header authentication.
- * @param signals - Array of technical trading signals.
- * @param recentStockData - Array of the last 7 days of stock data.
- * @param ticker - The stock ticker symbol.
- * @param market - The market type ('us' or 'kr').
- * @param stockName - (Optional) The name of the stock (used for kr market).
- * @returns {Promise<AdviceObject>} An object containing error status and the advice message or error details.
- */
-// MODIFIED: Function signature now accepts recentStockData
-export async function getGeminiAdvice(
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// --- GLOBAL QUEUE SYSTEM START ---
+
+interface QueueItem {
+  task: () => Promise<AdviceObject>;
+  resolve: (value: AdviceObject | PromiseLike<AdviceObject>) => void;
+}
+
+const requestQueue: QueueItem[] = [];
+let isProcessing = false;
+// 2.0 Flash는 속도가 빠르므로 간격을 4초로 설정 (안정성 확보)
+const REQUEST_INTERVAL = 4000;
+
+async function processQueue() {
+  if (isProcessing || requestQueue.length === 0) return;
+
+  isProcessing = true;
+  const item = requestQueue.shift();
+
+  if (item) {
+    try {
+      const result = await item.task();
+      item.resolve(result);
+    } catch (error) {
+      console.error("Queue processing error:", error);
+      item.resolve({
+        error: true,
+        message: "요청 처리 중 대기열 오류 발생",
+      });
+    }
+  }
+
+  // 요청 처리 후 대기 (Rate Limiting)
+  if (requestQueue.length > 0) {
+    console.log(`⏳ Waiting ${REQUEST_INTERVAL}ms before next request...`);
+    await sleep(REQUEST_INTERVAL);
+  }
+
+  isProcessing = false;
+  processQueue();
+}
+
+// --- GLOBAL QUEUE SYSTEM END ---
+
+async function performGeminiCall(
   signals: TradingSignal[],
-  recentStockData: StockDataPoint[], // NEW: Added recent stock data
+  recentStockData: StockDataPoint[],
   ticker: string,
   market: "kr" | "us",
   stockName?: string,
 ): Promise<AdviceObject> {
   const identifier =
     market === "kr" && stockName ? `${ticker} - ${stockName}` : ticker;
-  console.log(
-    `🤖 [${identifier}] ENTERING getGeminiAdvice function (using genAI.generateContent).`,
-  ); // Log entry with identifier
+  console.log(`🤖 [${identifier}] PROCESSING API CALL (Queue Executed).`);
 
-  // Filter for key signals (non-hold)
   const keySignals = signals.filter((s) => s.type !== "hold");
-
-  // Format the signals for the prompt
   const signalsString =
     keySignals.length > 0
       ? keySignals
@@ -82,27 +112,24 @@ export async function getGeminiAdvice(
           .join("\n")
       : "최근 1년 간 유의미한 매매 신호 없음";
 
-  // NEW: Format the recent stock data
   const formattedRecentData = recentStockData.map((d) => ({
     date: d.date,
-    close: d.close, // Keep as number
-    rsi: d.rsi ? parseFloat(d.rsi.toFixed(2)) : null, // Format RSI
+    close: d.close,
+    rsi: d.rsi ? parseFloat(d.rsi.toFixed(2)) : null,
   }));
   const recentDataString = JSON.stringify(formattedRecentData, null, 2);
 
-  // --- Create Korean Prompt regardless of market type ---
   let marketContext = "";
   let stockIdentifier = "";
 
   if (market === "us") {
     marketContext = "미국 주식";
-    stockIdentifier = ticker; // Use ticker for US stocks
+    stockIdentifier = ticker;
   } else if (market === "kr") {
     marketContext = "한국 주식";
-    stockIdentifier = `${stockName || ticker}(종목코드: ${ticker})`; // Use name and ticker for KR stocks
+    stockIdentifier = `${stockName || ticker}(종목코드: ${ticker})`;
   }
 
-  // MODIFIED: Updated prompt to include recent data
   const prompt = `
 당신은 전문 ${marketContext} 애널리스트입니다.
 ${stockIdentifier} 주식에 대한 투자 조언을 생성해주세요.
@@ -119,50 +146,100 @@ ${signalsString}
 3.  응답은 2-3개의 핵심 불렛포인트(bullet point)로 요약하고, 그 전에 한 문장으로 된 굵은 글씨의 요약(예: "**단기 하락 추세, 관망 필요**")을 먼저 제시해야 합니다.
 4.  다른 설명 없이 요약과 불렛포인트만 제공해주세요.
 `;
-  // --- End Prompt Creation ---
 
-  console.log(`[${identifier}] Generating advice with the following prompt:`);
-  console.log(prompt);
+  const maxRetries = 3;
+  let attempt = 0;
 
-  try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
+  while (attempt < maxRetries) {
+    try {
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
 
-    // NEW: Handle blocked responses
-    if (response.promptFeedback?.blockReason) {
-      const blockReason = response.promptFeedback.blockReason;
-      console.warn(
-        `[${identifier}] Gemini API Warning: Response blocked due to ${blockReason}`,
+      if (!text || text.trim() === "") {
+        return { error: true, message: "AI 조언 생성 불가: 빈 응답" };
+      }
+
+      console.log(`✅ [${identifier}] Gemini advice generated successfully.`);
+      return { error: false, message: text.trim() };
+    } catch (e: unknown) {
+      attempt++;
+      const errorMessage =
+        e instanceof Error ? e.message : "An unknown error occurred";
+
+      console.error(
+        `[${identifier}] Gemini API Error (Attempt ${attempt}/${maxRetries}): ${errorMessage}`,
       );
+
+      // --- 에러 처리 로직 ---
+
+      // 1. 일일 쿼터 초과 (PerDay) -> 재시도 해도 소용없음. 즉시 종료.
+      if (
+        errorMessage.includes("PerDay") ||
+        errorMessage.includes("QuotaFailure")
+      ) {
+        console.error(
+          `❌ [${identifier}] DAILY QUOTA EXCEEDED (2.0-flash). Stopping retries.`,
+        );
+        return {
+          error: true,
+          message: "Gemini API 일일 사용량 초과 (내일 다시 시도하세요)",
+        };
+      }
+
+      // 2. 일시적 속도 제한 (429) -> 60초 대기 후 재시도
+      if (
+        errorMessage.includes("429") ||
+        errorMessage.includes("Too Many Requests")
+      ) {
+        if (attempt < maxRetries) {
+          console.warn(`🛑 [${identifier}] Rate limit hit. Waiting 60s...`);
+          await sleep(60000); // 1분 대기
+          continue;
+        }
+      }
+
+      // 3. 서버 과부하 (503) -> 짧게 대기 후 재시도
+      if (
+        errorMessage.includes("503") ||
+        errorMessage.includes("Service Unavailable")
+      ) {
+        if (attempt < maxRetries) {
+          const delay = Math.pow(2, attempt - 1) * 1000;
+          await sleep(delay);
+          continue;
+        }
+      }
+
       return {
         error: true,
-        message: `AI 조언 생성 불가: ${blockReason}`,
+        message: `Gemini API 오류: ${errorMessage}`,
       };
     }
-
-    const text = response.text();
-
-    if (!text || text.trim() === "") {
-      console.warn(
-        `[${identifier}] Gemini API Warning: Received empty text response.`,
-      );
-      return {
-        error: true,
-        message: "AI 조언 생성 불가: 빈 응답",
-      };
-    }
-
-    // Success case
-    console.log(`✅ [${identifier}] Gemini advice generated successfully.`); // Log success
-    return { error: false, message: text.trim() };
-  } catch (e: unknown) {
-    const errorMessage =
-      e instanceof Error ? e.message : "An unknown error occurred";
-    console.error(`[${identifier}] Gemini API Error:`, errorMessage);
-    // Return a structured error object
-    return {
-      error: true,
-      message: `Gemini API 오류: ${errorMessage}`,
-    };
   }
+
+  return {
+    error: true,
+    message: "Gemini API 오류: 최대 재시도 횟수 초과",
+  };
+}
+
+export async function getGeminiAdvice(
+  signals: TradingSignal[],
+  recentStockData: StockDataPoint[],
+  ticker: string,
+  market: "kr" | "us",
+  stockName?: string,
+): Promise<AdviceObject> {
+  const identifier = stockName || ticker;
+  console.log(`🕒 [${identifier}] Queuing Gemini request...`);
+
+  return new Promise<AdviceObject>((resolve) => {
+    requestQueue.push({
+      task: () =>
+        performGeminiCall(signals, recentStockData, ticker, market, stockName),
+      resolve,
+    });
+    processQueue();
+  });
 }

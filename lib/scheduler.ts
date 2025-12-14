@@ -34,6 +34,8 @@ const config = {
     // ✅ [수정] "0 8 * * *" (매일 오전 8시) -> "0 8 * * 5" (금요일 오전 8시)
     sendDailyLotto: "0 8 * * 5", // 매주 금요일 오전 8시
     sendDailyStockSignals: "0 9 * * *", // 매일 오전 9시 (이 스케줄은 유지)
+    // New: Schedule for daily advice generation (Weekdays at 8:00 AM)
+    generateAdvice: "0 8 * * 1-5",
   },
   notificationChunkSize: 3, // 한 번에 보낼 알림의 최대 개수
 };
@@ -274,6 +276,11 @@ class JobScheduler {
       config.cronSchedules.sendDailyStockSignals,
       this._sendDailyStockSignals,
     );
+    this._scheduleJob(
+      "일일 주식 조언 생성",
+      config.cronSchedules.generateAdvice,
+      this._generateDailyAdvice,
+    );
   }
 
   private _scheduleJob(
@@ -340,63 +347,9 @@ class JobScheduler {
     }
   }
 
-  /**
-   * 캐시된 주식 데이터의 advice를 초기화(null)합니다.
-   * 이렇게 하면 클라이언트가 접속할 때 새로운 조언을 생성하도록 유도할 수 있습니다.
-   * 사용자의 요청에 따라 error를 true로 설정하는 대신 아예 객체를 비워(null) 갱신을 유도합니다.
-   */
-  private async _resetAdviceCache(): Promise<void> {
-    const cacheFiles = [
-      "kis-stock-cache.json",
-      "korean-stock-cache.json",
-      "stock-cache.json",
-    ];
-
-    for (const fileName of cacheFiles) {
-      const filePath = path.join(config.cacheDir, fileName);
-      try {
-        // 파일 존재 여부 확인
-        await fs.access(filePath);
-
-        const fileContent = await fs.readFile(filePath, "utf8");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const cacheData: Record<string, any> = JSON.parse(fileContent);
-        let isModified = false;
-
-        for (const ticker in cacheData) {
-          // advice가 있으면 null로 초기화하여 갱신 유도
-          if (cacheData[ticker].advice) {
-            cacheData[ticker].advice = null;
-            isModified = true;
-          }
-        }
-
-        if (isModified) {
-          await fs.writeFile(
-            filePath,
-            JSON.stringify(cacheData, null, 2),
-            "utf8",
-          );
-          console.log(`[Scheduler] Advice cache cleared for ${fileName}`);
-        }
-      } catch (error) {
-        // 파일이 없거나(ENOENT) 파싱 에러 등은 로그만 남기고 진행
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          console.warn(
-            `[Scheduler] Failed to clear advice cache for ${fileName}:`,
-            error,
-          );
-        }
-      }
-    }
-  }
-
   // NOTE: StockSignalInfo type is already defined at the top level
 
   private async _sendDailyStockSignals(): Promise<void> {
-    // ✅ [수정] 알림 발송 직전에 advice 캐시 초기화
-    await this._resetAdviceCache();
-
     const usStocks = stockConfig.us_stocks; // Iterate over us_stocks list
     // MODIFIED: Use the StockSignalInfo type defined at the top
     const allLatestSignals: StockSignalInfo[] = [];
@@ -458,6 +411,38 @@ class JobScheduler {
         "알림을 보낼 KIS 미국 주식 종목이 없거나 데이터를 가져오는 데 실패했습니다.", // MODIFIED: Updated log message
       );
     }
+  }
+
+  // New method to generate advice for US stocks daily with delay
+  private async _generateDailyAdvice(): Promise<void> {
+    const usStocks = stockConfig.us_stocks;
+    console.log(
+      `Starting daily advice generation for ${usStocks.length} US stocks...`,
+    );
+
+    for (const stock of usStocks) {
+      try {
+        console.log(`Triggering advice generation for ${stock.ticker}...`);
+        // Call the advice API endpoint.
+        // We only send ticker and apiType, the endpoint handles reading signals from cache.
+        await axios.post(`${config.apiBaseUrl}/api/advice`, {
+          ticker: stock.ticker,
+          apiType: "kisStock", // US stocks use kisStock apiType here
+        });
+      } catch (error) {
+        const axiosError = error as AxiosError;
+        console.error(
+          `Failed to generate advice for ${stock.ticker}:`,
+          axiosError.response?.data || axiosError.message,
+        );
+      }
+
+      // Wait for 1 minute before the next request to avoid "Too Many Requests" error.
+      // We wait even after the last one to be consistent or just return, but simplest is to wait.
+      console.log("Waiting 1 minute before next request...");
+      await new Promise((resolve) => setTimeout(resolve, 60000));
+    }
+    console.log("Daily advice generation completed.");
   }
 }
 

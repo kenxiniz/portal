@@ -20,6 +20,7 @@ export default function KStockPage() {
           loading: true,
           error: null,
           signals: [],
+          advice: null, // [FIXED] Initialize advice as null
         };
       });
       return initialState;
@@ -64,6 +65,7 @@ export default function KStockPage() {
             signals: signals,
             loading: false,
             error: null,
+            advice: prev[ticker]?.advice || null, // Preserve existing advice if any
           },
         }));
       } catch (e: unknown) {
