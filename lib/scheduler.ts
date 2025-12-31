@@ -39,6 +39,48 @@ const config = {
   notificationChunkSize: 3, // 한 번에 보낼 알림의 최대 개수
 };
 
+// --- Token Management Utilities (NEW) ---
+const KAKAO_TOKEN_PATH = path.join(config.cacheDir, "kakao_tokens.json");
+
+async function saveKakaoToken(tokens: {
+  access_token?: string;
+  refresh_token?: string;
+}) {
+  try {
+    let currentData = {};
+    try {
+      // Ensure cache dir exists
+      await fs.mkdir(config.cacheDir, { recursive: true });
+      const fileContent = await fs.readFile(KAKAO_TOKEN_PATH, "utf8");
+      currentData = JSON.parse(fileContent);
+    } catch {
+      // File might not exist yet, ignore
+    }
+
+    const newData = { ...currentData, ...tokens };
+    await fs.writeFile(
+      KAKAO_TOKEN_PATH,
+      JSON.stringify(newData, null, 2),
+      "utf8",
+    );
+    console.log("💾 Kakao tokens saved to cache file.");
+  } catch (error) {
+    console.error("❌ Failed to save Kakao tokens:", error);
+  }
+}
+
+async function getSavedKakaoToken(): Promise<{
+  access_token?: string;
+  refresh_token?: string;
+} | null> {
+  try {
+    const fileContent = await fs.readFile(KAKAO_TOKEN_PATH, "utf8");
+    return JSON.parse(fileContent);
+  } catch {
+    return null;
+  }
+}
+
 // --- Global Lock for Advice Generation ---
 let isAdviceRunning = false;
 
@@ -95,9 +137,27 @@ export async function generateDailyAdvice(): Promise<void> {
 class KakaoNotificationService {
   private accessToken: string | null = process.env.KAKAO_ACCESS_TOKEN || null;
 
+  constructor() {
+    // Attempt to load token from file on initialization if env is missing or potentially old
+    this._initializeToken();
+  }
+
+  private async _initializeToken() {
+    const saved = await getSavedKakaoToken();
+    if (saved?.access_token) {
+      this.accessToken = saved.access_token;
+    }
+  }
+
   private async _refreshAccessToken(): Promise<boolean> {
     console.log("카카오 Access Token 갱신을 시도합니다...");
-    if (!config.kakao.refreshToken || !config.kakao.clientId) {
+
+    // [MODIFIED] Prioritize saved refresh token from file
+    const savedTokens = await getSavedKakaoToken();
+    const currentRefreshToken =
+      savedTokens?.refresh_token || config.kakao.refreshToken;
+
+    if (!currentRefreshToken || !config.kakao.clientId) {
       console.error("리프레시 토큰 또는 클라이언트 ID가 설정되지 않았습니다.");
       return false;
     }
@@ -105,7 +165,7 @@ class KakaoNotificationService {
     const data = new URLSearchParams({
       grant_type: "refresh_token",
       client_id: config.kakao.clientId,
-      refresh_token: config.kakao.refreshToken,
+      refresh_token: currentRefreshToken,
     }).toString();
 
     try {
@@ -114,13 +174,24 @@ class KakaoNotificationService {
           "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
         },
       });
+
       this.accessToken = response.data.access_token;
-      console.log("✅ 카카오 Access Token 갱신 성공!");
+
+      // [MODIFIED] Save new tokens to file
+      const newTokens: { access_token: string; refresh_token?: string } = {
+        access_token: response.data.access_token,
+      };
+
       if (response.data.refresh_token) {
         console.warn(
-          "⚠️ 새로운 Refresh Token이 발급되었습니다. 환경 변수를 업데이트해야 할 수 있습니다.",
+          "♻️ 새로운 Refresh Token이 발급되었습니다. 파일에 저장합니다.",
         );
+        newTokens.refresh_token = response.data.refresh_token;
       }
+
+      await saveKakaoToken(newTokens);
+      console.log("✅ 카카오 Access Token 갱신 및 저장 성공!");
+
       return true;
     } catch (error) {
       console.error("❌ 카카오 Access Token 갱신 실패:", error);
@@ -133,10 +204,16 @@ class KakaoNotificationService {
     data: URLSearchParams,
     attempt = 1,
   ): Promise<void> {
+    // If no access token yet, try to refresh first (which loads from file)
     if (!this.accessToken) {
-      console.error("카카오 Access Token이 없어 메시지를 보낼 수 없습니다.");
-      return;
+      console.warn("Access Token이 없습니다. 토큰 갱신을 먼저 시도합니다.");
+      const refreshed = await this._refreshAccessToken();
+      if (!refreshed) {
+        console.error("토큰 갱신 실패로 메시지를 보낼 수 없습니다.");
+        return;
+      }
     }
+
     try {
       console.log(`카카오 메시지 발송 시도: ${url}`);
       await axios.post(url, data.toString(), {
@@ -148,8 +225,9 @@ class KakaoNotificationService {
       console.log(`✅ 카카오 메시지 전송 성공: ${url}`);
     } catch (error) {
       const axiosError = error as AxiosError<{ code?: number }>;
+      // -401: Invalid Token
       if (axiosError.response?.data?.code === -401 && attempt === 1) {
-        console.warn("토큰 만료 감지. 갱신 후 재시도합니다.");
+        console.warn("토큰 만료 감지 (-401). 갱신 후 재시도합니다.");
         if (await this._refreshAccessToken()) {
           await this._sendMessage(url, data, 2);
         }
