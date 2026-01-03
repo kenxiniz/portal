@@ -54,7 +54,6 @@ export interface CachedStockData {
 }
 
 // --- Existing functions (calculateRSI, calculateBollingerBands, analyzeAllTradingSignals) ---
-// (Keep existing function code as is)
 export const calculateRSI = (
   data: StockDataPoint[],
   period: number = 14,

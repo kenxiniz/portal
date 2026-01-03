@@ -301,26 +301,8 @@ class KakaoNotificationService {
       ],
     });
 
+  // [MODIFIED] 메시지 포맷 변경: [종목] YYYY-MM-DD / 상태 (사유)
   public createStockStatusTemplate = (signals: StockSignalInfo[]): object => {
-    const formatPrice = (price: number | undefined): string => {
-      if (price === undefined || price === null) return "가격 정보 없음";
-      return `$${price.toFixed(2)}`;
-    };
-
-    const getSignalText = (signal: TradingSignal): string => {
-      switch (signal.type) {
-        case "buy":
-          return `매수 (${formatPrice(signal.entryPrice)})`;
-        case "inverse-buy":
-          return `인버스 매수 (${formatPrice(signal.entryPrice)})`;
-        case "sell":
-          return `수익 실현 (${formatPrice(signal.realizedPrice)})`;
-        case "hold":
-        default:
-          return signal.reason;
-      }
-    };
-
     return {
       object_type: "list",
       header_title: "🇺🇸 KIS 미국 주식 신호",
@@ -330,22 +312,30 @@ class KakaoNotificationService {
       },
       contents: signals.map((item) => {
         const { name, currentSignal, lastMeaningfulSignal } = item;
+        const isHold = currentSignal.type === "hold";
 
-        let title = `[${name}] ${getSignalText(currentSignal)}`;
-        let description = `신호 발생일: ${currentSignal.date}`;
+        // 관망(hold) 상태라면 과거 신호를, 새로운 신호라면 현재 신호를 사용
+        const targetSignal =
+          isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
 
+        let statusText = "";
+
+        // 상태 텍스트 결정 로직
+        if (targetSignal.type === "buy") statusText = "매수";
+        else if (targetSignal.type === "inverse-buy")
+          statusText = "인버스 매수";
+        else if (targetSignal.type === "sell") statusText = "수익 실현";
+
+        // 현재 Hold 상태인데, 과거 신호가 매수/인버스 매수라면 '유지'를 붙임
         if (
-          lastMeaningfulSignal &&
-          lastMeaningfulSignal.date !== currentSignal.date
+          isHold &&
+          (targetSignal.type === "buy" || targetSignal.type === "inverse-buy")
         ) {
-          title = `[${name}] ${getSignalText(currentSignal)}`;
-          description = `최근 신호: ${getSignalText(lastMeaningfulSignal)} (${
-            lastMeaningfulSignal.date
-          })`;
-        } else if (!lastMeaningfulSignal) {
-          title = `[${name}] ${getSignalText(currentSignal)}`;
-          description = "최근 1년간 매매 신호 없음";
+          statusText += " 유지";
         }
+
+        const title = `[${name}] ${targetSignal.date}`;
+        const description = `${statusText} (${targetSignal.reason})`;
 
         return {
           title: title,
@@ -507,6 +497,7 @@ class JobScheduler {
     }
   }
 
+  // [MODIFIED] 필터링 로직 강화: 완전한 관망(중립) 상태 제거
   private async _sendDailyStockSignals(): Promise<void> {
     const usStocks = stockConfig.us_stocks;
     const allLatestSignals: StockSignalInfo[] = [];
@@ -523,9 +514,19 @@ class JobScheduler {
             .filter((s) => s.type !== "hold")
             .at(-1);
 
-          if (lastMeaningfulSignal && lastMeaningfulSignal.type === "sell") {
+          // 1. 과거 신호가 아예 없는 경우 (완전 초기 관망) -> 건너뛰기
+          if (currentSignal.type === "hold" && !lastMeaningfulSignal) {
+            continue;
+          }
+
+          // 2. 마지막 신호가 '수익 실현(sell)'이고 현재 관망(hold)인 경우 -> 중립 상태이므로 건너뛰기
+          // (단, 오늘이 바로 수익 실현일이면 currentSignal.type이 'sell'이므로 아래 로직을 통과하여 알림 발송됨)
+          if (
+            currentSignal.type === "hold" &&
+            lastMeaningfulSignal?.type === "sell"
+          ) {
             console.log(
-              `[${stock.ticker}] 알림 건너뛰기: 마지막 신호가 '수익 실현(sell)'입니다.`,
+              `[${stock.ticker}] 알림 건너뛰기: 중립 구간 (마지막 신호: 수익 실현)`,
             );
             continue;
           }
