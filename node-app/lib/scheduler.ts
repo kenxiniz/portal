@@ -327,14 +327,18 @@ class KakaoNotificationService {
         else if (targetSignal.type === "sell") statusText = "수익 실현";
 
         // 현재 Hold 상태인데, 과거 신호가 매수/인버스 매수라면 '유지'를 붙임
+        let isBuyHoldState = false;
         if (
           isHold &&
           (targetSignal.type === "buy" || targetSignal.type === "inverse-buy")
         ) {
           statusText += " 유지";
+          isBuyHoldState = true;
         }
 
-        const title = `[${name}] ${targetSignal.date}`;
+        // [NEW] If "Buy Hold" status, append "~" to the date
+        const dateSuffix = isBuyHoldState ? " ~" : "";
+        const title = `[${name}] ${targetSignal.date}${dateSuffix}`;
         const description = `${statusText} (${targetSignal.reason})`;
 
         return {

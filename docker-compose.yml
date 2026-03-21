@@ -1,0 +1,64 @@
+services:
+  # Next.js application service
+  node-app:
+    build:
+      context: ./node-app
+      dockerfile: ${DOCKERFILE_PATH:-Dockerfile.localbuild}
+      args:
+        - APP_ENV=docker
+    image: node-app
+    container_name: node-app
+    restart: always
+    networks:
+      - app-network
+    env_file:
+      - ./node-app/.env
+    volumes:
+      - ./node-app/.next/cache:/app/.next/cache
+      - ./node-app/.cache:/app/.cache
+      - ./node-app/lib:/app/lib
+
+  # Nginx reverse proxy service
+  nginx:
+    image: nginx:latest
+    container_name: nginx_ssl
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/logs:/var/log/nginx
+      # Shared named volume for Certbot ACME challenge
+      - webroot:/var/www/html
+    depends_on:
+      - node-app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+    networks:
+      - app-network
+
+  # Certbot SSL certificate service
+  certbot:
+    build:
+      context: ./certbot
+      dockerfile: Dockerfile
+    container_name: certbot_ssl
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certbot/logs:/var/log/certbot
+      # Shared named volume for Certbot ACME challenge
+      - webroot:/var/www/html
+    restart: always
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  # Define the named volume for sharing webroot between Nginx and Certbot
+  webroot:
