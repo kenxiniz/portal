@@ -1,5 +1,5 @@
 /* lib/candle/service.ts */
-import { CandleKR, CandleUS, ICandle } from "./models";
+import { CandleKR, CandleUS, ICandle } from "../models/candle";
 import { getFromCache, setToCache, invalidateCache } from "./cache";
 
 /**

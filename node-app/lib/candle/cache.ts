@@ -10,10 +10,10 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 export function getFromCache(key: string): unknown {
   const entry = cacheStore.get(key);
   if (entry && Date.now() - entry.savedAt < CACHE_TTL_MS) {
-    console.log("[Cache] HIT for key: " + key);
+    console.log("✅ [Cache] HIT for key: " + key);
     return entry.data;
   }
-  console.log("[Cache] MISS for key: " + key);
+  console.log("❌ [Cache] MISS for key: " + key);
   return null;
 }
 

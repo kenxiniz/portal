@@ -7,6 +7,8 @@ import { updateLottoWinningNumbers, sendDailyLottoNumbers } from "./jobs/lotto";
 import { sendDailyStockSignals } from "./jobs/stock";
 import { collectMarketData } from "./jobs/collect"; // [NEW] Import collection job
 
+export { generateDailyAdvice, resetAdviceCache, collectMarketData };
+
 class JobScheduler {
   private telegramService: TelegramNotificationService;
 

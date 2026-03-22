@@ -1,14 +1,15 @@
 /* app/api/trigger-advice/route.ts */
 
 import { NextResponse } from "next/server";
+// This path refers to lib/scheduler/index.ts
 import { generateDailyAdvice } from "@/lib/scheduler";
 
 export async function POST() {
   try {
     // Trigger advice generation in the background (fire and forget)
-    // We don't await this because it takes a long time (1 min per stock)
+    // No await here because it takes approx. 1 min per stock
     generateDailyAdvice().catch((error) => {
-      console.error("Manual advice generation failed:", error);
+      console.error("Manual background advice generation failed:", error);
     });
 
     return NextResponse.json(
@@ -18,7 +19,7 @@ export async function POST() {
   } catch (error) {
     console.error("Failed to trigger advice generation:", error);
     return NextResponse.json(
-      { error: "Failed to trigger advice generation." },
+      { error: "Internal Server Error during advice trigger." },
       { status: 500 },
     );
   }

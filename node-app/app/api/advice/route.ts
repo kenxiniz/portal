@@ -1,10 +1,11 @@
 /* /app/api/advice/route.ts */
-// MODIFIED: This endpoint now reads data/signals from cache, not from POST body.
-// MODIFIED: Added auto-fetch logic for cache misses. Emojis removed from logs.
+// MODIFIED: Fixed ESLint unused-vars errors by logging error details.
+// MODIFIED: Integrated in-memory store and MongoDB persistence via TickerAdvice model.
+// MODIFIED: All logs/comments in English. Emojis removed from logs.
 
 import { NextResponse } from "next/server";
-import path from "path";
-import fs from "fs/promises";
+import { connectDB } from "@/lib/mongodb";
+import { TickerAdvice } from "@/lib/models/advice";
 import {
   CachedStockData,
   AdviceObject,
@@ -14,86 +15,74 @@ import {
 import { getGeminiAdvice } from "@/lib/geminiUtils";
 import stockConfig from "@/lib/stock.json";
 
-// Define cache paths
-const cacheDir = path.join(process.cwd(), ".cache");
-const KIS_CACHE_PATH = path.join(cacheDir, "kis-stock-cache.json");
-const KOREAN_CACHE_PATH = path.join(cacheDir, "korean-stock-cache.json");
-const AV_CACHE_PATH = path.join(cacheDir, "stock-cache.json");
-
 type ApiType = "stock" | "kisStock" | "kStock";
 
 interface StockCache {
-  [key: string]: CachedStockData;
+  [ticker: string]: CachedStockData;
 }
 
-// In-memory map to store in-progress generation promises
-// Use a composite key to avoid collisions (e.g., "kisStock-TSLA")
+interface MemoryStore {
+  stock: StockCache;
+  kisStock: StockCache;
+  kStock: StockCache;
+}
+
+// Global store for in-memory persistence (same as candle logic)
+const globalForCache = global as unknown as { memoryStore: MemoryStore };
+const memoryStore: MemoryStore = globalForCache.memoryStore || {
+  stock: {},
+  kisStock: {},
+  kStock: {},
+};
+
+if (process.env.NODE_ENV !== "production") {
+  globalForCache.memoryStore = memoryStore;
+}
+
 const adviceGenerationInProgress = new Map<string, Promise<AdviceObject>>();
 
-// --- Generic Cache Read/Write Functions ---
-async function readStockCache(filePath: string): Promise<StockCache> {
+/**
+ * Persists Gemini advice to MongoDB.
+ */
+async function saveToDatabase(ticker: string, advice: AdviceObject) {
   try {
-    const fileContent = await fs.readFile(filePath, "utf-8");
-    return JSON.parse(fileContent);
-  } catch {
-    return {};
-  }
-}
+    await connectDB();
 
-async function writeStockCache(
-  filePath: string,
-  data: StockCache,
-): Promise<void> {
-  try {
-    await fs.mkdir(cacheDir, { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+    // Updates tickeradvices collection using the TickerAdvice model
+    await TickerAdvice.findOneAndUpdate(
+      { ticker },
+      {
+        ticker,
+        advice: advice,
+        updatedAt: new Date(),
+      },
+      { upsert: true, new: true },
+    );
+
+    console.log(`[${ticker}] Database sync successful: Saved to MongoDB.`);
   } catch (error) {
-    console.error(`Error writing cache file (${filePath}):`, error);
-  }
-}
-// --- End Cache Functions ---
-
-function getStockName(ticker: string): string {
-  const stockInfo = stockConfig.k_stocks.find((s) => s.ticker === ticker);
-  return stockInfo ? stockInfo.name : ticker;
-}
-
-function getCachePath(apiType: ApiType): string {
-  switch (apiType) {
-    case "stock":
-      return AV_CACHE_PATH;
-    case "kisStock":
-      return KIS_CACHE_PATH;
-    case "kStock":
-      return KOREAN_CACHE_PATH;
-    default:
-      // This should not be reachable if types are correct
-      throw new Error(`Invalid apiType: ${apiType}`);
+    console.error(`[${ticker}] Database sync failed:`, error);
   }
 }
 
-// MODIFIED: Function signature no longer needs signals
 async function generateAndCacheAdvice(
   apiType: ApiType,
   ticker: string,
-  stockCache: StockCache,
   cachedTickerData: CachedStockData,
 ): Promise<AdviceObject> {
-  const cachePath = getCachePath(apiType);
   console.log(
-    `[${ticker}/${apiType}/advice] ADVICE CACHE MISS: Generating new advice...`,
+    `[${ticker}/${apiType}/advice] Starting Gemini analysis process...`,
   );
 
-  // Extract data from cache
   const signals: TradingSignal[] = cachedTickerData.signals || [];
   const fullStockData: StockDataPoint[] = cachedTickerData.data || [];
-  // Get last 7 days of data
   const recentStockData = fullStockData.slice(-7);
 
   try {
     let newAdvice: AdviceObject;
     if (apiType === "kStock") {
-      const stockName = getStockName(ticker);
+      const stockName =
+        stockConfig.k_stocks.find((s) => s.ticker === ticker)?.name || ticker;
       newAdvice = await getGeminiAdvice(
         signals,
         recentStockData,
@@ -102,45 +91,38 @@ async function generateAndCacheAdvice(
         stockName,
       );
     } else {
-      // "stock" (AV) and "kisStock" are both 'us' market
       newAdvice = await getGeminiAdvice(signals, recentStockData, ticker, "us");
     }
 
-    // Save new advice to the specific cache file
+    // 1. Update In-Memory cache
     cachedTickerData.advice = newAdvice;
-    await writeStockCache(cachePath, stockCache);
+
+    // 2. Queue MongoDB persistence
+    saveToDatabase(ticker, newAdvice);
 
     console.log(
-      `[${ticker}/${apiType}/advice] New advice generated and cached.`,
+      `[${ticker}/${apiType}/advice] Memory updated and DB persistence triggered.`,
     );
     return newAdvice;
   } catch (e) {
     console.error(
-      `[${ticker}/${apiType}/advice] Failed to generate advice:`,
+      `[${ticker}/${apiType}/advice] Gemini advice generation failed:`,
       e,
     );
-    const errorAdvice: AdviceObject = {
+    return {
       error: true,
-      message: `Gemini advice generation failed: ${
-        e instanceof Error ? e.message : "Unknown error"
-      }`,
+      message: `Gemini failure: ${e instanceof Error ? e.message : "Unknown error"}`,
     };
-    cachedTickerData.advice = errorAdvice; // Cache the error
-    await writeStockCache(cachePath, stockCache);
-    return errorAdvice;
   }
 }
 
 export async function POST(request: Request) {
-  let body: {
-    ticker: string;
-    apiType: ApiType;
-  };
-
+  let body: { ticker: string; apiType: ApiType };
   try {
     body = await request.json();
   } catch (error) {
-    console.error("[/api/advice] Failed to parse request body:", error);
+    // FIX: Log the error to satisfy ESLint no-unused-vars
+    console.error("[/api/advice] Body parsing error:", error);
     return NextResponse.json(
       { error: "Invalid request body" },
       { status: 400 },
@@ -152,115 +134,83 @@ export async function POST(request: Request) {
 
   if (!ticker || !apiType) {
     return NextResponse.json(
-      { error: "Missing required fields: ticker, apiType" },
+      { error: "Missing required fields" },
       { status: 400 },
     );
   }
 
-  const cachePath = getCachePath(apiType);
-  const stockCache = await readStockCache(cachePath);
+  let cachedTickerData = memoryStore[apiType][ticker];
 
-  // MODIFIED: Changed from const to let so we can update it if we auto-fetch
-  let cachedTickerData = stockCache[ticker];
-
-  // 1. Check for valid data cache and Auto-Fetch if missing
+  // Auto-Fetch if data is missing in memory
   if (
     !cachedTickerData ||
     !cachedTickerData.data ||
     !cachedTickerData.signals
   ) {
     console.log(
-      `[${ticker}/${apiType}/advice] Cache miss. Attempting to auto-fetch data before generating advice.`,
+      `[${ticker}/${apiType}/advice] Memory cache miss. Fetching data...`,
     );
-
     try {
-      // Construct the local API URL to fetch the stock data
       const baseUrl =
-        process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-      const fetchUrl = `${baseUrl}/api/${apiType}/${ticker}`;
+        process.env.NEXT_PUBLIC_BASE_URL || "http://node-app:3000";
+      const fetchRes = await fetch(`${baseUrl}/api/${apiType}/${ticker}`, {
+        method: "GET",
+      });
+
+      if (!fetchRes.ok) throw new Error(`Source API error: ${fetchRes.status}`);
+
+      const responseData = await fetchRes.json();
+
+      // Update local memory with the retrieved data
+      memoryStore[apiType][ticker] = {
+        ...memoryStore[apiType][ticker],
+        ...responseData,
+      };
+      cachedTickerData = memoryStore[apiType][ticker];
 
       console.log(
-        `[${ticker}/${apiType}/advice] Fetching data from: ${fetchUrl}`,
+        `[${ticker}/${apiType}/advice] Auto-fetch complete. Memory sync done.`,
       );
-      const fetchRes = await fetch(fetchUrl, { method: "GET" });
-
-      if (!fetchRes.ok) {
-        throw new Error(`Data fetch API returned status: ${fetchRes.status}`);
-      }
-
-      // Reload cache after successful fetch
-      const updatedCache = await readStockCache(cachePath);
-      cachedTickerData = updatedCache[ticker];
-
-      if (
-        !cachedTickerData ||
-        !cachedTickerData.data ||
-        !cachedTickerData.signals
-      ) {
-        throw new Error("Cache is still empty after successful fetch attempt.");
-      }
-
-      // Update the reference in our local stockCache object
-      stockCache[ticker] = cachedTickerData;
-      console.log(
-        `[${ticker}/${apiType}/advice] Auto-fetch successful. Resuming advice generation.`,
-      );
-    } catch (fetchError) {
-      const errorMessage =
-        fetchError instanceof Error ? fetchError.message : String(fetchError);
-      console.error(
-        `[${ticker}/${apiType}/advice] Auto-fetch failed:`,
-        errorMessage,
-      );
+    } catch (err) {
+      // FIX: Log the err to satisfy ESLint no-unused-vars
+      console.error(`[${ticker}/${apiType}/advice] Auto-fetch failed:`, err);
       return NextResponse.json(
-        { error: `Cache miss and auto-fetch failed: ${errorMessage}` },
+        { error: "Data recovery failed" },
         { status: 500 },
       );
     }
   }
 
-  // 2. Check for valid advice cache
-  if (cachedTickerData?.advice && cachedTickerData.advice.error === false) {
+  // Return cached advice if valid
+  if (cachedTickerData?.advice && !cachedTickerData.advice.error) {
     console.log(
-      `[${ticker}/${apiType}/advice] ADVICE CACHE HIT: Returning cached advice.`,
+      `[${ticker}/${apiType}/advice] Memory Hit: Returning cached response.`,
     );
     return NextResponse.json({ ...cachedTickerData.advice, isCached: true });
   }
 
-  // 3. Check if generation is already in progress
+  // Concurrency check
   if (adviceGenerationInProgress.has(progressKey)) {
     console.log(
-      `[${ticker}/${apiType}/advice] Advice generation in progress. Awaiting existing promise.`,
+      `[${ticker}/${apiType}/advice] Analysis in progress. Waiting for existing promise...`,
     );
     const advice = await adviceGenerationInProgress.get(progressKey)!;
-    return NextResponse.json(advice, {
-      status: advice.error ? 500 : 200,
-    });
+    return NextResponse.json(advice);
   }
 
-  // 4. Generate new advice (if missing or error)
+  // Run new analysis
   const generationPromise = generateAndCacheAdvice(
     apiType,
     ticker,
-    stockCache,
     cachedTickerData,
   );
   adviceGenerationInProgress.set(progressKey, generationPromise);
 
-  let advice: AdviceObject;
   try {
-    advice = await generationPromise;
+    const advice = await generationPromise;
+    return NextResponse.json({ ...advice, isCached: false });
   } finally {
     adviceGenerationInProgress.delete(progressKey);
-    console.log(
-      `[${ticker}/${apiType}/advice] Generation finished. Promise removed from map.`,
-    );
+    console.log(`[${ticker}/${apiType}/advice] Analysis sequence finished.`);
   }
-
-  return NextResponse.json(
-    { ...advice, isCached: false },
-    {
-      status: advice.error ? 500 : 200,
-    },
-  );
 }
