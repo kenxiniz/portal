@@ -1,6 +1,5 @@
 /* /lib/kisApi.ts */
-
-import axios, { AxiosError } from "axios";
+import axios from "axios";
 import { StockDataPoint } from "./stockUtils";
 import stockConfig from "./stock.json";
 
@@ -11,6 +10,7 @@ const KIS_APP_SECRET = process.env.KIS_APP_SECRET;
 let accessToken: string | null = null;
 let tokenExpiresAt: number | null = null;
 
+// Interfaces
 interface KisStockItem {
   xymd: string;
   open: string;
@@ -20,13 +20,16 @@ interface KisStockItem {
   tvol: string;
 }
 
-interface KisApiError {
-  msg1?: string;
+interface KisMinuteStockItem {
+  last: string;
+  open: string;
+  high: string;
+  low: string;
+  evol: string; // Update: Field name for volume in minute chart is 'evol'
+  xhms: string; // Update: Field name for time is 'xhms'
+  xymd: string; // Update: Field name for date is 'xymd'
 }
 
-/*
- *  * * API 인증 토큰을 발급받거나 기존 토큰을 반환하는 함수
- *   * */
 async function getAccessToken(): Promise<string> {
   const now = Date.now();
   if (accessToken && tokenExpiresAt && now < tokenExpiresAt) {
@@ -45,20 +48,16 @@ async function getAccessToken(): Promise<string> {
     });
 
     accessToken = response.data.access_token;
-    /* 토큰 만료 시간 1분 전으로 설정 */
     tokenExpiresAt = now + (response.data.expires_in - 60) * 1000;
 
-    console.log("✅ KIS Access Token has been issued successfully.");
+    console.log("KIS Access Token has been issued successfully.");
     return accessToken!;
   } catch (error) {
-    console.error("❌ Failed to get KIS access token:", error);
+    console.error("Failed to get KIS access token:", error);
     throw new Error("Failed to get KIS access token");
   }
 }
 
-/*
- *  * * 페이지네이션을 구현하여 2년치 데이터를 모두 가져오는 함수
- *   * */
 async function getDailyOverseasStockData(
   ticker: string,
   exchange: string,
@@ -74,34 +73,29 @@ async function getDailyOverseasStockData(
   while (continueFetching) {
     const params = new URLSearchParams({
       AUTH: "",
-      EXCD: exchange,
+      EXCD: exchange.toUpperCase(), // [FIX] Ensure exchange code is uppercase
       SYMB: ticker,
       GUBN: "0",
       BYMD: currentBymd,
       MODP: "1",
     }).toString();
 
-    const url = `${KIS_API_URL}/uapi/overseas-price/v1/quotations/dailyprice?${params}`;
-
     try {
-      console.log(
-        `Fetching data for ${ticker} (EXCD: ${exchange}) until ${currentBymd}...`,
-      );
-      const response = await axios.get(url, {
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          Authorization: `Bearer ${token}`,
-          appkey: KIS_APP_KEY,
-          appsecret: KIS_APP_SECRET,
-          tr_id: "HHDFS76240000",
+      const response = await axios.get(
+        `${KIS_API_URL}/uapi/overseas-price/v1/quotations/dailyprice?${params}`,
+        {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            Authorization: `Bearer ${token}`,
+            appkey: KIS_APP_KEY,
+            appsecret: KIS_APP_SECRET,
+            tr_id: "HHDFS76240000",
+            custtype: "P", // [FIX] Add customer type header (P = Personal)
+          },
         },
-      });
+      );
 
-      if (response.data.rt_cd !== "0") {
-        throw new Error(
-          response.data.msg1 || "Failed to fetch data from KIS API",
-        );
-      }
+      if (response.data.rt_cd !== "0") throw new Error(response.data.msg1);
 
       const chunk = response.data.output2.map((item: KisStockItem) => ({
         date: `${item.xymd.substring(0, 4)}-${item.xymd.substring(4, 6)}-${item.xymd.substring(6, 8)}`,
@@ -116,55 +110,142 @@ async function getDailyOverseasStockData(
         continueFetching = false;
         break;
       }
-
       allData.push(...chunk);
 
-      const lastDateStr = chunk[chunk.length - 1].date;
-      const lastDate = new Date(lastDateStr);
-
+      const lastDate = new Date(chunk[chunk.length - 1].date);
       if (lastDate <= twoYearsAgo) {
         continueFetching = false;
       } else {
-        const nextDate = new Date(lastDate);
-        nextDate.setDate(nextDate.getDate() - 1);
-        currentBymd = nextDate.toISOString().slice(0, 10).replace(/-/g, "");
+        lastDate.setDate(lastDate.getDate() - 1);
+        currentBymd = lastDate.toISOString().slice(0, 10).replace(/-/g, "");
       }
     } catch (error) {
-      const axiosError = error as AxiosError<KisApiError>;
-      const errorMessage =
-        axiosError.response?.data?.msg1 || axiosError.message;
-      console.error(
-        `❌ Failed to fetch overseas daily data for ${ticker} (EXCD: ${exchange}):`,
-        errorMessage,
-      );
-      throw new Error(
-        `Failed to fetch overseas daily data for ${ticker} (EXCD: ${exchange}): ${errorMessage}`,
-      );
+      console.error(`Error fetching daily data for ${ticker}:`, error);
+      throw error;
     }
   }
 
-  const uniqueData = Array.from(
+  return Array.from(
     new Map(allData.map((item) => [item.date, item])).values(),
-  );
-  return uniqueData.sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
-  );
+  ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 }
 
-/*
- *  * * 종목 정보를 stock.json에서 찾아 API를 호출하는 통합 함수
- *   * */
 export async function getDailyStockData(
   ticker: string,
 ): Promise<StockDataPoint[]> {
-  /* [수정] stock.json의 us_stocks를 참조하도록 변경 */
   const stockInfo = stockConfig.us_stocks.find(
     (t) => t.ticker.toUpperCase() === ticker.toUpperCase(),
   );
+  if (!stockInfo) throw new Error(`Ticker ${ticker} not in stock.json`);
+  return getDailyOverseasStockData(stockInfo.ticker, stockInfo.exchange);
+}
 
-  if (stockInfo) {
-    return getDailyOverseasStockData(stockInfo.ticker, stockInfo.exchange);
-  } else {
-    throw new Error(`Ticker ${ticker} is not defined in stock.json.`);
+export async function getMinuteStockData(
+  ticker: string,
+  gap: number = 15,
+  maxPages: number = 10, // Default to fetch up to 10 pages (~1200 records)
+): Promise<StockDataPoint[]> {
+  const stockInfo = stockConfig.us_stocks.find(
+    (t) => t.ticker.toUpperCase() === ticker.toUpperCase(),
+  );
+  if (!stockInfo) throw new Error(`Ticker ${ticker} not in stock.json`);
+
+  const token = await getAccessToken();
+  const allData: StockDataPoint[] = [];
+
+  let continueFetching = true;
+  let currentNext = "";
+  let currentKeyb = "";
+  let pageCount = 0;
+
+  console.log(`Starting pagination to fetch minute data for ${ticker}`);
+
+  while (continueFetching && pageCount < maxPages) {
+    const params = new URLSearchParams({
+      AUTH: "",
+      EXCD: stockInfo.exchange.toUpperCase(), // Ensure exchange code is uppercase
+      SYMB: ticker,
+      NMIN: gap.toString(),
+      PINC: "1", // Set to "1" to include previous day's data
+      NEXT: currentNext,
+      NREC: "120",
+      FILL: "",
+      KEYB: currentKeyb,
+    }).toString();
+
+    try {
+      const response = await axios.get(
+        `${KIS_API_URL}/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice?${params}`,
+        {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            Authorization: `Bearer ${token}`,
+            appkey: KIS_APP_KEY,
+            appsecret: KIS_APP_SECRET,
+            tr_id: "HHDFS76950200", // Corrected TR_ID for overseas minute chart
+            custtype: "P", // Add customer type header (P = Personal)
+          },
+        },
+      );
+
+      if (response.data.rt_cd !== "0") {
+        console.error(`[KIS API Error] ${ticker}: ${response.data.msg1}`);
+        throw new Error(response.data.msg1);
+      }
+
+      const output2 = response.data.output2 || [];
+      if (output2.length === 0) {
+        break;
+      }
+
+      const chunk: StockDataPoint[] = output2
+        .map((item: KisMinuteStockItem) => ({
+          date: `${item.xymd.substring(0, 4)}-${item.xymd.substring(4, 6)}-${item.xymd.substring(6, 8)}T${item.xhms.substring(0, 2)}:${item.xhms.substring(2, 4)}:${item.xhms.substring(4, 6)}`,
+          open: parseFloat(item.open),
+          high: parseFloat(item.high),
+          low: parseFloat(item.low),
+          close: parseFloat(item.last),
+          volume: parseFloat(item.evol),
+        }))
+        .filter((item: StockDataPoint) => !isNaN(item.close) && item.close > 0);
+
+      if (chunk.length === 0) {
+        continueFetching = false;
+        break;
+      }
+
+      allData.push(...chunk);
+
+      // Check if there is more data to fetch based on KIS API rules
+      if (output2.length < 120) {
+        continueFetching = false;
+      } else {
+        currentNext = "1"; // Update NEXT to 1 for subsequent requests
+        const lastItem = output2[output2.length - 1];
+        currentKeyb = lastItem.xymd + lastItem.xhms; // Update KEYB with the last item's date and time
+      }
+
+      pageCount++;
+
+      // Delay to avoid hitting API rate limits
+      if (continueFetching) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    } catch (error) {
+      console.error(
+        `Error fetching minute data for ${ticker} on page ${pageCount}:`,
+        error,
+      );
+      throw error;
+    }
   }
+
+  console.log(
+    `Completed fetching minute data for ${ticker}, total pages: ${pageCount}, total records: ${allData.length}`,
+  );
+
+  // Deduplicate and sort data
+  return Array.from(
+    new Map(allData.map((item) => [item.date, item])).values(),
+  ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 }

@@ -1,16 +1,16 @@
 /* lib/stockUtils.ts */
 
-// --- Existing StockDataPoint & TradingSignal Interfaces (Keep as is) ---
+// --- Interfaces ---
+
 export interface StockDataPoint {
-  date: string /* YYYY-MM-DD 형식의 문자열 */;
+  date: string; // YYYY-MM-DD 또는 YYYY-MM-DD HH:mm:ss
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number;
-  rsi?: number; // Optional
+  rsi?: number;
   bollingerBands?: {
-    // Optional
     middle: number;
     upper: number;
     lower: number;
@@ -28,22 +28,17 @@ export interface TradingSignal {
   realizedPrice?: number;
 }
 
-// --- AdviceObject Interface ---
-/**
- * Represents the structure for storing Gemini AI advice, including error status.
- */
 export interface AdviceObject {
-  error: boolean; // True if generation failed, false otherwise
-  message: string; // The advice text or the error details
+  error: boolean;
+  message: string;
 }
 
-// MODIFIED: Added advice back to TickerState
 export interface TickerState {
   data: StockDataPoint[] | null;
   loading: boolean;
   error: string | null;
   signals: TradingSignal[];
-  advice: AdviceObject | null; // restored
+  advice: AdviceObject | null;
 }
 
 export interface CachedStockData {
@@ -53,81 +48,103 @@ export interface CachedStockData {
   advice?: AdviceObject | null;
 }
 
-// --- Existing functions (calculateRSI, calculateBollingerBands, analyzeAllTradingSignals) ---
+// --- Technical Indicators ---
+
+/**
+ * RSI (Relative Strength Index) 계산
+ * 데이터의 인덱스 밀림을 방지하기 위해 입력 배열과 동일한 길이를 반환합니다.
+ */
 export const calculateRSI = (
   data: StockDataPoint[],
   period: number = 14,
 ): StockDataPoint[] => {
-  if (data.length <= period) return data;
-  const rsiData = [...data];
-  let avgGain = 0,
-    avgLoss = 0;
+  if (data.length === 0) return [];
+
+  // 1. 모든 데이터 포인트에 rsi 필드를 undefined로 초기화하여 원본 구조 유지
+  const rsiData = data.map((item) => ({
+    ...item,
+    rsi: undefined as number | undefined,
+  }));
+
+  if (data.length <= period) return rsiData;
+
+  let avgGain = 0;
+  let avgLoss = 0;
+
+  // 2. 초기 평균 상승/하락분 계산
   for (let i = 1; i <= period; i++) {
-    if (!rsiData[i] || !rsiData[i - 1]) continue;
     const diff = rsiData[i].close - rsiData[i - 1].close;
     if (diff > 0) avgGain += diff;
     else avgLoss += Math.abs(diff);
   }
-  if (period > 0) {
-    avgGain /= period;
-    avgLoss /= period;
-  }
 
+  avgGain /= period;
+  avgLoss /= period;
+
+  // 3. 첫 번째 RSI 값 할당
   if (rsiData[period]) {
-    rsiData[period].rsi =
-      100 - 100 / (1 + (avgLoss === 0 ? Infinity : avgGain / avgLoss));
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsiData[period].rsi = 100 - 100 / (1 + rs);
   }
 
+  // 4. Wilder's Smoothing 방식 적용
   for (let i = period + 1; i < rsiData.length; i++) {
-    if (!rsiData[i] || !rsiData[i - 1]) continue;
     const diff = rsiData[i].close - rsiData[i - 1].close;
     const gain = diff > 0 ? diff : 0;
     const loss = diff < 0 ? Math.abs(diff) : 0;
 
-    if (period > 0) {
-      avgGain = (avgGain * (period - 1) + gain) / period;
-      avgLoss = (avgLoss * (period - 1) + loss) / period;
-    }
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
 
-    if (rsiData[i]) {
-      rsiData[i].rsi =
-        100 - 100 / (1 + (avgLoss === 0 ? Infinity : avgGain / avgLoss));
-    }
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsiData[i].rsi = 100 - 100 / (1 + rs);
   }
+
   return rsiData;
 };
 
+/**
+ * Bollinger Bands 계산 함수 수정
+ * TypeScript 타입 추론 오류를 해결하기 위해 초기화 시 명시적 타입을 지정합니다.
+ */
 export const calculateBollingerBands = (
   data: StockDataPoint[],
   period: number = 20,
   stdDev: number = 2,
 ): StockDataPoint[] => {
-  if (data.length < period) return data;
+  // [FIX] 초기화 시 bollingerBands의 타입을 명시적으로 지정하여 나중에 객체 할당이 가능하게 합니다.
+  const bbData = data.map((item) => ({
+    ...item,
+    bollingerBands: undefined as StockDataPoint["bollingerBands"],
+  }));
 
-  const bbData = [...data];
+  if (data.length < period) return bbData;
 
   for (let i = period - 1; i < bbData.length; i++) {
     const slice = bbData.slice(i - period + 1, i + 1);
     const sum = slice.reduce((acc, val) => acc + val.close, 0);
-    const middle = period > 0 ? sum / period : 0;
+    const middle = sum / period;
+
     const variance =
-      period > 0
-        ? slice.reduce((acc, val) => acc + Math.pow(val.close - middle, 2), 0) /
-          period
-        : 0;
+      slice.reduce((acc, val) => acc + Math.pow(val.close - middle, 2), 0) /
+      period;
     const standardDeviation = Math.sqrt(variance);
 
-    if (bbData[i]) {
-      bbData[i].bollingerBands = {
-        middle: middle,
-        upper: middle + standardDeviation * stdDev,
-        lower: middle - standardDeviation * stdDev,
-      };
-    }
+    // 이제 정상적으로 할당이 가능합니다.
+    bbData[i].bollingerBands = {
+      middle: middle,
+      upper: middle + standardDeviation * stdDev,
+      lower: middle - standardDeviation * stdDev,
+    };
   }
   return bbData;
 };
 
+// --- Signal Analysis ---
+
+/**
+ * RSI 다이버전스 및 볼린저 밴드 기반 매매 신호 분석
+ */
 export const analyzeAllTradingSignals = (
   data: StockDataPoint[],
 ): TradingSignal[] => {
@@ -145,6 +162,7 @@ export const analyzeAllTradingSignals = (
   let firstPeakIndex: number | null = null;
   let potentialSecondPeak: StockDataPoint | null = null;
 
+  // 인덱스 1부터 시작하여 이전 봉과 비교
   for (let i = 1; i < data.length; i++) {
     const currentPoint = data[i];
     const prevPoint = data[i - 1];
@@ -157,7 +175,7 @@ export const analyzeAllTradingSignals = (
     )
       continue;
 
-    /* --- 쌍바닥 (매수) 신호 로직 --- */
+    /* --- 매수 신호 로직 (RSI 상승 다이버전스) --- */
     if (potentialSecondTrough && firstTrough) {
       if (currentPoint.close > potentialSecondTrough.close) {
         const buySignal: TradingSignal = {
@@ -191,20 +209,18 @@ export const analyzeAllTradingSignals = (
         }
         const daysSinceFirstTrough = i - firstTroughIndex;
 
-        if (
-          firstTrough.rsi !== undefined &&
-          currentPoint.rsi < firstTrough.rsi
-        ) {
+        // RSI가 첫 번째 저점보다 낮아지면 다이버전스 무효화
+        if (currentPoint.rsi < firstTrough.rsi!) {
           firstTrough = null;
           firstTroughIndex = null;
         } else if (daysSinceFirstTrough > 90) {
           firstTrough = null;
           firstTroughIndex = null;
         } else if (daysSinceFirstTrough > 5) {
+          // 가격은 낮아지는데 RSI는 높아지는 경우 (상승 다이버전스 조건)
           if (
-            firstTrough.rsi !== undefined &&
             currentPoint.close < firstTrough.close &&
-            currentPoint.rsi > firstTrough.rsi
+            currentPoint.rsi > firstTrough.rsi!
           ) {
             potentialSecondTrough = currentPoint;
           }
@@ -212,7 +228,7 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* --- 쌍봉 (인버스 매수) 신호 로직 --- */
+    /* --- 인버스 매수 신호 로직 (RSI 하락 다이버전스) --- */
     if (potentialSecondPeak && firstPeak) {
       if (currentPoint.close < potentialSecondPeak.close) {
         const inverseBuySignal: TradingSignal = {
@@ -246,17 +262,18 @@ export const analyzeAllTradingSignals = (
         }
         const daysSinceFirstPeak = i - firstPeakIndex;
 
-        if (firstPeak.rsi !== undefined && currentPoint.rsi > firstPeak.rsi) {
+        // RSI가 첫 번째 고점보다 높아지면 다이버전스 무효화
+        if (currentPoint.rsi > firstPeak.rsi!) {
           firstPeak = null;
           firstPeakIndex = null;
         } else if (daysSinceFirstPeak > 90) {
           firstPeak = null;
           firstPeakIndex = null;
         } else if (daysSinceFirstPeak > 5) {
+          // 가격은 높아지는데 RSI는 낮아지는 경우 (하락 다이버전스 조건)
           if (
-            firstPeak.rsi !== undefined &&
             currentPoint.close > firstPeak.close &&
-            currentPoint.rsi < firstPeak.rsi
+            currentPoint.rsi < firstPeak.rsi!
           ) {
             potentialSecondPeak = currentPoint;
           }
@@ -306,22 +323,24 @@ export const analyzeAllTradingSignals = (
     }
   }
 
+  // 중복 제거 및 최종 정렬
   const uniqueSignalsMap = new Map<string, TradingSignal>();
   signals.forEach((s) => {
     uniqueSignalsMap.set(`${s.date}-${s.reason}`, s);
   });
+
   const uniqueSignals = Array.from(uniqueSignalsMap.values());
 
+  // 마지막 날짜에 신호가 없으면 '관망' 신호 추가
   if (data.length > 0) {
-    const lastDataPointDate = data[data.length - 1]?.date;
-    const lastSignalDate =
-      uniqueSignals.length > 0
-        ? uniqueSignals[uniqueSignals.length - 1]?.date
-        : null;
+    const lastDataPoint = data[data.length - 1];
+    const hasSignalOnLastDate = uniqueSignals.some(
+      (s) => s.date === lastDataPoint.date,
+    );
 
-    if (lastDataPointDate && lastSignalDate !== lastDataPointDate) {
+    if (!hasSignalOnLastDate) {
       uniqueSignals.push({
-        date: lastDataPointDate,
+        date: lastDataPoint.date,
         type: "hold",
         reason: "관망 (중립 구간)",
       });

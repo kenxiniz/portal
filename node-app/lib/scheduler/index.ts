@@ -1,9 +1,11 @@
+/* lib/scheduler/index.ts */
 import cron from "node-cron";
 import { schedulerConfig } from "./config";
 import { TelegramNotificationService } from "./telegramService";
 import { generateDailyAdvice, resetAdviceCache } from "./jobs/advice";
 import { updateLottoWinningNumbers, sendDailyLottoNumbers } from "./jobs/lotto";
 import { sendDailyStockSignals } from "./jobs/stock";
+import { collectMarketData } from "./jobs/collect"; // [NEW] Import collection job
 
 class JobScheduler {
   private telegramService: TelegramNotificationService;
@@ -38,6 +40,12 @@ class JobScheduler {
       "Reset Advice Cache on Weekdays",
       schedulerConfig.cronSchedules.resetAdvice,
       resetAdviceCache,
+    );
+    // [NEW] Added 5-minute market data collection job
+    this._scheduleJob(
+      "Collect Market Data Every 5 Minutes",
+      schedulerConfig.cronSchedules.collectMarketData || "*/5 * * * *",
+      collectMarketData,
     );
   }
 
