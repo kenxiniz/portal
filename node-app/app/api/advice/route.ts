@@ -1,5 +1,6 @@
 /* /app/api/advice/route.ts */
 // MODIFIED: This endpoint now reads data/signals from cache, not from POST body.
+// MODIFIED: Added auto-fetch logic for cache misses. Emojis removed from logs.
 
 import { NextResponse } from "next/server";
 import path from "path";
@@ -8,7 +9,7 @@ import {
   CachedStockData,
   AdviceObject,
   TradingSignal,
-  StockDataPoint, // MODIFIED: Import StockDataPoint
+  StockDataPoint,
 } from "@/lib/stockUtils";
 import { getGeminiAdvice } from "@/lib/geminiUtils";
 import stockConfig from "@/lib/stock.json";
@@ -76,14 +77,14 @@ async function generateAndCacheAdvice(
   apiType: ApiType,
   ticker: string,
   stockCache: StockCache,
-  cachedTickerData: CachedStockData, // Pass the specific cache entry
+  cachedTickerData: CachedStockData,
 ): Promise<AdviceObject> {
   const cachePath = getCachePath(apiType);
   console.log(
-    `🤖 [${ticker}/${apiType}/advice] ADVICE CACHE MISS: Generating new advice...`,
+    `[${ticker}/${apiType}/advice] ADVICE CACHE MISS: Generating new advice...`,
   );
 
-  // MODIFIED: Extract data from cache
+  // Extract data from cache
   const signals: TradingSignal[] = cachedTickerData.signals || [];
   const fullStockData: StockDataPoint[] = cachedTickerData.data || [];
   // Get last 7 days of data
@@ -93,7 +94,6 @@ async function generateAndCacheAdvice(
     let newAdvice: AdviceObject;
     if (apiType === "kStock") {
       const stockName = getStockName(ticker);
-      // MODIFIED: Pass recentStockData to getGeminiAdvice
       newAdvice = await getGeminiAdvice(
         signals,
         recentStockData,
@@ -103,7 +103,6 @@ async function generateAndCacheAdvice(
       );
     } else {
       // "stock" (AV) and "kisStock" are both 'us' market
-      // MODIFIED: Pass recentStockData to getGeminiAdvice
       newAdvice = await getGeminiAdvice(signals, recentStockData, ticker, "us");
     }
 
@@ -112,7 +111,7 @@ async function generateAndCacheAdvice(
     await writeStockCache(cachePath, stockCache);
 
     console.log(
-      `✅ [${ticker}/${apiType}/advice] New advice generated and cached.`,
+      `[${ticker}/${apiType}/advice] New advice generated and cached.`,
     );
     return newAdvice;
   } catch (e) {
@@ -122,7 +121,7 @@ async function generateAndCacheAdvice(
     );
     const errorAdvice: AdviceObject = {
       error: true,
-      message: `Gemini 조언 생성 실패: ${
+      message: `Gemini advice generation failed: ${
         e instanceof Error ? e.message : "Unknown error"
       }`,
     };
@@ -136,14 +135,11 @@ export async function POST(request: Request) {
   let body: {
     ticker: string;
     apiType: ApiType;
-    // MODIFIED: signals is no longer needed in the body
-    // signals: TradingSignal[];
   };
 
   try {
     body = await request.json();
   } catch (error) {
-    // FIXED: Use the 'error' variable
     console.error("[/api/advice] Failed to parse request body:", error);
     return NextResponse.json(
       { error: "Invalid request body" },
@@ -151,9 +147,8 @@ export async function POST(request: Request) {
     );
   }
 
-  // MODIFIED: Only ticker and apiType are needed
   const { ticker, apiType } = body;
-  const progressKey = `${apiType}-${ticker}`; // Composite key for the map
+  const progressKey = `${apiType}-${ticker}`;
 
   if (!ticker || !apiType) {
     return NextResponse.json(
@@ -164,32 +159,71 @@ export async function POST(request: Request) {
 
   const cachePath = getCachePath(apiType);
   const stockCache = await readStockCache(cachePath);
-  const cachedTickerData = stockCache[ticker];
 
-  // 1. Check for valid data cache
-  // MODIFIED: We MUST have data and signals in the cache to proceed
+  // MODIFIED: Changed from const to let so we can update it if we auto-fetch
+  let cachedTickerData = stockCache[ticker];
+
+  // 1. Check for valid data cache and Auto-Fetch if missing
   if (
     !cachedTickerData ||
     !cachedTickerData.data ||
     !cachedTickerData.signals
   ) {
-    console.error(
-      `[${ticker}/${apiType}/advice] ERROR: Data or signals not found in cache. Cannot generate advice.`,
+    console.log(
+      `[${ticker}/${apiType}/advice] Cache miss. Attempting to auto-fetch data before generating advice.`,
     );
-    return NextResponse.json(
-      {
-        error: "Cache miss. Data/signals not found. Please fetch data first.",
-      },
-      { status: 404 },
-    );
+
+    try {
+      // Construct the local API URL to fetch the stock data
+      const baseUrl =
+        process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+      const fetchUrl = `${baseUrl}/api/${apiType}/${ticker}`;
+
+      console.log(
+        `[${ticker}/${apiType}/advice] Fetching data from: ${fetchUrl}`,
+      );
+      const fetchRes = await fetch(fetchUrl, { method: "GET" });
+
+      if (!fetchRes.ok) {
+        throw new Error(`Data fetch API returned status: ${fetchRes.status}`);
+      }
+
+      // Reload cache after successful fetch
+      const updatedCache = await readStockCache(cachePath);
+      cachedTickerData = updatedCache[ticker];
+
+      if (
+        !cachedTickerData ||
+        !cachedTickerData.data ||
+        !cachedTickerData.signals
+      ) {
+        throw new Error("Cache is still empty after successful fetch attempt.");
+      }
+
+      // Update the reference in our local stockCache object
+      stockCache[ticker] = cachedTickerData;
+      console.log(
+        `[${ticker}/${apiType}/advice] Auto-fetch successful. Resuming advice generation.`,
+      );
+    } catch (fetchError) {
+      const errorMessage =
+        fetchError instanceof Error ? fetchError.message : String(fetchError);
+      console.error(
+        `[${ticker}/${apiType}/advice] Auto-fetch failed:`,
+        errorMessage,
+      );
+      return NextResponse.json(
+        { error: `Cache miss and auto-fetch failed: ${errorMessage}` },
+        { status: 500 },
+      );
+    }
   }
 
   // 2. Check for valid advice cache
   if (cachedTickerData?.advice && cachedTickerData.advice.error === false) {
     console.log(
-      `✅ [${ticker}/${apiType}/advice] ADVICE CACHE HIT: Returning cached advice.`,
+      `[${ticker}/${apiType}/advice] ADVICE CACHE HIT: Returning cached advice.`,
     );
-    // [NEW] Return isCached: true so scheduler can skip waiting
     return NextResponse.json({ ...cachedTickerData.advice, isCached: true });
   }
 
@@ -198,7 +232,6 @@ export async function POST(request: Request) {
     console.log(
       `[${ticker}/${apiType}/advice] Advice generation in progress. Awaiting existing promise.`,
     );
-    // Await the existing promise
     const advice = await adviceGenerationInProgress.get(progressKey)!;
     return NextResponse.json(advice, {
       status: advice.error ? 500 : 200,
@@ -206,28 +239,24 @@ export async function POST(request: Request) {
   }
 
   // 4. Generate new advice (if missing or error)
-  // MODIFIED: No longer passing signals from body
   const generationPromise = generateAndCacheAdvice(
     apiType,
     ticker,
     stockCache,
-    cachedTickerData, // Pass the specific cache entry
+    cachedTickerData,
   );
   adviceGenerationInProgress.set(progressKey, generationPromise);
 
   let advice: AdviceObject;
   try {
-    // Await its completion
     advice = await generationPromise;
   } finally {
-    // Remove from map once complete (success or fail)
     adviceGenerationInProgress.delete(progressKey);
     console.log(
       `[${ticker}/${apiType}/advice] Generation finished. Promise removed from map.`,
     );
   }
 
-  // [NEW] Return isCached: false
   return NextResponse.json(
     { ...advice, isCached: false },
     {

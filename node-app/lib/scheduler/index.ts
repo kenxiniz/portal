@@ -1,15 +1,15 @@
 import cron from "node-cron";
 import { schedulerConfig } from "./config";
-import { KakaoNotificationService } from "./kakaoService";
+import { TelegramNotificationService } from "./telegramService";
 import { generateDailyAdvice, resetAdviceCache } from "./jobs/advice";
 import { updateLottoWinningNumbers, sendDailyLottoNumbers } from "./jobs/lotto";
 import { sendDailyStockSignals } from "./jobs/stock";
 
 class JobScheduler {
-  private kakaoService: KakaoNotificationService;
+  private telegramService: TelegramNotificationService;
 
   constructor() {
-    this.kakaoService = new KakaoNotificationService();
+    this.telegramService = new TelegramNotificationService();
     this.initializeJobs();
   }
 
@@ -22,12 +22,12 @@ class JobScheduler {
     this._scheduleJob(
       "Send Daily Lotto Numbers",
       schedulerConfig.cronSchedules.sendDailyLotto,
-      () => sendDailyLottoNumbers(this.kakaoService),
+      () => sendDailyLottoNumbers(this.telegramService),
     );
     this._scheduleJob(
       "Send Daily Stock Signals",
       schedulerConfig.cronSchedules.sendDailyStockSignals,
-      () => sendDailyStockSignals(this.kakaoService),
+      () => sendDailyStockSignals(this.telegramService),
     );
     this._scheduleJob(
       "Generate Daily Advice",
@@ -41,7 +41,11 @@ class JobScheduler {
     );
   }
 
-  private _scheduleJob(name: string, schedule: string, task: () => Promise<void>): void {
+  private _scheduleJob(
+    name: string,
+    schedule: string,
+    task: () => Promise<void>,
+  ): void {
     cron.schedule(
       schedule,
       async () => {
@@ -63,7 +67,9 @@ declare global {
 }
 
 if (!global.isSchedulerRunning) {
-  console.log(`Initializing scheduler... (NODE_ENV: ${process.env.NODE_ENV || "unknown"})`);
+  console.log(
+    `Initializing scheduler... (NODE_ENV: ${process.env.NODE_ENV || "unknown"})`,
+  );
   new JobScheduler();
   global.isSchedulerRunning = true;
 } else {

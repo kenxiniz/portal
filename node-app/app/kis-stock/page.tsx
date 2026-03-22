@@ -114,13 +114,27 @@ export default function KisStockPage() {
   useEffect(() => {
     const loadAllTickersSequentially = async () => {
       if (tickers.length > 0) {
-        const firstTicker = tickers[0];
-        setOpenedTicker(firstTicker);
-        await fetchStockData(firstTicker);
+        // Parse URL search parameters to check for a specific ticker
+        const urlParams = new URLSearchParams(window.location.search);
+        const focusTicker = urlParams.get("ticker");
 
-        for (let i = 1; i < tickers.length; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
+        // Determine which ticker to load and expand first
+        const initialTicker =
+          focusTicker && tickers.includes(focusTicker)
+            ? focusTicker
+            : tickers[0];
+
+        setOpenedTicker(initialTicker);
+        await fetchStockData(initialTicker);
+
+        // Load the remaining tickers sequentially
+        for (let i = 0; i < tickers.length; i++) {
           const ticker = tickers[i];
+
+          // Skip the initial ticker since it is already loaded
+          if (ticker === initialTicker) continue;
+
+          await new Promise((resolve) => setTimeout(resolve, 500));
           await fetchStockData(ticker);
         }
       }

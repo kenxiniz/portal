@@ -2,7 +2,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-/* [수정] 보호할 페이지 경로 목록에 '/api/friends'를 추가합니다. */
 const protectedRoutes = [
   "/my-properties",
   "/stock",
@@ -14,28 +13,24 @@ const protectedRoutes = [
 
 const COOKIE_NAME = "app-auth-token";
 
-const getBaseUrl = () => {
-  if (process.env.APP_ENV === "docker") {
-    return "https://kenxin.org";
-  }
-  return "https://kenxin.org";
-  //return 'https://dev.kenxin.org';
-};
-
 export function middleware(request: NextRequest) {
-  const baseUrl = getBaseUrl();
-
   if (
     protectedRoutes.some((path) => request.nextUrl.pathname.startsWith(path))
   ) {
     const authToken = request.cookies.get(COOKIE_NAME);
 
     if (!authToken || authToken.value !== "true") {
-      const loginUrl = new URL("/login", baseUrl);
+      // Create a dynamic login URL based on the current request's origin
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+
+      // Clear any existing search parameters before setting the callback
+      loginUrl.search = "";
       loginUrl.searchParams.set(
         "callbackUrl",
         request.nextUrl.pathname + request.nextUrl.search,
       );
+
       return NextResponse.redirect(loginUrl);
     }
   }

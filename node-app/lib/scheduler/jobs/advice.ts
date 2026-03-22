@@ -20,18 +20,26 @@ export async function generateDailyAdvice(): Promise<void> {
     for (const stock of usStocks) {
       try {
         console.log(`Triggering advice generation for ${stock.ticker}...`);
-        const response = await axios.post(`${schedulerConfig.apiBaseUrl}/api/advice`, {
-          ticker: stock.ticker,
-          apiType: "kisStock",
-        });
+        const response = await axios.post(
+          `${schedulerConfig.apiBaseUrl}/api/advice`,
+          {
+            ticker: stock.ticker,
+            apiType: "kisStock",
+          },
+        );
 
         if (response.data && response.data.isCached) {
-          console.log(`[${stock.ticker}] Cached advice found. Skipping 1-minute wait.`);
+          console.log(
+            `[${stock.ticker}] Cached advice found. Skipping 1-minute wait.`,
+          );
           continue;
         }
       } catch (error) {
         const axiosError = error as AxiosError;
-        console.error(`Failed to generate advice for ${stock.ticker}:`, axiosError.response?.data || axiosError.message);
+        console.error(
+          `Failed to generate advice for ${stock.ticker}:`,
+          axiosError.response?.data || axiosError.message,
+        );
       }
 
       console.log("Waiting 1 minute before next request...");
