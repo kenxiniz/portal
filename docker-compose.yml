@@ -13,6 +13,8 @@ services:
       - app-network
     env_file:
       - ./node-app/.env
+    depends_on:
+      - mongodb
     volumes:
       - ./node-app/.next/cache:/app/.next/cache
       - ./node-app/.cache:/app/.cache
@@ -52,6 +54,20 @@ services:
       # Shared named volume for Certbot ACME challenge
       - webroot:/var/www/html
     restart: always
+    networks:
+      - app-network
+
+  mongodb:
+    build:
+      context: ./mongodb
+      dockerfile: Dockerfile
+    container_name: mongodb
+    restart: always
+    # Load environment variables for the build and runtime
+    env_file:
+      - ./mongodb/.env
+    volumes:
+      - ./mongodb_data:/data/db
     networks:
       - app-network
 
