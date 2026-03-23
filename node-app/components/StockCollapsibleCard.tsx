@@ -16,10 +16,9 @@ import {
   TrendingUp,
   Minus,
   CircleDollarSign,
-  Sparkles, // AI icon
-  AlertTriangle, // Error icon
+  Sparkles,
+  AlertTriangle,
 } from "lucide-react";
-// ✅ [수정] AdviceObject 제거 (TickerState 내에서 사용되므로 별도 import 불필요)
 import { TickerState, TradingSignal } from "@/lib/stockUtils";
 import {
   StockChartDisplay,
@@ -37,29 +36,48 @@ import {
 
 interface StockCollapsibleCardProps {
   displayName: string;
-  tickerSymbol: string; // Restored this prop to match URL params
+  tickerSymbol: string;
   apiType: "kisStock" | "kStock" | "stock";
   tickerState: TickerState;
   gridStrokeColor: string;
   isOpen: boolean;
   onOpenChange: () => void;
   currency?: "USD" | "KRW";
+  timeframe?: "1d" | "1h" | "15m";
 }
 
-// --- Existing helper functions ---
-const formatDate = (dateString: string) => {
+// [NEW] Updated date formatting function to handle intraday hours and minutes
+const formatDateTime = (
+  dateString: string,
+  timeframe?: "1d" | "1h" | "15m",
+) => {
   if (!dateString) return "-";
   try {
-    const date = new Date(dateString);
+    // [NEW] Ensure standard ISO format for safe parsing
+    const safeDateStr = dateString.includes(" ")
+      ? dateString.replace(" ", "T")
+      : dateString;
+    const date = new Date(safeDateStr);
+
     if (isNaN(date.getTime())) return dateString;
+
     const year = date.getFullYear().toString().slice(-2);
     const month = (date.getMonth() + 1).toString().padStart(2, "0");
     const day = date.getDate().toString().padStart(2, "0");
-    return `${year}-${month}-${day}`;
+
+    if (!timeframe || timeframe === "1d") {
+      return `${year}-${month}-${day}`;
+    } else {
+      // [NEW] Extract and append hours and minutes for intraday timeframes
+      const hours = date.getHours().toString().padStart(2, "0");
+      const minutes = date.getMinutes().toString().padStart(2, "0");
+      return `${year}-${month}-${day} ${hours}:${minutes}`;
+    }
   } catch {
     return dateString;
   }
 };
+
 const getSignalIcon = (signal: TradingSignal) => {
   if (signal.type === "sell") {
     return <CircleDollarSign className="h-4 w-4 text-green-500" />;
@@ -76,36 +94,29 @@ const getSignalIcon = (signal: TradingSignal) => {
 export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   displayName,
   tickerSymbol,
-  // MODIFIED: Removed unused props apiType
   tickerState,
   gridStrokeColor,
   isOpen,
   onOpenChange,
   currency = "USD",
+  timeframe = "1d",
 }) => {
   const latestSignal =
     Array.isArray(tickerState.signals) && tickerState.signals.length > 0
       ? tickerState.signals.at(-1)
       : null;
   const chartRef = useRef<StockChartDisplayHandles>(null);
-
-  // Add reference for auto-scrolling
   const cardContainerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll logic based on URL search params
   useEffect(() => {
-    // Read the ticker param from the current window location
     const urlParams = new URLSearchParams(window.location.search);
     const focusTicker = urlParams.get("ticker");
 
-    // If the URL matches this card and it is open, scroll it into view
     if (focusTicker === tickerSymbol && isOpen && cardContainerRef.current) {
-      // Add a slight delay to allow the collapsible animation to finish expanding
       setTimeout(() => {
         if (cardContainerRef.current) {
           const elementTop =
             cardContainerRef.current.getBoundingClientRect().top;
-          // Offset by 20px from the top of the viewport
           const y = elementTop + window.scrollY - 20;
           window.scrollTo({ top: y, behavior: "smooth" });
         }
@@ -152,17 +163,13 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     chartRef.current?.moveToDate(targetDate);
   };
 
-  // MODIFIED: Use advice directly from tickerState
   const adviceObject = tickerState.advice;
   const adviceMessage = adviceObject?.message;
   const hasAdviceError = adviceObject?.error === true;
   const isMainDataLoading = tickerState.loading && !tickerState.data;
-
-  // New: Check if advice is actually loaded
   const isAdviceAvailable = !!adviceObject;
 
   return (
-    // Wrapper div added to hold the ref and id for precise scrolling
     <div
       ref={cardContainerRef}
       id={`stock-card-${tickerSymbol}`}
@@ -211,7 +218,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
           </CollapsibleTrigger>
           <CollapsibleContent>
             <CardContent className="pt-4 pb-4 px-4">
-              {/* --- Signals Table --- */}
               {historicalSignals.length > 0 ? (
                 <div className="my-4">
                   <h4 className="text-sm font-semibold mb-2 text-slate-600 dark:text-slate-400">
@@ -240,11 +246,13 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
                           >
                             <TableCell className="font-mono text-[11px] whitespace-nowrap py-1 px-2">
+                              {/* [NEW] Apply formatDateTime with timeframe parameter */}
                               {signal.startDate
-                                ? `${formatDate(signal.startDate)} ~ ${formatDate(
+                                ? `${formatDateTime(signal.startDate, timeframe)} ~ ${formatDateTime(
                                     signal.date,
+                                    timeframe,
                                   )}`
-                                : formatDate(signal.date)}
+                                : formatDateTime(signal.date, timeframe)}
                             </TableCell>
                             <TableCell className="text-xs py-1 px-2">
                               <div className="flex items-center gap-1">
@@ -291,9 +299,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                   지난 분석 기간 동안 유의미한 매매 신호가 없었습니다.
                 </p>
               ) : null}
-              {/* --- End Signals Table --- */}
 
-              {/* --- Gemini AI Advice Section --- */}
               <div
                 className={cn(
                   "my-4 p-3 rounded-lg shadow-inner border",
@@ -318,7 +324,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                   Gemini AI 조언 {hasAdviceError ? "(오류)" : ""}
                 </h4>
 
-                {/* MODIFIED: Display pre-loaded advice or a standby message */}
                 {hasAdviceError ? (
                   <p
                     className={cn(
@@ -345,9 +350,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                   </p>
                 )}
               </div>
-              {/* --- End Gemini AI Advice Section --- */}
 
-              {/* --- Chart Display --- */}
               {tickerState.data && !tickerState.error && (
                 <StockChartDisplay
                   ref={chartRef}
@@ -356,6 +359,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                   gridStrokeColor={gridStrokeColor}
                   loading={isMainDataLoading}
                   error={null}
+                  timeframe={timeframe}
                 />
               )}
               {tickerState.error && !tickerState.loading && (
@@ -368,7 +372,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                   차트 로딩 중...
                 </div>
               )}
-              {/* --- End Chart Display --- */}
             </CardContent>
           </CollapsibleContent>
         </Card>
