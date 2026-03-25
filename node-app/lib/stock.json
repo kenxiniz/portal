@@ -1,6 +1,6 @@
 {
   "us_stocks": [
-    { "ticker": "SBIT", "exchange": "AMS" },
+    { "ticker": "GOOGL", "exchange": "NAS" },
     { "ticker": "TSLA", "exchange": "NAS" },
     { "ticker": "NVDA", "exchange": "NAS" },
     { "ticker": "SOXL", "exchange": "AMS" },
@@ -10,7 +10,8 @@
     { "ticker": "TMV", "exchange": "AMS" },
     { "ticker": "TMF", "exchange": "AMS" },
     { "ticker": "YINN", "exchange": "AMS" },
-    { "ticker": "YANG", "exchange": "AMS" }
+    { "ticker": "YANG", "exchange": "AMS" },
+    { "ticker": "SBIT", "exchange": "AMS" }
   ],
   "k_stocks": [
     { "ticker": "Q530105", "name": "삼성 인버스 2X 코스피200" },
