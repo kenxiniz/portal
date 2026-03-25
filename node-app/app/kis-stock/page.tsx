@@ -38,7 +38,19 @@ export default function KisStockPage() {
   );
 
   const [openedTicker, setOpenedTicker] = useState<string | null>(null);
-  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>("1d");
+
+  // [MODIFIED] Initialize selectedTimeframe from URL parameter 'tf' if it exists
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>(() => {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const tfParam = urlParams.get("tf");
+      if (tfParam === "1h" || tfParam === "15m" || tfParam === "1d") {
+        return tfParam as Timeframe;
+      }
+    }
+    return "1d";
+  });
+
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
@@ -49,7 +61,9 @@ export default function KisStockPage() {
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
   const adviceTriggered = useRef(false);
-  const previousTimeframe = useRef<Timeframe>("1d");
+
+  // [MODIFIED] Initialize previousTimeframe with the initial selectedTimeframe
+  const previousTimeframe = useRef<Timeframe>(selectedTimeframe);
 
   const nextSyncTimeRef = useRef<number | null>(null);
 
@@ -215,7 +229,6 @@ export default function KisStockPage() {
     }
   }, [loadAllTickersSequentially, selectedTimeframe]);
 
-  // [MODIFIED] Unified Single Timer: Handles both countdown and data fetching
   useEffect(() => {
     const unifiedSyncTimer = setInterval(() => {
       if (nextSyncTimeRef.current) {

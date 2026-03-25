@@ -151,22 +151,18 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     return "";
   };
 
-  // [NEW] Calculate the date exactly one year ago from today
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-  // [MODIFIED] Filter historical signals to only include those from the last 1 year
   const historicalSignals = Array.isArray(tickerState.signals)
     ? tickerState.signals.filter((s) => {
         if (s.type === "hold") return false;
 
-        // Safely parse the signal date
         const safeDateStr = s.date.includes(" ")
           ? s.date.replace(" ", "T")
           : s.date;
         const signalDate = new Date(safeDateStr);
 
-        // Exclude signals older than 1 year
         return signalDate >= oneYearAgo;
       })
     : [];
@@ -241,7 +237,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                       <TableHeader>
                         <TableRow className="bg-slate-50 dark:bg-slate-800">
                           <TableHead className="h-8 px-2 text-xs">
-                            신호 발생 시점
+                            매수 날짜
                           </TableHead>
                           <TableHead className="h-8 px-2 text-xs">
                             신호
@@ -283,7 +279,8 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                     >
                                       {Number(signal.profitRate).toFixed(2)}%
                                     </span>
-                                    <span className="text-gray-500 text-[10px] truncate max-w-[80px]">
+                                    {/* [MODIFIED] Removed max-w-[80px] and truncate to prevent text cutoff */}
+                                    <span className="text-gray-500 text-[10px] whitespace-nowrap">
                                       {signal.details}
                                     </span>
                                   </div>
