@@ -18,6 +18,9 @@ const tickers = stockConfig.us_stocks.map((t) => t.ticker);
 
 type Timeframe = "1d" | "1h" | "15m";
 
+// [NEW] Define the auto-refresh interval (5 minutes in milliseconds)
+const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 export default function KisStockPage() {
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(
     () => {
@@ -40,10 +43,18 @@ export default function KisStockPage() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
+  // [NEW] State for countdown timer
+  const [timeUntilNextSync, setTimeUntilNextSync] = useState<number>(
+    AUTO_REFRESH_INTERVAL_MS,
+  );
+
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
   const adviceTriggered = useRef(false);
   const previousTimeframe = useRef<Timeframe>("1d");
+
+  // [NEW] Ref to hold the timestamp of the next scheduled sync
+  const nextSyncTimeRef = useRef<number | null>(null);
 
   const fetchStockData = useCallback(
     async (
@@ -51,7 +62,8 @@ export default function KisStockPage() {
       timeframe: Timeframe,
       forceRefresh: boolean = false,
     ) => {
-      if (tickerStates[ticker]?.loading !== true) {
+      // Prevent setting loading state to true if it's an auto-refresh to avoid flickering
+      if (tickerStates[ticker]?.loading !== true && !forceRefresh) {
         setTickerStates((prev) => ({
           ...prev,
           [ticker]: { ...prev[ticker], loading: true, error: null },
@@ -128,20 +140,17 @@ export default function KisStockPage() {
     triggerAdviceGeneration();
   }, []);
 
-  // [MODIFIED] logic to handle sequential loading while respecting the current opened ticker
   const loadAllTickersSequentially = useCallback(
     async (
       timeframeToLoad: Timeframe,
       forceRefresh: boolean = false,
       isTimeframeChange: boolean = false,
+      isAutoRefresh: boolean = false, // [NEW] Flag to identify background auto-refresh
     ) => {
       if (tickers.length > 0) {
         const urlParams = new URLSearchParams(window.location.search);
         const focusTicker = urlParams.get("ticker");
 
-        // [MODIFIED] Determine which ticker to load first
-        // If it's a timeframe change, prioritize the currently opened ticker if it exists
-        // Otherwise, prioritize the URL param or the first ticker
         let initialTicker = tickers[0];
 
         if (isTimeframeChange && openedTicker) {
@@ -150,18 +159,15 @@ export default function KisStockPage() {
           initialTicker = focusTicker;
         }
 
-        // Only set the opened ticker if it's the very first initial load or focused by URL
         if (
           !fullLoadInitiated.current ||
-          (!isTimeframeChange && !forceRefresh)
+          (!isTimeframeChange && !forceRefresh && !isAutoRefresh)
         ) {
           setOpenedTicker(initialTicker);
         }
 
-        // Load the prioritized ticker first
         await fetchStockData(initialTicker, timeframeToLoad, forceRefresh);
 
-        // Load the remaining tickers sequentially
         for (let i = 0; i < tickers.length; i++) {
           const ticker = tickers[i];
           if (ticker === initialTicker) continue;
@@ -171,6 +177,9 @@ export default function KisStockPage() {
         }
 
         setLastSyncTime(new Date());
+
+        // [NEW] Reset the next sync time after a successful fetch
+        nextSyncTimeRef.current = Date.now() + AUTO_REFRESH_INTERVAL_MS;
       }
     },
     [fetchStockData, openedTicker],
@@ -180,19 +189,17 @@ export default function KisStockPage() {
     if (isSyncing) return;
     setIsSyncing(true);
     console.log("[MANUAL SYNC] Starting forced refresh for all tickers");
-    await loadAllTickersSequentially(selectedTimeframe, true, false);
+    await loadAllTickersSequentially(selectedTimeframe, true, false, false);
     setIsSyncing(false);
   };
 
   useEffect(() => {
-    // 1. Initial full load on page mount
     if (!fullLoadInitiated.current) {
       fullLoadInitiated.current = true;
       loadAllTickersSequentially(selectedTimeframe);
       return;
     }
 
-    // 2. Handle timeframe changes without closing the currently opened card
     if (previousTimeframe.current !== selectedTimeframe) {
       console.log(
         `[TIMEFRAME CHANGED] Updating all tickers to ${selectedTimeframe}`,
@@ -207,9 +214,32 @@ export default function KisStockPage() {
         return resetState;
       });
 
-      // Pass true to isTimeframeChange to keep openedTicker intact
-      loadAllTickersSequentially(selectedTimeframe, false, true);
+      loadAllTickersSequentially(selectedTimeframe, false, true, false);
     }
+  }, [loadAllTickersSequentially, selectedTimeframe]);
+
+  // [NEW] Effect for Auto-Refresh Timer and Countdown
+  useEffect(() => {
+    // 1. Setup the background data fetch interval (every 5 minutes)
+    const dataFetchInterval = setInterval(() => {
+      console.log("[AUTO SYNC] Initiating background data refresh...");
+      loadAllTickersSequentially(selectedTimeframe, true, false, true);
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    // 2. Setup the countdown timer for the UI (updates every 1 second)
+    const countdownInterval = setInterval(() => {
+      if (nextSyncTimeRef.current) {
+        const remainingTime = nextSyncTimeRef.current - Date.now();
+        // Prevent negative values
+        setTimeUntilNextSync(Math.max(0, remainingTime));
+      }
+    }, 1000);
+
+    // Cleanup intervals on component unmount
+    return () => {
+      clearInterval(dataFetchInterval);
+      clearInterval(countdownInterval);
+    };
   }, [loadAllTickersSequentially, selectedTimeframe]);
 
   const handleOpenChange = (ticker: string) => {
@@ -217,14 +247,32 @@ export default function KisStockPage() {
     setOpenedTicker(newOpenedTicker);
   };
 
+  // [MODIFIED] Helper to display sync status and countdown
   const getSyncButtonText = () => {
     if (isSyncing) return "동기화 중...";
+
+    // Format the remaining time into MM:SS
+    const minutes = Math.floor(timeUntilNextSync / 60000);
+    const seconds = Math.floor((timeUntilNextSync % 60000) / 1000);
+    const formattedCountdown = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
     if (lastSyncTime) {
-      const hours = lastSyncTime.getHours().toString().padStart(2, "0");
-      const minutes = lastSyncTime.getMinutes().toString().padStart(2, "0");
-      return `${hours}:${minutes} 동기화 완료`;
+      const syncHours = lastSyncTime.getHours().toString().padStart(2, "0");
+      const syncMinutes = lastSyncTime.getMinutes().toString().padStart(2, "0");
+
+      // Responsive text: Hide "동기화 완료" on very small screens to save space
+      return (
+        <span className="flex items-center gap-1">
+          <span className="hidden sm:inline text-xs opacity-75">
+            {syncHours}:{syncMinutes} 완료
+          </span>
+          <span className="hidden sm:inline opacity-50">|</span>
+          <span>{formattedCountdown} 후 갱신</span>
+        </span>
+      );
     }
-    return "최신 시세 동기화";
+
+    return `${formattedCountdown} 후 갱신`;
   };
 
   return (
@@ -271,7 +319,7 @@ export default function KisStockPage() {
           <button
             onClick={handleManualSync}
             disabled={isSyncing}
-            className={`flex items-center justify-center px-4 py-2.5 rounded-md text-sm font-medium transition-all w-full md:w-auto
+            className={`flex items-center justify-center px-4 py-2.5 rounded-md text-sm font-medium transition-all w-full md:w-auto min-w-[160px]
                   ${
                     isSyncing
                       ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
@@ -279,7 +327,7 @@ export default function KisStockPage() {
                   }`}
           >
             <RefreshCw
-              className={`w-4 h-4 mr-2 ${isSyncing ? "animate-spin" : ""}`}
+              className={`w-4 h-4 mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
             />
             {getSyncButtonText()}
           </button>
