@@ -46,14 +46,12 @@ interface StockCollapsibleCardProps {
   timeframe?: "1d" | "1h" | "15m";
 }
 
-// [NEW] Updated date formatting function to handle intraday hours and minutes
 const formatDateTime = (
   dateString: string,
   timeframe?: "1d" | "1h" | "15m",
 ) => {
   if (!dateString) return "-";
   try {
-    // [NEW] Ensure standard ISO format for safe parsing
     const safeDateStr = dateString.includes(" ")
       ? dateString.replace(" ", "T")
       : dateString;
@@ -68,7 +66,6 @@ const formatDateTime = (
     if (!timeframe || timeframe === "1d") {
       return `${year}-${month}-${day}`;
     } else {
-      // [NEW] Extract and append hours and minutes for intraday timeframes
       const hours = date.getHours().toString().padStart(2, "0");
       const minutes = date.getMinutes().toString().padStart(2, "0");
       return `${year}-${month}-${day} ${hours}:${minutes}`;
@@ -228,7 +225,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                       <TableHeader>
                         <TableRow className="bg-slate-50 dark:bg-slate-800">
                           <TableHead className="h-8 px-2 text-xs">
-                            기간
+                            신호 발생 날짜 시간
                           </TableHead>
                           <TableHead className="h-8 px-2 text-xs">
                             신호
@@ -246,13 +243,8 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
                           >
                             <TableCell className="font-mono text-[11px] whitespace-nowrap py-1 px-2">
-                              {/* [NEW] Apply formatDateTime with timeframe parameter */}
-                              {signal.startDate
-                                ? `${formatDateTime(signal.startDate, timeframe)} ~ ${formatDateTime(
-                                    signal.date,
-                                    timeframe,
-                                  )}`
-                                : formatDateTime(signal.date, timeframe)}
+                              {/* [MODIFIED] Display only the final action date, ignoring startDate range */}
+                              {formatDateTime(signal.date, timeframe)}
                             </TableCell>
                             <TableCell className="text-xs py-1 px-2">
                               <div className="flex items-center gap-1">
