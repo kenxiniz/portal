@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Collapsible,
@@ -33,6 +33,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import stockConfig from "@/lib/stock.json";
+
+interface StockConfigItem {
+  ticker: string;
+  exchange?: string;
+  isInverse?: boolean;
+  name?: string;
+}
 
 interface StockCollapsibleCardProps {
   displayName: string;
@@ -104,6 +112,20 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
       : null;
   const chartRef = useRef<StockChartDisplayHandles>(null);
   const cardContainerRef = useRef<HTMLDivElement>(null);
+
+  const isInverseStock = useMemo(() => {
+    const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
+      (s) => s.ticker === tickerSymbol,
+    );
+    if (usStock?.isInverse) return true;
+
+    const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
+      (s) => s.ticker === tickerSymbol,
+    );
+    if (kStock?.isInverse) return true;
+
+    return false;
+  }, [tickerSymbol]);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -248,52 +270,81 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {historicalSignals.map((signal, index) => (
-                          <TableRow
-                            key={index}
-                            onClick={() => handleSignalClick(signal)}
-                            className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
-                          >
-                            <TableCell className="font-mono text-[11px] whitespace-nowrap py-1 px-2">
-                              {formatDateTime(signal.date, timeframe)}
-                            </TableCell>
-                            <TableCell className="text-xs py-1 px-2">
-                              <div className="flex items-center gap-1">
-                                {getSignalIcon(signal)}
-                                <span className="truncate max-w-[150px] sm:max-w-none">
-                                  {signal.reason}
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-xs py-1 px-2 text-right font-mono">
-                              {signal.type === "sell" &&
-                                signal.profitRate !== undefined && (
-                                  <div className="flex flex-col items-end justify-center">
-                                    <span
-                                      className={cn(
-                                        "font-semibold",
-                                        Number(signal.profitRate) >= 0
-                                          ? "text-green-600 dark:text-green-400"
-                                          : "text-red-600 dark:text-red-400",
-                                      )}
-                                    >
-                                      {Number(signal.profitRate).toFixed(2)}%
-                                    </span>
-                                    {/* [MODIFIED] Removed max-w-[80px] and truncate to prevent text cutoff */}
-                                    <span className="text-gray-500 text-[10px] whitespace-nowrap">
-                                      {signal.details}
-                                    </span>
-                                  </div>
-                                )}
-                              {signal.type.includes("buy") &&
-                                signal.entryPrice !== undefined && (
-                                  <span className="text-blue-600 dark:text-blue-400">
-                                    {formatPrice(signal.entryPrice)}
+                        {historicalSignals.map((signal, index) => {
+                          // Check for high-risk warning (reverse market direction)
+                          const showHighRiskWarning =
+                            timeframe === "1d" &&
+                            ((isInverseStock && signal.type === "buy") ||
+                              (!isInverseStock &&
+                                signal.type === "inverse-buy"));
+
+                          // [NEW] Check for positive momentum badge (Gazua!)
+                          const showGazuaBadge =
+                            timeframe === "1d" &&
+                            ((!isInverseStock && signal.type === "buy") ||
+                              (isInverseStock &&
+                                signal.type === "inverse-buy"));
+
+                          return (
+                            <TableRow
+                              key={index}
+                              onClick={() => handleSignalClick(signal)}
+                              className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
+                            >
+                              <TableCell className="font-mono text-[11px] whitespace-nowrap py-1 px-2">
+                                {formatDateTime(signal.date, timeframe)}
+                              </TableCell>
+                              <TableCell className="text-xs py-1 px-2">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {getSignalIcon(signal)}
+                                  <span className="sm:max-w-none">
+                                    {signal.reason}
                                   </span>
-                                )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                                  {showHighRiskWarning && (
+                                    <span
+                                      className="text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800 whitespace-nowrap"
+                                      title="인버스 투자는 리스크가 매우 큽니다. 실제 매매보다는 시장 방향성 참고용으로만 활용해 주세요."
+                                    >
+                                      고위험 (매매 참고용)
+                                    </span>
+                                  )}
+                                  {/* [NEW] Positive momentum badge for 1d signals */}
+                                  {showGazuaBadge && (
+                                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800 whitespace-nowrap">
+                                      가즈아!
+                                    </span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-xs py-1 px-2 text-right font-mono">
+                                {signal.type === "sell" &&
+                                  signal.profitRate !== undefined && (
+                                    <div className="flex flex-col items-end justify-center">
+                                      <span
+                                        className={cn(
+                                          "font-semibold",
+                                          Number(signal.profitRate) >= 0
+                                            ? "text-green-600 dark:text-green-400"
+                                            : "text-red-600 dark:text-red-400",
+                                        )}
+                                      >
+                                        {Number(signal.profitRate).toFixed(2)}%
+                                      </span>
+                                      <span className="text-gray-500 text-[10px] whitespace-nowrap">
+                                        {signal.details}
+                                      </span>
+                                    </div>
+                                  )}
+                                {signal.type.includes("buy") &&
+                                  signal.entryPrice !== undefined && (
+                                    <span className="text-blue-600 dark:text-blue-400">
+                                      {formatPrice(signal.entryPrice)}
+                                    </span>
+                                  )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>

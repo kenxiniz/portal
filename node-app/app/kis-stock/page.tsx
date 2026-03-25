@@ -39,7 +39,6 @@ export default function KisStockPage() {
 
   const [openedTicker, setOpenedTicker] = useState<string | null>(null);
 
-  // [MODIFIED] Initialize selectedTimeframe from URL parameter 'tf' if it exists
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>(() => {
     if (typeof window !== "undefined") {
       const urlParams = new URLSearchParams(window.location.search);
@@ -61,24 +60,24 @@ export default function KisStockPage() {
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
   const adviceTriggered = useRef(false);
-
-  // [MODIFIED] Initialize previousTimeframe with the initial selectedTimeframe
   const previousTimeframe = useRef<Timeframe>(selectedTimeframe);
-
   const nextSyncTimeRef = useRef<number | null>(null);
 
+  // [FIXED] Removed tickerStates from dependency by using functional update internally
   const fetchStockData = useCallback(
     async (
       ticker: string,
       timeframe: Timeframe,
       forceRefresh: boolean = false,
     ) => {
-      if (tickerStates[ticker]?.loading !== true && !forceRefresh) {
-        setTickerStates((prev) => ({
+      setTickerStates((prev) => {
+        // Prevent unnecessary state updates if already loading
+        if (prev[ticker]?.loading === true && !forceRefresh) return prev;
+        return {
           ...prev,
           [ticker]: { ...prev[ticker], loading: true, error: null },
-        }));
-      }
+        };
+      });
 
       try {
         console.log(
@@ -187,8 +186,6 @@ export default function KisStockPage() {
         }
 
         setLastSyncTime(new Date());
-
-        // Reset the target time for the next auto-refresh
         nextSyncTimeRef.current = Date.now() + AUTO_REFRESH_INTERVAL_MS;
         setTimeUntilNextSync(AUTO_REFRESH_INTERVAL_MS);
       }
@@ -238,11 +235,8 @@ export default function KisStockPage() {
           console.log(
             "[AUTO SYNC] Countdown reached 0. Initiating background data refresh...",
           );
-          // Optimistically reset target time to prevent multiple triggers
           nextSyncTimeRef.current = Date.now() + AUTO_REFRESH_INTERVAL_MS;
           setTimeUntilNextSync(AUTO_REFRESH_INTERVAL_MS);
-
-          // Trigger the fetch
           loadAllTickersSequentially(selectedTimeframe, true, false, true);
         } else {
           setTimeUntilNextSync(remainingTime);

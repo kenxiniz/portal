@@ -5,6 +5,7 @@ import { schedulerConfig } from "./config";
 import { StockSignalInfo } from "./types";
 import { LottoSet } from "@/types/lotto";
 import { TradingSignal } from "@/lib/stockUtils";
+import stockConfig from "@/lib/stock.json";
 
 export interface InlineKeyboardButton {
   text: string;
@@ -26,11 +27,17 @@ interface SendMessagePayload {
   reply_markup?: ReplyMarkup;
 }
 
+// Internal interface for stock configuration item to avoid linting errors
+interface StockConfigItem {
+  ticker: string;
+  isInverse?: boolean;
+}
+
 export class TelegramNotificationService {
   private botToken: string | undefined = process.env.TELEGRAM_BOT_TOKEN;
   private chatIds: string[] = [];
 
-  // Make cache static so it persists across multiple instances and scheduler runs
+  // Static cache to persist across multiple instances and scheduler runs
   private static sentSignalCache: Record<string, string> = {};
 
   constructor() {
@@ -172,13 +179,37 @@ export class TelegramNotificationService {
 
           const displayDate = this.formatSignalTime(signalDate);
           const timeframeDisplay = this.getTimeframeDisplayName(timeframe);
+          const isShortTerm = timeframe !== "1d";
+
+          // Identify if the stock is an inverse ETF
+          const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
+            (s) => s.ticker === ticker,
+          );
+          const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
+            (s) => s.ticker === ticker,
+          );
+          const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
+
+          // Determine subTag (Gazua vs High Risk) based on signal type and stock nature
+          let subTag = "";
+          if (latestSignal.type.includes("buy")) {
+            const isMatchingMarketGrowth =
+              (!isInverse && latestSignal.type === "buy") ||
+              (isInverse && latestSignal.type === "inverse-buy");
+
+            subTag = isMatchingMarketGrowth
+              ? "🚀 [가즈아!]"
+              : "⚠️ [고위험-매매참고]";
+          }
+
           let message = "";
 
           if (latestSignal.type.includes("buy")) {
             const priceStr = latestSignal.entryPrice
               ? `$${latestSignal.entryPrice.toFixed(2)}`
               : "N/A";
-            message += `🚨 <b>[${timeframeDisplay} 단타 매수 신호 감지]</b>\n\n`;
+
+            message += `🚨 <b>[${timeframeDisplay}${isShortTerm ? " 단타" : ""} 매수 신호 감지]</b> ${subTag}\n\n`;
             message += `<b>종목:</b> ${ticker}\n`;
             message += `<b>발생 시간:</b> ${displayDate}\n`;
             message += `<b>매수가:</b> ${priceStr}\n`;
@@ -189,7 +220,7 @@ export class TelegramNotificationService {
             const headerIcon = isProfit ? "💰" : "📉";
             const headerText = isProfit ? "익절(수익)" : "손절";
 
-            message += `${headerIcon} <b>[${timeframeDisplay} 단타 ${headerText} 신호 감지]</b>\n\n`;
+            message += `${headerIcon} <b>[${timeframeDisplay}${isShortTerm ? " 단타" : ""} ${headerText} 신호 감지]</b>\n\n`;
             message += `<b>종목:</b> ${ticker}\n`;
             message += `<b>발생 시간:</b> ${displayDate}\n`;
             message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
