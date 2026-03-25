@@ -3,6 +3,7 @@ import axios, { AxiosError } from "axios";
 import { isMarketOpen } from "../../marketTime";
 import { schedulerConfig } from "../config";
 import stockConfig from "../../stock.json";
+import { TelegramNotificationService } from "../telegramService";
 
 /**
  * Periodically collects market data every 5 minutes during market hours.
@@ -21,24 +22,41 @@ export async function collectMarketData(): Promise<void> {
 
   console.log("[Scheduler] Market is open. Starting 5-min data update.");
 
+  const telegramService = new TelegramNotificationService();
+
   // Process US Stocks
   if (isUsOpen) {
     for (const stock of stockConfig.us_stocks) {
-      try {
-        const url = `${schedulerConfig.apiBaseUrl}/api/kisStock/${stock.ticker}?timeframe=1d&refresh=true`;
-        await axios.get(url);
-        console.log(
-          `[Scheduler] Successfully triggered refresh for ${stock.ticker}`,
-        );
-      } catch (error) {
-        const axiosError = error as AxiosError;
-        console.error(
-          `[Scheduler] Failed to refresh ${stock.ticker}:`,
-          axiosError.message,
-        );
+      const timeframes = ["1d", "1h", "15m"];
+
+      for (const timeframe of timeframes) {
+        try {
+          const url = `${schedulerConfig.apiBaseUrl}/api/kisStock/${stock.ticker}?timeframe=${timeframe}&refresh=true`;
+          const response = await axios.get(url);
+          console.log(
+            `[Scheduler] Successfully triggered refresh for ${stock.ticker} (${timeframe})`,
+          );
+
+          // Evaluate real-time signals for intraday timeframes
+          if (timeframe !== "1d" && response.data && response.data.signals) {
+            // [MODIFIED] Call the updated generic signal notification method
+            await telegramService.notifyRealtimeSignal(
+              stock.ticker,
+              timeframe,
+              response.data.signals,
+            );
+          }
+        } catch (error) {
+          const axiosError = error as AxiosError;
+          console.error(
+            `[Scheduler] Failed to refresh ${stock.ticker} (${timeframe}):`,
+            axiosError.message,
+          );
+        }
+
+        // Rate limit protection (500ms)
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
-      // Rate limit protection (500ms)
-      await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
 

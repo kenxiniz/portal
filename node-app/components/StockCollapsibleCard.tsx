@@ -151,8 +151,24 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     return "";
   };
 
+  // [NEW] Calculate the date exactly one year ago from today
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+  // [MODIFIED] Filter historical signals to only include those from the last 1 year
   const historicalSignals = Array.isArray(tickerState.signals)
-    ? tickerState.signals.filter((s) => s.type !== "hold")
+    ? tickerState.signals.filter((s) => {
+        if (s.type === "hold") return false;
+
+        // Safely parse the signal date
+        const safeDateStr = s.date.includes(" ")
+          ? s.date.replace(" ", "T")
+          : s.date;
+        const signalDate = new Date(safeDateStr);
+
+        // Exclude signals older than 1 year
+        return signalDate >= oneYearAgo;
+      })
     : [];
 
   const handleSignalClick = (signal: TradingSignal) => {
@@ -225,7 +241,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                       <TableHeader>
                         <TableRow className="bg-slate-50 dark:bg-slate-800">
                           <TableHead className="h-8 px-2 text-xs">
-                            신호 발생 날짜 시간
+                            신호 발생 시점
                           </TableHead>
                           <TableHead className="h-8 px-2 text-xs">
                             신호
@@ -243,7 +259,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
                           >
                             <TableCell className="font-mono text-[11px] whitespace-nowrap py-1 px-2">
-                              {/* [MODIFIED] Display only the final action date, ignoring startDate range */}
                               {formatDateTime(signal.date, timeframe)}
                             </TableCell>
                             <TableCell className="text-xs py-1 px-2">

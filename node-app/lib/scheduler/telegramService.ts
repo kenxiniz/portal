@@ -4,8 +4,8 @@ import axios, { AxiosError } from "axios";
 import { schedulerConfig } from "./config";
 import { StockSignalInfo } from "./types";
 import { LottoSet } from "@/types/lotto";
+import { TradingSignal } from "@/lib/stockUtils";
 
-// Define strict types for Telegram API to resolve ESLint 'no-explicit-any' errors
 export interface InlineKeyboardButton {
   text: string;
   url?: string;
@@ -30,8 +30,11 @@ export class TelegramNotificationService {
   private botToken: string | undefined = process.env.TELEGRAM_BOT_TOKEN;
   private chatIds: string[] = [];
 
+  // Cache to prevent duplicate notifications.
+  // Key format: `${chatId}_${ticker}_${timeframe}`, Value: signal date
+  private sentSignalCache: Record<string, string> = {};
+
   constructor() {
-    // Parse multiple chat IDs from environment variables
     const rawChatIds =
       process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID;
 
@@ -49,7 +52,6 @@ export class TelegramNotificationService {
     }
   }
 
-  // Replaced 'any' with 'ReplyMarkup'
   public async notify(
     message: string,
     replyMarkup?: ReplyMarkup,
@@ -66,10 +68,8 @@ export class TelegramNotificationService {
       `Attempting to send Telegram message to ${this.chatIds.length} chats.`,
     );
 
-    // Map each chat ID to a message sending promise
     const sendPromises = this.chatIds.map(async (chatId) => {
       try {
-        // Replaced 'any' with 'SendMessagePayload'
         const payload: SendMessagePayload = {
           chat_id: chatId,
           text: message,
@@ -84,7 +84,6 @@ export class TelegramNotificationService {
         await axios.post(url, payload);
         console.log(`Successfully sent Telegram message to chat: ${chatId}`);
       } catch (error) {
-        // Used unknown type and type guard to avoid 'any'
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         const axiosError = error as AxiosError;
@@ -92,16 +91,13 @@ export class TelegramNotificationService {
           `Failed to send Telegram message to chat ${chatId}:`,
           axiosError.response?.data || errorMessage,
         );
-        // Throwing error to reflect the failure in Promise.allSettled result
         throw error;
       }
     });
 
-    // Execute all promises concurrently and wait for all to finish
     await Promise.allSettled(sendPromises);
   }
 
-  // Replaced 'any' with 'ReplyMarkup'
   public async notifyInChunks<T>(
     createMessage: (chunk: T[]) => string,
     items: T[],
@@ -112,6 +108,92 @@ export class TelegramNotificationService {
       const chunk = items.slice(i, i + chunkSize);
       const message = createMessage(chunk);
       await this.notify(message, replyMarkup);
+    }
+  }
+
+  // [MODIFIED] Renamed method and added logic to handle both Buy and Sell signals
+  public async notifyRealtimeSignal(
+    ticker: string,
+    timeframe: string,
+    signals: TradingSignal[],
+  ): Promise<void> {
+    if (
+      !this.botToken ||
+      this.chatIds.length === 0 ||
+      !signals ||
+      signals.length === 0
+    ) {
+      return;
+    }
+
+    const latestSignal = signals[signals.length - 1];
+
+    // Process if it is a buy, inverse-buy, or sell signal (ignore "hold")
+    if (latestSignal.type.includes("buy") || latestSignal.type === "sell") {
+      const signalDate = latestSignal.date;
+      const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
+
+      const sendPromises = this.chatIds.map(async (chatId) => {
+        const cacheKey = `${chatId}_${ticker}_${timeframe}`;
+        const lastSentDate = this.sentSignalCache[cacheKey];
+
+        // Check if we already sent this exact signal to this specific chat
+        if (lastSentDate !== signalDate) {
+          const displayDate = signalDate.replace("T", " ");
+          let message = "";
+
+          // Format message based on signal type
+          if (latestSignal.type.includes("buy")) {
+            const priceStr = latestSignal.entryPrice
+              ? `$${latestSignal.entryPrice.toFixed(2)}`
+              : "N/A";
+            message += `🚨 <b>[${timeframe.toUpperCase()} 실시간 매수 신호 감지]</b>\n\n`;
+            message += `<b>종목:</b> ${ticker}\n`;
+            message += `<b>발생 시간:</b> ${displayDate}\n`;
+            message += `<b>매수가:</b> ${priceStr}\n`;
+            message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
+          } else if (latestSignal.type === "sell") {
+            const profitRateNum = Number(latestSignal.profitRate) || 0;
+            const isProfit = profitRateNum >= 0;
+            const headerIcon = isProfit ? "💰" : "📉";
+            const headerText = isProfit ? "익절(수익)" : "손절";
+
+            message += `${headerIcon} <b>[${timeframe.toUpperCase()} 실시간 ${headerText} 신호 감지]</b>\n\n`;
+            message += `<b>종목:</b> ${ticker}\n`;
+            message += `<b>발생 시간:</b> ${displayDate}\n`;
+            message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
+            message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
+          }
+
+          const targetPath = encodeURIComponent(`kis-stock?ticker=${ticker}`);
+          const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
+          message += `<a href="${redirectLink}">👉 상세 차트 바로가기</a>`;
+
+          try {
+            const payload: SendMessagePayload = {
+              chat_id: chatId,
+              text: message,
+              parse_mode: "HTML",
+              disable_web_page_preview: true,
+            };
+
+            await axios.post(url, payload);
+            console.log(
+              `[Scheduler] Sent ${timeframe} realtime ${latestSignal.type} signal for ${ticker} to chat ${chatId}`,
+            );
+
+            // Mark as sent in the cache
+            this.sentSignalCache[cacheKey] = signalDate;
+          } catch (error) {
+            console.error(
+              `[Scheduler] Failed to send realtime signal to ${chatId}:`,
+              error,
+            );
+          }
+        }
+      });
+
+      await Promise.allSettled(sendPromises);
     }
   }
 
@@ -135,7 +217,6 @@ export class TelegramNotificationService {
     message += `오늘의 투자 인사이트, 켄신님이 콕 집어드려요.\n`;
     message += `━━━━━━━━━━━━━━━━━━\n\n`;
 
-    // Removed any by using the proper interface
     signals.forEach((item: StockSignalInfo, index: number) => {
       const { name, currentSignal, lastMeaningfulSignal, advice } = item;
       const isHold = currentSignal.type === "hold";
@@ -183,13 +264,6 @@ export class TelegramNotificationService {
         message += `\n<b>⚠️ AI가 아직 분석 중이에요. 조금만 기다려주세요!</b>\n`;
       }
 
-      if (advice && !advice.error) {
-        // ... (AI Advice 부분 기존 코드 유지) ...
-      } else if (advice?.error) {
-        message += `\n<b>⚠️ AI가 아직 분석 중이에요. 조금만 기다려주세요!</b>\n`;
-      }
-
-      // Add a specific redirect link for this ticker
       const targetPath = encodeURIComponent(`kis-stock?ticker=${name}`);
       const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
       message += `\n<a href="${redirectLink}">👉 [${name}] 상세 차트 확인하기</a>\n`;
@@ -197,7 +271,6 @@ export class TelegramNotificationService {
       message += `\n━━━━━━━━━━━━━━━━━━\n`;
     });
 
-    // Remove the general link at the bottom since we now have per-stock links
     return message;
   };
 }
