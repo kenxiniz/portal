@@ -12,6 +12,10 @@ import {
 import { getDailyStockData, getMinuteStockData } from "../../../../lib/kisApi";
 import mongoose from "mongoose";
 
+// [NEW] Force Next.js to completely disable caching for this API route
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // Advice Schema (Independent from candles)
 const AdviceSchema = new mongoose.Schema({
   ticker: { type: String, required: true, unique: true },
@@ -100,7 +104,12 @@ export async function GET(request: Request) {
 
       // 5. Calculate Indicators
       const processedData = calculateBollingerBands(calculateRSI(mappedData));
-      const signals = analyzeAllTradingSignals(processedData);
+
+      // [MODIFIED] Pass the timeframe to analyzeAllTradingSignals to support time-based exits
+      const signals = analyzeAllTradingSignals(
+        processedData,
+        timeframe as "1d" | "1h" | "15m",
+      );
 
       return NextResponse.json({
         data: processedData,

@@ -3,7 +3,7 @@
 // --- Interfaces ---
 
 export interface StockDataPoint {
-  date: string; // YYYY-MM-DD 또는 YYYY-MM-DD HH:mm:ss
+  date: string;
   open: number;
   high: number;
   low: number;
@@ -50,17 +50,12 @@ export interface CachedStockData {
 
 // --- Technical Indicators ---
 
-/**
- * RSI (Relative Strength Index) 계산
- * 데이터의 인덱스 밀림을 방지하기 위해 입력 배열과 동일한 길이를 반환합니다.
- */
 export const calculateRSI = (
   data: StockDataPoint[],
   period: number = 14,
 ): StockDataPoint[] => {
   if (data.length === 0) return [];
 
-  // 1. 모든 데이터 포인트에 rsi 필드를 undefined로 초기화하여 원본 구조 유지
   const rsiData = data.map((item) => ({
     ...item,
     rsi: undefined as number | undefined,
@@ -71,7 +66,6 @@ export const calculateRSI = (
   let avgGain = 0;
   let avgLoss = 0;
 
-  // 2. 초기 평균 상승/하락분 계산
   for (let i = 1; i <= period; i++) {
     const diff = rsiData[i].close - rsiData[i - 1].close;
     if (diff > 0) avgGain += diff;
@@ -81,13 +75,11 @@ export const calculateRSI = (
   avgGain /= period;
   avgLoss /= period;
 
-  // 3. 첫 번째 RSI 값 할당
   if (rsiData[period]) {
     const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
     rsiData[period].rsi = 100 - 100 / (1 + rs);
   }
 
-  // 4. Wilder's Smoothing 방식 적용
   for (let i = period + 1; i < rsiData.length; i++) {
     const diff = rsiData[i].close - rsiData[i - 1].close;
     const gain = diff > 0 ? diff : 0;
@@ -103,16 +95,11 @@ export const calculateRSI = (
   return rsiData;
 };
 
-/**
- * Bollinger Bands 계산 함수 수정
- * TypeScript 타입 추론 오류를 해결하기 위해 초기화 시 명시적 타입을 지정합니다.
- */
 export const calculateBollingerBands = (
   data: StockDataPoint[],
   period: number = 20,
   stdDev: number = 2,
 ): StockDataPoint[] => {
-  // [FIX] 초기화 시 bollingerBands의 타입을 명시적으로 지정하여 나중에 객체 할당이 가능하게 합니다.
   const bbData = data.map((item) => ({
     ...item,
     bollingerBands: undefined as StockDataPoint["bollingerBands"],
@@ -130,7 +117,6 @@ export const calculateBollingerBands = (
       period;
     const standardDeviation = Math.sqrt(variance);
 
-    // 이제 정상적으로 할당이 가능합니다.
     bbData[i].bollingerBands = {
       middle: middle,
       upper: middle + standardDeviation * stdDev,
@@ -142,11 +128,9 @@ export const calculateBollingerBands = (
 
 // --- Signal Analysis ---
 
-/**
- * RSI 다이버전스 및 볼린저 밴드 기반 매매 신호 분석
- */
 export const analyzeAllTradingSignals = (
   data: StockDataPoint[],
+  timeframe: "1d" | "1h" | "15m" = "1d",
 ): TradingSignal[] => {
   if (data.length === 0) return [];
 
@@ -162,7 +146,9 @@ export const analyzeAllTradingSignals = (
   let firstPeakIndex: number | null = null;
   let potentialSecondPeak: StockDataPoint | null = null;
 
-  // 인덱스 1부터 시작하여 이전 봉과 비교
+  const expirationMs =
+    timeframe === "1d" ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+
   for (let i = 1; i < data.length; i++) {
     const currentPoint = data[i];
     const prevPoint = data[i - 1];
@@ -175,7 +161,88 @@ export const analyzeAllTradingSignals = (
     )
       continue;
 
-    /* --- 매수 신호 로직 (RSI 상승 다이버전스) --- */
+    const currentTimestamp = new Date(
+      currentPoint.date.includes(" ")
+        ? currentPoint.date.replace(" ", "T")
+        : currentPoint.date,
+    ).getTime();
+
+    if (lastBuySignal && lastBuySignal.entryPrice !== undefined) {
+      const buyTimestamp = new Date(
+        lastBuySignal.date.includes(" ")
+          ? lastBuySignal.date.replace(" ", "T")
+          : lastBuySignal.date,
+      ).getTime();
+      const profitRate =
+        ((currentPoint.close - lastBuySignal.entryPrice) /
+          lastBuySignal.entryPrice) *
+        100;
+
+      if (profitRate <= -5.0) {
+        signals.push({
+          date: currentPoint.date,
+          type: "sell",
+          reason: "자동 손절 (-5% 도달)",
+          realizedPrice: currentPoint.close,
+          profitRate: profitRate,
+          details: `손절가 도달: ${profitRate.toFixed(2)}%`,
+        });
+        lastBuySignal = null;
+      } else if (currentTimestamp - buyTimestamp >= expirationMs) {
+        signals.push({
+          date: currentPoint.date,
+          type: "sell",
+          reason:
+            profitRate >= 0
+              ? "시간 제한 익절 (기간 만료)"
+              : "시간 제한 손절 (기간 만료)",
+          realizedPrice: currentPoint.close,
+          profitRate: profitRate,
+          details: `보유 한도 초과: ${profitRate.toFixed(2)}%`,
+        });
+        lastBuySignal = null;
+      }
+    } else if (
+      lastInverseBuySignal &&
+      lastInverseBuySignal.entryPrice !== undefined
+    ) {
+      const invBuyTimestamp = new Date(
+        lastInverseBuySignal.date.includes(" ")
+          ? lastInverseBuySignal.date.replace(" ", "T")
+          : lastInverseBuySignal.date,
+      ).getTime();
+      const profitRate =
+        ((lastInverseBuySignal.entryPrice - currentPoint.close) /
+          lastInverseBuySignal.entryPrice) *
+        100;
+
+      if (profitRate <= -5.0) {
+        signals.push({
+          date: currentPoint.date,
+          type: "sell",
+          reason: "자동 손절 (-5% 도달)",
+          realizedPrice: currentPoint.close,
+          profitRate: profitRate,
+          details: `손절가 도달: ${profitRate.toFixed(2)}%`,
+        });
+        lastInverseBuySignal = null;
+      } else if (currentTimestamp - invBuyTimestamp >= expirationMs) {
+        signals.push({
+          date: currentPoint.date,
+          type: "sell",
+          reason:
+            profitRate >= 0
+              ? "시간 제한 익절 (인버스 만료)"
+              : "시간 제한 손절 (인버스 만료)",
+          realizedPrice: currentPoint.close,
+          profitRate: profitRate,
+          details: `보유 한도 초과: ${profitRate.toFixed(2)}%`,
+        });
+        lastInverseBuySignal = null;
+      }
+    }
+
+    /* --- Buy Signal Logic --- */
     if (potentialSecondTrough && firstTrough) {
       if (currentPoint.close > potentialSecondTrough.close) {
         const buySignal: TradingSignal = {
@@ -187,6 +254,7 @@ export const analyzeAllTradingSignals = (
           details: `RSI 상승 다이버전스`,
         };
         signals.push(buySignal);
+        // [FIX] Always update to the latest buy signal to base profit calculation on the most recent entry
         lastBuySignal = buySignal;
         firstTrough = null;
         firstTroughIndex = null;
@@ -209,7 +277,6 @@ export const analyzeAllTradingSignals = (
         }
         const daysSinceFirstTrough = i - firstTroughIndex;
 
-        // RSI가 첫 번째 저점보다 낮아지면 다이버전스 무효화
         if (currentPoint.rsi < firstTrough.rsi!) {
           firstTrough = null;
           firstTroughIndex = null;
@@ -217,7 +284,6 @@ export const analyzeAllTradingSignals = (
           firstTrough = null;
           firstTroughIndex = null;
         } else if (daysSinceFirstTrough > 5) {
-          // 가격은 낮아지는데 RSI는 높아지는 경우 (상승 다이버전스 조건)
           if (
             currentPoint.close < firstTrough.close &&
             currentPoint.rsi > firstTrough.rsi!
@@ -228,7 +294,7 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* --- 인버스 매수 신호 로직 (RSI 하락 다이버전스) --- */
+    /* --- Inverse Buy Signal Logic --- */
     if (potentialSecondPeak && firstPeak) {
       if (currentPoint.close < potentialSecondPeak.close) {
         const inverseBuySignal: TradingSignal = {
@@ -240,6 +306,7 @@ export const analyzeAllTradingSignals = (
           details: `RSI 하락 다이버전스`,
         };
         signals.push(inverseBuySignal);
+        // [FIX] Always update to the latest inverse buy signal to base profit calculation on the most recent entry
         lastInverseBuySignal = inverseBuySignal;
         firstPeak = null;
         firstPeakIndex = null;
@@ -262,7 +329,6 @@ export const analyzeAllTradingSignals = (
         }
         const daysSinceFirstPeak = i - firstPeakIndex;
 
-        // RSI가 첫 번째 고점보다 높아지면 다이버전스 무효화
         if (currentPoint.rsi > firstPeak.rsi!) {
           firstPeak = null;
           firstPeakIndex = null;
@@ -270,7 +336,6 @@ export const analyzeAllTradingSignals = (
           firstPeak = null;
           firstPeakIndex = null;
         } else if (daysSinceFirstPeak > 5) {
-          // 가격은 높아지는데 RSI는 낮아지는 경우 (하락 다이버전스 조건)
           if (
             currentPoint.close > firstPeak.close &&
             currentPoint.rsi < firstPeak.rsi!
@@ -281,7 +346,7 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* --- 수익 실현 (Sell) 신호 로직 --- */
+    /* --- Sell Signal Logic --- */
     if (currentPoint.bollingerBands) {
       if (
         lastBuySignal &&
@@ -323,7 +388,6 @@ export const analyzeAllTradingSignals = (
     }
   }
 
-  // 중복 제거 및 최종 정렬
   const uniqueSignalsMap = new Map<string, TradingSignal>();
   signals.forEach((s) => {
     uniqueSignalsMap.set(`${s.date}-${s.reason}`, s);
@@ -331,7 +395,6 @@ export const analyzeAllTradingSignals = (
 
   const uniqueSignals = Array.from(uniqueSignalsMap.values());
 
-  // 마지막 날짜에 신호가 없으면 '관망' 신호 추가
   if (data.length > 0) {
     const lastDataPoint = data[data.length - 1];
     const hasSignalOnLastDate = uniqueSignals.some(
@@ -348,6 +411,12 @@ export const analyzeAllTradingSignals = (
   }
 
   return uniqueSignals.sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+    (a, b) =>
+      new Date(
+        a.date.includes(" ") ? a.date.replace(" ", "T") : a.date,
+      ).getTime() -
+      new Date(
+        b.date.includes(" ") ? b.date.replace(" ", "T") : b.date,
+      ).getTime(),
   );
 };
