@@ -82,6 +82,19 @@ export class TelegramShortTermService {
     return timeframe.toUpperCase();
   }
 
+  // Helper method to find the matching entry signal for a sell signal
+  private findRecentEntrySignal(
+    signals: TradingSignal[],
+  ): TradingSignal | null {
+    // Iterate backwards from the second to last item to find the most recent buy/inverse-buy
+    for (let i = signals.length - 2; i >= 0; i--) {
+      if (signals[i].type === "buy" || signals[i].type === "inverse-buy") {
+        return signals[i];
+      }
+    }
+    return null;
+  }
+
   public async notifyRealtimeSignal(
     ticker: string,
     timeframe: string,
@@ -98,7 +111,11 @@ export class TelegramShortTermService {
 
     const latestSignal = signals[signals.length - 1];
 
-    if (latestSignal.type.includes("buy") || latestSignal.type === "sell") {
+    if (
+      latestSignal.type === "buy" ||
+      latestSignal.type === "inverse-buy" ||
+      latestSignal.type === "sell"
+    ) {
       const signalDate = latestSignal.date;
       const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
 
@@ -120,20 +137,20 @@ export class TelegramShortTermService {
           );
           const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
 
-          let subTag = "";
-          if (latestSignal.type.includes("buy")) {
+          let message = "";
+
+          if (
+            latestSignal.type === "buy" ||
+            latestSignal.type === "inverse-buy"
+          ) {
             const isMatchingMarketGrowth =
               (!isInverse && latestSignal.type === "buy") ||
               (isInverse && latestSignal.type === "inverse-buy");
 
-            subTag = isMatchingMarketGrowth
+            const subTag = isMatchingMarketGrowth
               ? "🚀 [가즈아!]"
               : "⚠️ [고위험-매매참고]";
-          }
 
-          let message = "";
-
-          if (latestSignal.type.includes("buy")) {
             const priceStr = latestSignal.entryPrice
               ? `$${latestSignal.entryPrice.toFixed(2)}`
               : "N/A";
@@ -149,11 +166,31 @@ export class TelegramShortTermService {
             const headerIcon = isProfit ? "💰" : "📉";
             const headerText = isProfit ? "익절(수익)" : "손절";
 
+            // Find the entry signal to display entry time and price
+            const entrySignal = this.findRecentEntrySignal(signals);
+            const entryTimeDisplay = entrySignal
+              ? this.formatSignalTime(entrySignal.date)
+              : "N/A";
+            const entryPriceDisplay =
+              entrySignal && entrySignal.entryPrice
+                ? `$${entrySignal.entryPrice.toFixed(2)}`
+                : "N/A";
+
+            // Format current sell price (using realizedPrice if available)
+            const sellPriceDisplay = latestSignal.realizedPrice
+              ? `$${latestSignal.realizedPrice.toFixed(2)}`
+              : "N/A";
+
             message += `${headerIcon} <b>[${timeframeDisplay} 단타 ${headerText} 신호 감지]</b>\n\n`;
             message += `<b>종목:</b> ${ticker}\n`;
-            message += `<b>발생 시간:</b> ${displayDate}\n`;
+            message += `<b>매도 시간:</b> ${displayDate}\n`;
+            message += `<b>매도 가격:</b> ${sellPriceDisplay}\n`;
             message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
             message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
+
+            message += `<b>--- 진입 정보 ---</b>\n`;
+            message += `<b>진입 시간:</b> ${entryTimeDisplay}\n`;
+            message += `<b>진입 가격:</b> ${entryPriceDisplay}\n\n`;
           }
 
           const targetPath = encodeURIComponent(
@@ -176,11 +213,9 @@ export class TelegramShortTermService {
               `[Scheduler] Sent short-term realtime signal for ${ticker} to chat ${chatId}`,
             );
           } catch (error) {
-            // Rollback cache if telegram API request completely fails
             TelegramShortTermService.sentSignalCache[cacheKey] =
               lastSentDate || "";
 
-            // [FIXED] Use AxiosError for more detailed logging
             const axiosError = error as AxiosError;
             console.error(
               `[Scheduler] Failed to send short-term signal to ${chatId}:`,
