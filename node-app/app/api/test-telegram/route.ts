@@ -1,13 +1,15 @@
+/* app/api/test-telegram/route.ts */
 import { NextResponse } from "next/server";
-// Adjust the import paths based on your actual directory structure
-import { TelegramNotificationService } from "@/lib/scheduler/telegramService";
+// [FIXED] Updated import to use the new separated long-term service
+import { TelegramLongTermService } from "@/lib/scheduler/telegramLongTermService";
 import { sendDailyStockSignals } from "@/lib/scheduler/jobs/stock";
 
 export async function GET() {
   console.log("[Test Telegram] Initiating manual trigger for stock signals.");
 
   try {
-    const telegramService = new TelegramNotificationService();
+    // [FIXED] Instantiate the new long-term service
+    const telegramService = new TelegramLongTermService();
 
     console.log("[Test Telegram] Executing sendDailyStockSignals manually...");
     // Execute the actual stock checking and notification logic

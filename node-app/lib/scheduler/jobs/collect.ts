@@ -3,7 +3,10 @@ import axios, { AxiosError } from "axios";
 import { isMarketOpen } from "../../marketTime";
 import { schedulerConfig } from "../config";
 import stockConfig from "../../stock.json";
-import { TelegramNotificationService } from "../telegramService";
+
+// Import the newly separated telegram services
+import { TelegramLongTermService } from "../telegramLongTermService";
+import { TelegramShortTermService } from "../telegramShortTermService";
 
 /**
  * Periodically collects market data every 5 minutes during market hours.
@@ -22,7 +25,9 @@ export async function collectMarketData(): Promise<void> {
 
   console.log("[Scheduler] Market is open. Starting 5-min data update.");
 
-  const telegramService = new TelegramNotificationService();
+  // Initialize both long-term and short-term telegram services
+  const telegramLongTermService = new TelegramLongTermService();
+  const telegramShortTermService = new TelegramShortTermService();
 
   // Process US Stocks
   if (isUsOpen) {
@@ -37,14 +42,23 @@ export async function collectMarketData(): Promise<void> {
             `[Scheduler] Successfully triggered refresh for ${stock.ticker} (${timeframe})`,
           );
 
-          // Evaluate real-time signals for intraday timeframes
-          if (timeframe !== "1d" && response.data && response.data.signals) {
-            // [MODIFIED] Call the updated generic signal notification method
-            await telegramService.notifyRealtimeSignal(
-              stock.ticker,
-              timeframe,
-              response.data.signals,
-            );
+          // Evaluate real-time signals for all timeframes
+          if (response.data && response.data.signals) {
+            if (timeframe === "1d") {
+              // Send 1d signals to the long-term chat room
+              await telegramLongTermService.notifyRealtimeSignal(
+                stock.ticker,
+                timeframe,
+                response.data.signals,
+              );
+            } else {
+              // Send 1h and 15m signals to the short-term chat rooms
+              await telegramShortTermService.notifyRealtimeSignal(
+                stock.ticker,
+                timeframe,
+                response.data.signals,
+              );
+            }
           }
         } catch (error) {
           const axiosError = error as AxiosError;

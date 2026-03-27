@@ -2,22 +2,27 @@
 
 import axios, { AxiosError } from "axios";
 import { schedulerConfig } from "../config";
-import { TelegramNotificationService } from "../telegramService";
+// [FIXED] Updated import to use the new separated long-term service
+import { TelegramLongTermService } from "../telegramLongTermService";
 import { StockSignalInfo } from "../types";
 import { TradingSignal } from "../../stockUtils";
 import stockConfig from "../../stock.json";
 
+/**
+ * Sends daily stock signals report based on 1d timeframe data.
+ * @param telegramService Instance of TelegramLongTermService
+ */
 export async function sendDailyStockSignals(
-  telegramService: TelegramNotificationService,
+  telegramService: TelegramLongTermService,
 ): Promise<void> {
   const usStocks = stockConfig.us_stocks;
   const allLatestSignals: StockSignalInfo[] = [];
 
   for (const stock of usStocks) {
     try {
-      // Fetching data from the local internal API
+      // Fetching data from the local internal API (defaulting to 1d timeframe)
       const response = await axios.get(
-        `${schedulerConfig.apiBaseUrl}/api/kisStock/${stock.ticker}`,
+        `${schedulerConfig.apiBaseUrl}/api/kisStock/${stock.ticker}?timeframe=1d`,
       );
 
       // Extracting signals and Gemini advice from the response
@@ -65,12 +70,12 @@ export async function sendDailyStockSignals(
   // Dispatch notifications if there are any valid signals to report
   if (allLatestSignals.length > 0) {
     console.log(
-      `Checked ${allLatestSignals.length} KIS US stock statuses. Sending report via Telegram.`,
+      `Checked ${allLatestSignals.length} KIS US stock statuses. Sending report via Telegram Long-Term Chat.`,
     );
 
-    // Notify in chunks without replyMarkup (no inline keyboard)
+    // Notify in chunks using the long-term service's message formatting
     await telegramService.notifyInChunks(
-      telegramService.createStockStatusMessage,
+      telegramService.createStockStatusMessage.bind(telegramService),
       allLatestSignals,
       schedulerConfig.notificationChunkSize,
     );

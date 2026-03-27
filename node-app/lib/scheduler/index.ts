@@ -1,19 +1,22 @@
 /* lib/scheduler/index.ts */
 import cron from "node-cron";
 import { schedulerConfig } from "./config";
-import { TelegramNotificationService } from "./telegramService";
+// [FIXED] Updated import to use the new separated long-term service
+import { TelegramLongTermService } from "./telegramLongTermService";
 import { generateDailyAdvice, resetAdviceCache } from "./jobs/advice";
 import { updateLottoWinningNumbers, sendDailyLottoNumbers } from "./jobs/lotto";
 import { sendDailyStockSignals } from "./jobs/stock";
-import { collectMarketData } from "./jobs/collect"; // [NEW] Import collection job
+import { collectMarketData } from "./jobs/collect";
 
 export { generateDailyAdvice, resetAdviceCache, collectMarketData };
 
 class JobScheduler {
-  private telegramService: TelegramNotificationService;
+  // [FIXED] Change type to TelegramLongTermService
+  private telegramService: TelegramLongTermService;
 
   constructor() {
-    this.telegramService = new TelegramNotificationService();
+    // [FIXED] Instantiate the new long-term service
+    this.telegramService = new TelegramLongTermService();
     this.initializeJobs();
   }
 
@@ -43,7 +46,6 @@ class JobScheduler {
       schedulerConfig.cronSchedules.resetAdvice,
       resetAdviceCache,
     );
-    // [NEW] Added 5-minute market data collection job
     this._scheduleJob(
       "Collect Market Data Every 5 Minutes",
       schedulerConfig.cronSchedules.collectMarketData || "*/5 * * * *",
