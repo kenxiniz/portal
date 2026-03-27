@@ -279,14 +279,14 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             index === historicalSignals.length - 1 &&
                             isBuySignal;
 
-                          // Check for high-risk warning
+                          // Check for high-risk warning (reverse market direction)
                           const showHighRiskWarning =
                             timeframe === "1d" &&
                             ((isInverseStock && signal.type === "buy") ||
                               (!isInverseStock &&
                                 signal.type === "inverse-buy"));
 
-                          // Check for Gazua badge
+                          // Check for positive momentum badge
                           const showGazuaBadge =
                             timeframe === "1d" &&
                             ((!isInverseStock && signal.type === "buy") ||
@@ -357,8 +357,11 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                       >
                                         {Number(signal.profitRate).toFixed(2)}%
                                       </span>
+                                      {/* [FIXED] Force display of realizedPrice to prevent duplicate % rendering from faulty signal.details */}
                                       <span className="text-gray-500 text-[10px] whitespace-nowrap">
-                                        {signal.details}
+                                        {signal.realizedPrice !== undefined
+                                          ? formatPrice(signal.realizedPrice)
+                                          : signal.details}
                                       </span>
                                     </div>
                                   )}
@@ -368,7 +371,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                       <span className="text-blue-600 dark:text-blue-400">
                                         {formatPrice(signal.entryPrice)}
                                       </span>
-                                      {/* [NEW] Show real-time profit for active buy signals */}
                                       {currentProfitRate !== null && (
                                         <span
                                           className={cn(
