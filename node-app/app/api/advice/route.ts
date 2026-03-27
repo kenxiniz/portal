@@ -3,13 +3,8 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import { TickerAdvice } from "@/lib/models/advice";
-import {
-  CachedStockData,
-  AdviceObject,
-  TradingSignal,
-  StockDataPoint,
-} from "@/lib/stockUtils";
-import { getGeminiAdvice } from "@/lib/geminiUtils";
+import { CachedStockData, AdviceObject } from "@/lib/stockUtils";
+import { getBatchGeminiAdvice, BatchInputItem } from "@/lib/geminiUtils";
 import stockConfig from "@/lib/stock.json";
 
 type ApiType = "stock" | "kisStock" | "kStock";
@@ -35,11 +30,11 @@ if (process.env.NODE_ENV !== "production") {
   globalForCache.memoryStore = memoryStore;
 }
 
-const adviceGenerationInProgress = new Map<string, Promise<AdviceObject>>();
+const batchGenerationInProgress = new Map<
+  string,
+  Promise<Record<string, AdviceObject>>
+>();
 
-/**
- * Persists Gemini advice to MongoDB.
- */
 async function saveToDatabase(ticker: string, advice: AdviceObject) {
   try {
     await connectDB();
@@ -60,65 +55,13 @@ async function saveToDatabase(ticker: string, advice: AdviceObject) {
   }
 }
 
-async function generateAndCacheAdvice(
-  apiType: ApiType,
-  ticker: string,
-  cachedTickerData: CachedStockData,
-): Promise<AdviceObject> {
-  console.log(
-    `[INFO] [${ticker}/${apiType}/advice] Starting Gemini analysis process...`,
-  );
-
-  const signals: TradingSignal[] = cachedTickerData.signals || [];
-  const fullStockData: StockDataPoint[] = cachedTickerData.data || [];
-  const recentStockData = fullStockData.slice(-7);
-
-  try {
-    let newAdvice: AdviceObject;
-    if (apiType === "kStock") {
-      const stockName =
-        stockConfig.k_stocks.find((s) => s.ticker === ticker)?.name || ticker;
-      newAdvice = await getGeminiAdvice(
-        signals,
-        recentStockData,
-        ticker,
-        "kr",
-        stockName,
-      );
-    } else {
-      newAdvice = await getGeminiAdvice(signals, recentStockData, ticker, "us");
-    }
-
-    // [CRITICAL FIX] Prevent saving error objects to DB or Cache
-    if (newAdvice.error) {
-      console.error(
-        `[ERROR] [${ticker}/${apiType}/advice] API returned an error object. Skipping DB and Cache updates.`,
-      );
-      return newAdvice;
-    }
-
-    cachedTickerData.advice = newAdvice;
-    // Ensure saveToDatabase does not overwrite existing good data with errors
-    saveToDatabase(ticker, newAdvice);
-
-    console.log(
-      `[INFO] [${ticker}/${apiType}/advice] Memory updated and DB persistence triggered.`,
-    );
-    return newAdvice;
-  } catch (e) {
-    console.error(
-      `[ERROR] [${ticker}/${apiType}/advice] Gemini advice generation failed:`,
-      e,
-    );
-    return {
-      error: true,
-      message: `Gemini failure: ${e instanceof Error ? e.message : "Unknown error"}`,
-    };
-  }
-}
-
 export async function POST(request: Request) {
-  let body: { ticker: string; apiType: ApiType; refresh?: boolean };
+  let body: {
+    ticker?: string;
+    isBatch?: boolean;
+    apiType: ApiType;
+    refresh?: boolean;
+  };
   try {
     body = await request.json();
   } catch (error) {
@@ -129,175 +72,206 @@ export async function POST(request: Request) {
     );
   }
 
-  const { ticker, apiType, refresh } = body;
-  const progressKey = `${apiType}-${ticker}`;
+  const { ticker, isBatch, apiType, refresh } = body;
 
-  if (!ticker || !apiType) {
+  if (!apiType) {
     return NextResponse.json(
-      { error: "Missing required fields" },
+      { error: "Missing apiType field" },
       { status: 400 },
     );
   }
 
-  let cachedTickerData = memoryStore[apiType][ticker];
-
-  if (
-    !cachedTickerData ||
-    !cachedTickerData.data ||
-    !cachedTickerData.signals
-  ) {
-    console.log(
-      `[INFO] [${ticker}/${apiType}/advice] Memory cache miss. Fetching data...`,
-    );
-    try {
-      const baseUrl =
-        process.env.NEXT_PUBLIC_BASE_URL || "http://node-app:3000";
-      const fetchRes = await fetch(`${baseUrl}/api/${apiType}/${ticker}`, {
-        method: "GET",
-      });
-
-      if (!fetchRes.ok) throw new Error(`Source API error: ${fetchRes.status}`);
-
-      const responseData = await fetchRes.json();
-      memoryStore[apiType][ticker] = {
-        ...memoryStore[apiType][ticker],
-        ...responseData,
-      };
-      cachedTickerData = memoryStore[apiType][ticker];
-      console.log(
-        `[INFO] [${ticker}/${apiType}/advice] Auto-fetch complete. Memory sync done.`,
+  let targetTickers: string[] = [];
+  if (isBatch) {
+    if (apiType === "kStock") {
+      targetTickers = stockConfig.k_stocks.map(
+        (s: { ticker: string }) => s.ticker,
       );
-    } catch (err) {
-      console.error(
-        `[ERROR] [${ticker}/${apiType}/advice] Auto-fetch failed:`,
-        err,
-      );
-      return NextResponse.json(
-        { error: "Data recovery failed" },
-        { status: 500 },
+    } else {
+      targetTickers = stockConfig.us_stocks.map(
+        (s: { ticker: string }) => s.ticker,
       );
     }
-  }
-
-  if (!refresh && cachedTickerData?.advice && !cachedTickerData.advice.error) {
-    console.log(
-      `[INFO] [${ticker}/${apiType}/advice] Memory Hit: Returning cached response.`,
-    );
-    return NextResponse.json({ ...cachedTickerData.advice, isCached: true });
-  }
-
-  if (refresh) {
-    console.log(
-      `[INFO] [${ticker}/${apiType}/advice] Refresh flag detected. Bypassing memory cache.`,
+  } else if (ticker) {
+    targetTickers = [ticker];
+  } else {
+    return NextResponse.json(
+      { error: "No ticker provided and isBatch is false" },
+      { status: 400 },
     );
   }
 
-  let fallbackAdvice: AdviceObject | null = null;
+  const progressKey = `batch-${apiType}-${targetTickers.join("-")}`;
 
-  try {
+  if (batchGenerationInProgress.has(progressKey)) {
     console.log(
-      `[DEBUG] [${ticker}/${apiType}/advice] Starting DB connection and lookup.`,
+      `[INFO] [Batch/${apiType}] Analysis in progress. Waiting for existing promise...`,
     );
-    await connectDB();
-    const existingRecord = await TickerAdvice.findOne({ ticker });
+    const batchResult = await batchGenerationInProgress.get(progressKey)!;
+    return NextResponse.json(
+      ticker && !isBatch ? batchResult[ticker] : batchResult,
+    );
+  }
 
-    if (
-      existingRecord &&
-      existingRecord.advice &&
-      !existingRecord.advice.error
-    ) {
-      fallbackAdvice = existingRecord.advice;
-      console.log(
-        `[INFO] [${ticker}/${apiType}/advice] DB Record found. Saved as potential fallback.`,
-      );
+  const generationPromise = (async () => {
+    const responseData: Record<
+      string,
+      AdviceObject & { isCached?: boolean; isFallback?: boolean }
+    > = {};
+    const itemsForGemini: BatchInputItem[] = [];
+    const fallbacks: Record<string, AdviceObject> = {};
 
-      if (existingRecord.updatedAt) {
-        const kstOptions: Intl.DateTimeFormatOptions = {
-          timeZone: "Asia/Seoul",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        };
+    const kstOptions: Intl.DateTimeFormatOptions = {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    };
+    const todayDateStr = new Intl.DateTimeFormat("en-CA", kstOptions).format(
+      new Date(),
+    );
 
-        const recordDateStr = new Intl.DateTimeFormat(
-          "en-CA",
-          kstOptions,
-        ).format(new Date(existingRecord.updatedAt));
-        const todayDateStr = new Intl.DateTimeFormat(
-          "en-CA",
-          kstOptions,
-        ).format(new Date());
+    console.log(
+      `[INFO] [Batch/${apiType}] Processing ${targetTickers.length} tickers.`,
+    );
 
+    for (const t of targetTickers) {
+      let cachedTickerData = memoryStore[apiType][t];
+
+      if (
+        !cachedTickerData ||
+        !cachedTickerData.data ||
+        !cachedTickerData.signals
+      ) {
         console.log(
-          `[DEBUG] [${ticker}/${apiType}/advice] Record Date: ${recordDateStr}, Today Date: ${todayDateStr}, Refresh: ${refresh}`,
+          `[INFO] [${t}/${apiType}/advice] Memory cache miss. Fetching data...`,
         );
-
-        if (!refresh && recordDateStr === todayDateStr) {
-          console.log(
-            `[INFO] [${ticker}/${apiType}/advice] DB Hit: Found today's advice in database.`,
-          );
-          cachedTickerData.advice = existingRecord.advice;
-          return NextResponse.json({
-            ...existingRecord.advice,
-            isCached: true,
+        try {
+          const baseUrl =
+            process.env.NEXT_PUBLIC_BASE_URL || "http://node-app:3000";
+          const fetchRes = await fetch(`${baseUrl}/api/${apiType}/${t}`, {
+            method: "GET",
           });
-        } else if (!refresh) {
-          console.log(
-            `[INFO] [${ticker}/${apiType}/advice] DB Hit but outdated: Need new advice for today.`,
+          if (!fetchRes.ok)
+            throw new Error(`Source API error: ${fetchRes.status}`);
+
+          const responseJson = await fetchRes.json();
+          memoryStore[apiType][t] = {
+            ...memoryStore[apiType][t],
+            ...responseJson,
+          };
+          cachedTickerData = memoryStore[apiType][t];
+          console.log(`[INFO] [${t}/${apiType}/advice] Auto-fetch complete.`);
+        } catch (err) {
+          console.error(
+            `[ERROR] [${t}/${apiType}/advice] Auto-fetch failed:`,
+            err,
           );
-        } else {
-          console.log(
-            `[INFO] [${ticker}/${apiType}/advice] Refresh flag is true. Bypassing date check to force update.`,
-          );
+          responseData[t] = { error: true, message: "Data recovery failed" };
+          continue;
         }
       }
-    } else {
-      console.log(
-        `[INFO] [${ticker}/${apiType}/advice] DB Miss or corrupted data: No valid existing record found.`,
-      );
+
+      let dbHit = false;
+
+      try {
+        await connectDB();
+        const existingRecord = await TickerAdvice.findOne({ ticker: t });
+
+        if (
+          existingRecord &&
+          existingRecord.advice &&
+          !existingRecord.advice.error
+        ) {
+          fallbacks[t] = existingRecord.advice;
+
+          if (existingRecord.updatedAt) {
+            const recordDateStr = new Intl.DateTimeFormat(
+              "en-CA",
+              kstOptions,
+            ).format(new Date(existingRecord.updatedAt));
+
+            if (!refresh && recordDateStr === todayDateStr) {
+              console.log(
+                `[INFO] [${t}/${apiType}/advice] DB Hit: Found today's advice.`,
+              );
+              cachedTickerData.advice = existingRecord.advice;
+              responseData[t] = { ...existingRecord.advice, isCached: true };
+              dbHit = true;
+            }
+          }
+        }
+      } catch (dbError) {
+        console.error(
+          `[ERROR] [${t}/${apiType}/advice] DB lookup failed:`,
+          dbError,
+        );
+      }
+
+      if (!dbHit) {
+        // [MODIFIED] Fixed ESLint warning by defining explicit type for stockConfig iteration instead of 'any'
+        itemsForGemini.push({
+          ticker: t,
+          stockName:
+            apiType === "kStock"
+              ? stockConfig.k_stocks.find(
+                  (s: { ticker: string; name: string }) => s.ticker === t,
+                )?.name
+              : undefined,
+          signals: cachedTickerData.signals || [],
+          recentStockData: (cachedTickerData.data || []).slice(-7),
+        });
+      }
     }
-  } catch (dbError) {
-    console.error(
-      `[ERROR] [${ticker}/${apiType}/advice] DB verification failed:`,
-      dbError,
-    );
-  }
 
-  if (adviceGenerationInProgress.has(progressKey)) {
-    console.log(
-      `[INFO] [${ticker}/${apiType}/advice] Analysis in progress. Waiting for existing promise...`,
-    );
-    const advice = await adviceGenerationInProgress.get(progressKey)!;
-    return NextResponse.json(advice);
-  }
+    if (itemsForGemini.length > 0) {
+      console.log(
+        `[INFO] [Batch/${apiType}] Triggering Gemini API for ${itemsForGemini.length} items.`,
+      );
+      const market = apiType === "kStock" ? "kr" : "us";
+      const batchResults = await getBatchGeminiAdvice(itemsForGemini, market);
 
-  const generationPromise = generateAndCacheAdvice(
-    apiType,
-    ticker,
-    cachedTickerData,
-  );
-  adviceGenerationInProgress.set(progressKey, generationPromise);
+      for (const item of itemsForGemini) {
+        const t = item.ticker;
+        const newAdvice = batchResults[t];
+
+        if (!newAdvice || newAdvice.error) {
+          console.warn(
+            `[WARN] [${t}/${apiType}/advice] Gemini failure. Attempting fallback.`,
+          );
+          if (fallbacks[t]) {
+            responseData[t] = {
+              ...fallbacks[t],
+              isCached: true,
+              isFallback: true,
+            };
+          } else {
+            responseData[t] = newAdvice || {
+              error: true,
+              message: "Unknown batch generation error",
+            };
+          }
+          continue;
+        }
+
+        memoryStore[apiType][t].advice = newAdvice;
+        await saveToDatabase(t, newAdvice);
+        responseData[t] = { ...newAdvice, isCached: false };
+      }
+    }
+
+    return responseData;
+  })();
+
+  batchGenerationInProgress.set(progressKey, generationPromise);
 
   try {
-    const advice = await generationPromise;
-
-    if (advice.error && fallbackAdvice) {
-      console.log(
-        `[WARN] [${ticker}/${apiType}/advice] Gemini API failed. Using outdated DB record as fallback.`,
-      );
-      // Fallback response explicitly returned
-      return NextResponse.json({
-        ...fallbackAdvice,
-        isCached: true,
-        isFallback: true,
-      });
-    }
-
-    return NextResponse.json({ ...advice, isCached: false });
-  } finally {
-    adviceGenerationInProgress.delete(progressKey);
-    console.log(
-      `[INFO] [${ticker}/${apiType}/advice] Analysis sequence finished.`,
+    const fullResponse = await generationPromise;
+    return NextResponse.json(
+      ticker && !isBatch ? fullResponse[ticker] : fullResponse,
     );
+  } finally {
+    batchGenerationInProgress.delete(progressKey);
+    console.log(`[INFO] [Batch/${apiType}] Analysis sequence finished.`);
   }
 }

@@ -14,12 +14,11 @@ if (!API_KEY) {
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-/**
- * ✅ 모델 변경: gemini-2.5-flash (하루 20회 제한) -> gemini-2.0-flash (대용량 쿼터)
- * 제공해주신 리스트에 있는 'gemini-2.0-flash'를 사용합니다.
- */
 const model = genAI.getGenerativeModel({
   model: "gemini-2.5-flash",
+  generationConfig: {
+    responseMimeType: "application/json",
+  },
   safetySettings: [
     {
       category: HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -45,13 +44,16 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // --- GLOBAL QUEUE SYSTEM START ---
 
 interface QueueItem {
-  task: () => Promise<AdviceObject>;
-  resolve: (value: AdviceObject | PromiseLike<AdviceObject>) => void;
+  task: () => Promise<Record<string, AdviceObject>>;
+  resolve: (
+    value:
+      | Record<string, AdviceObject>
+      | PromiseLike<Record<string, AdviceObject>>,
+  ) => void;
 }
 
 const requestQueue: QueueItem[] = [];
 let isProcessing = false;
-// 2.0 Flash는 속도가 빠르므로 간격을 4초로 설정 (안정성 확보)
 const REQUEST_INTERVAL = 4000;
 
 async function processQueue() {
@@ -65,17 +67,13 @@ async function processQueue() {
       const result = await item.task();
       item.resolve(result);
     } catch (error) {
-      console.error("Queue processing error:", error);
-      item.resolve({
-        error: true,
-        message: "요청 처리 중 대기열 오류 발생",
-      });
+      console.error("[ERROR] Queue processing error:", error);
+      item.resolve({});
     }
   }
 
-  // 요청 처리 후 대기 (Rate Limiting)
   if (requestQueue.length > 0) {
-    console.log(`⏳ Waiting ${REQUEST_INTERVAL}ms before next request...`);
+    console.log(`[INFO] Waiting ${REQUEST_INTERVAL}ms before next request...`);
     await sleep(REQUEST_INTERVAL);
   }
 
@@ -85,75 +83,79 @@ async function processQueue() {
 
 // --- GLOBAL QUEUE SYSTEM END ---
 
-async function performGeminiCall(
-  signals: TradingSignal[],
-  recentStockData: StockDataPoint[],
-  ticker: string,
+export interface BatchInputItem {
+  ticker: string;
+  stockName?: string;
+  signals: TradingSignal[];
+  recentStockData: StockDataPoint[];
+}
+
+async function performBatchGeminiCall(
+  items: BatchInputItem[],
   market: "kr" | "us",
-  stockName?: string,
-): Promise<AdviceObject> {
-  const identifier =
-    market === "kr" && stockName ? `${ticker} - ${stockName}` : ticker;
-  console.log(`🤖 [${identifier}] PROCESSING API CALL (Queue Executed).`);
+): Promise<Record<string, AdviceObject>> {
+  if (items.length === 0) return {};
 
-  const keySignals = signals.filter((s) => s.type !== "hold");
-  const signalsString =
-    keySignals.length > 0
-      ? keySignals
-          .map((s) => {
-            let signalDesc = `[${s.date}] ${s.reason}`;
-            if (s.type === "sell" && s.profitRate !== undefined) {
-              signalDesc += ` (수익률: ${s.profitRate.toFixed(2)}%)`;
-            } else if (s.type.includes("buy") && s.entryPrice) {
-              signalDesc += ` (진입가: ${s.entryPrice})`;
-            }
-            return signalDesc;
-          })
-          .join("\n")
-      : "최근 1년 간 유의미한 매매 신호 없음";
+  console.log(`[INFO] PROCESSING BATCH API CALL for ${items.length} stocks.`);
 
-  const formattedRecentData = recentStockData.map((d) => ({
-    date: d.date,
-    close: d.close,
-    rsi: d.rsi ? parseFloat(d.rsi.toFixed(2)) : null,
-  }));
-  const recentDataString = JSON.stringify(formattedRecentData, null, 2);
-
-  let marketContext = "";
-  let stockIdentifier = "";
-
-  if (market === "us") {
-    marketContext = "미국 주식";
-    stockIdentifier = ticker;
-  } else if (market === "kr") {
-    marketContext = "한국 주식";
-    stockIdentifier = `${stockName || ticker}(종목코드: ${ticker})`;
-  }
-
-  // Get current date for the prompt
+  const marketContext = market === "us" ? "US Stocks" : "Korean Stocks";
   const now = new Date();
   const todayString = `${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일`;
 
-  // Modified Prompt: Added instruction to include the date
+  let dataPayload = "";
+  items.forEach((item) => {
+    const keySignals = item.signals.filter((s) => s.type !== "hold");
+    const signalsString =
+      keySignals.length > 0
+        ? keySignals
+            .map((s) => {
+              let signalDesc = `[${s.date}] ${s.reason}`;
+              if (s.type === "sell" && s.profitRate !== undefined) {
+                signalDesc += ` (Return: ${s.profitRate.toFixed(2)}%)`;
+              } else if (s.type.includes("buy") && s.entryPrice) {
+                signalDesc += ` (Entry: ${s.entryPrice})`;
+              }
+              return signalDesc;
+            })
+            .join("\n")
+        : "No significant trading signals in the past year";
+
+    const formattedRecentData = item.recentStockData.map((d) => ({
+      date: d.date,
+      close: d.close,
+      rsi: d.rsi ? parseFloat(d.rsi.toFixed(2)) : null,
+    }));
+
+    dataPayload += `\n### Ticker Key: ${item.ticker}\n`;
+    if (item.stockName) dataPayload += `Stock Name: ${item.stockName}\n`;
+    dataPayload += `Recent 7 Days Data:\n${JSON.stringify(formattedRecentData, null, 2)}\n`;
+    dataPayload += `Recent 1 Year Signals:\n${signalsString}\n`;
+  });
+
   const prompt = `
-당신은 전문 ${marketContext} 애널리스트입니다.
-${stockIdentifier} 주식에 대한 투자 조언을 생성해주세요.
+You are an expert ${marketContext} analyst.
+Analyze the provided data for multiple stocks and generate investment advice for each.
+Date: ${todayString}
 
-**작성 기준일:** ${todayString}
+REQUIREMENTS:
+1. You MUST return a valid JSON object.
+2. The root JSON keys must be the exact "Ticker Key" provided for each stock.
+3. The JSON values must be the generated advice string in Korean.
+4. Each advice string format MUST exactly follow this structure:
+[${todayString} 기준]
+**One-line summary in bold**
+- Detailed analysis bullet 1
+- Detailed analysis bullet 2
+5. Do not include any markdown code blocks (like \`\`\`json) or any other text outside the JSON object.
 
-**최근 1주일 가격 및 RSI 데이터:**
-${recentDataString}
+EXAMPLE OUTPUT FORMAT:
+{
+  "AAPL": "[${todayString} 기준]\\n**단기 상승 추세, 매수 유지**\\n- 최근 7일간 RSI가 50에서 65로 꾸준히 상승하며 매수세가 유입되고 있습니다.\\n- 150달러 부근의 지지선을 확인한 후 반등하는 모습을 보이고 있어 긍정적입니다.",
+  "TSLA": "[${todayString} 기준]\\n**변동성 확대 예상, 관망 추천**\\n- 거래량이 급증하며 주가 등락폭이 커지고 있어 단기적인 주의가 필요합니다.\\n- 과거 매수 신호 발생 이후 추가 상승 동력이 다소 부족한 상태입니다."
+}
 
-**최근 1년간의 주요 매매 신호:**
-${signalsString}
-
-**요구사항:**
-1.  위에 제공된 **최근 1주일 데이터**와 **최근 1년 매매 신호**를 모두 조합하여 분석합니다.
-2.  분석을 기반으로 투자 의견을 **한국어**로 간결하게 제공합니다.
-3.  **응답의 가장 첫 줄에 "[${todayString} 기준]"이라고 작성일을 명시해주세요.**
-4.  그 다음 줄에 한 문장으로 된 굵은 글씨의 요약(예: "**단기 하락 추세, 관망 필요**")을 제시하세요.
-5.  그 아래에 2-3개의 핵심 불렛포인트(bullet point)로 상세 내용을 요약하세요.
-6.  다른 설명 없이 위 형식(날짜, 요약, 불렛포인트)만 제공해주세요.
+STOCK DATA TO ANALYZE:
+${dataPayload}
 `;
 
   const maxRetries = 3;
@@ -166,49 +168,51 @@ ${signalsString}
       const text = response.text();
 
       if (!text || text.trim() === "") {
-        return { error: true, message: "AI 조언 생성 불가: 빈 응답" };
+        throw new Error("AI returned empty response");
       }
 
-      console.log(`✅ [${identifier}] Gemini advice generated successfully.`);
-      return { error: false, message: text.trim() };
+      const parsedResult = JSON.parse(text);
+      const finalResult: Record<string, AdviceObject> = {};
+
+      for (const key of Object.keys(parsedResult)) {
+        finalResult[key] = { error: false, message: parsedResult[key] };
+      }
+
+      console.log(`[INFO] Batch Gemini advice generated successfully.`);
+      return finalResult;
     } catch (e: unknown) {
       attempt++;
-      const errorMessage =
-        e instanceof Error ? e.message : "An unknown error occurred";
-
+      const errorMessage = e instanceof Error ? e.message : "Unknown error";
       console.error(
-        `[${identifier}] Gemini API Error (Attempt ${attempt}/${maxRetries}): ${errorMessage}`,
+        `[ERROR] Gemini API Error (Attempt ${attempt}/${maxRetries}): ${errorMessage}`,
       );
 
-      // --- 에러 처리 로직 ---
-
-      // 1. 일일 쿼터 초과 (PerDay) -> 재시도 해도 소용없음. 즉시 종료.
       if (
         errorMessage.includes("PerDay") ||
         errorMessage.includes("QuotaFailure")
       ) {
-        console.error(
-          `❌ [${identifier}] DAILY QUOTA EXCEEDED (2.0-flash). Stopping retries.`,
-        );
-        return {
-          error: true,
-          message: "Gemini API 일일 사용량 초과 (내일 다시 시도하세요)",
-        };
+        console.error(`[ERROR] DAILY QUOTA EXCEEDED. Stopping retries.`);
+        const errorRes: Record<string, AdviceObject> = {};
+        items.forEach((item) => {
+          errorRes[item.ticker] = {
+            error: true,
+            message: "Gemini API 일일 사용량 초과 (내일 다시 시도하세요)",
+          };
+        });
+        return errorRes;
       }
 
-      // 2. 일시적 속도 제한 (429) -> 60초 대기 후 재시도
       if (
         errorMessage.includes("429") ||
         errorMessage.includes("Too Many Requests")
       ) {
         if (attempt < maxRetries) {
-          console.warn(`🛑 [${identifier}] Rate limit hit. Waiting 60s...`);
-          await sleep(60000); // 1분 대기
+          console.warn(`[WARN] Rate limit hit. Waiting 60s...`);
+          await sleep(60000);
           continue;
         }
       }
 
-      // 3. 서버 과부하 (503) -> 짧게 대기 후 재시도
       if (
         errorMessage.includes("503") ||
         errorMessage.includes("Service Unavailable")
@@ -220,33 +224,39 @@ ${signalsString}
         }
       }
 
-      return {
-        error: true,
-        message: `Gemini API 오류: ${errorMessage}`,
-      };
+      if (attempt === maxRetries) {
+        const finalErrorRes: Record<string, AdviceObject> = {};
+        items.forEach((item) => {
+          finalErrorRes[item.ticker] = {
+            error: true,
+            message: `Gemini API 오류: ${errorMessage}`,
+          };
+        });
+        return finalErrorRes;
+      }
     }
   }
 
-  return {
-    error: true,
-    message: "Gemini API 오류: 최대 재시도 횟수 초과",
-  };
+  const failRes: Record<string, AdviceObject> = {};
+  items.forEach((item) => {
+    failRes[item.ticker] = {
+      error: true,
+      message: "Gemini API 오류: 최대 재시도 횟수 초과",
+    };
+  });
+  return failRes;
 }
 
-export async function getGeminiAdvice(
-  signals: TradingSignal[],
-  recentStockData: StockDataPoint[],
-  ticker: string,
+export async function getBatchGeminiAdvice(
+  items: BatchInputItem[],
   market: "kr" | "us",
-  stockName?: string,
-): Promise<AdviceObject> {
-  const identifier = stockName || ticker;
-  console.log(`🕒 [${identifier}] Queuing Gemini request...`);
-
-  return new Promise<AdviceObject>((resolve) => {
+): Promise<Record<string, AdviceObject>> {
+  console.log(
+    `[INFO] Queuing batch Gemini request for ${items.length} items...`,
+  );
+  return new Promise<Record<string, AdviceObject>>((resolve) => {
     requestQueue.push({
-      task: () =>
-        performGeminiCall(signals, recentStockData, ticker, market, stockName),
+      task: () => performBatchGeminiCall(items, market),
       resolve,
     });
     processQueue();
