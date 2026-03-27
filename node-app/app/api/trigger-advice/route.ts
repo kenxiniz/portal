@@ -1,25 +1,41 @@
 /* app/api/trigger-advice/route.ts */
 
 import { NextResponse } from "next/server";
-// This path refers to lib/scheduler/index.ts
+// Re-confirming the export exists in lib/scheduler/index.ts
 import { generateDailyAdvice } from "@/lib/scheduler";
 
 export async function POST() {
+  console.log("[Trigger] Manual trigger received for daily advice generation.");
+
   try {
-    // Trigger advice generation in the background (fire and forget)
-    // No await here because it takes approx. 1 min per stock
+    // Fire and forget: Do not 'await' as this process takes ~1 min per ticker due to rate limits.
+    // The inner function handles its own concurrency check (isAdviceRunning).
     generateDailyAdvice().catch((error) => {
-      console.error("Manual background advice generation failed:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(
+        "[Trigger] Background advice generation task failed:",
+        errorMessage,
+      );
     });
 
     return NextResponse.json(
-      { message: "Advice generation triggered successfully." },
+      {
+        success: true,
+        message:
+          "Advice generation task has been successfully queued in the background.",
+      },
       { status: 200 },
     );
   } catch (error) {
-    console.error("Failed to trigger advice generation:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(
+      "[Trigger] Critical failure during advice trigger sequence:",
+      errorMessage,
+    );
+
     return NextResponse.json(
-      { error: "Internal Server Error during advice trigger." },
+      { error: "Internal Server Error occurred while triggering advice." },
       { status: 500 },
     );
   }

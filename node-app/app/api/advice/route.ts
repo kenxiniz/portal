@@ -1,7 +1,4 @@
 /* /app/api/advice/route.ts */
-// MODIFIED: Fixed ESLint unused-vars errors by logging error details.
-// MODIFIED: Integrated in-memory store and MongoDB persistence via TickerAdvice model.
-// MODIFIED: All logs/comments in English. Emojis removed from logs.
 
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
@@ -27,7 +24,6 @@ interface MemoryStore {
   kStock: StockCache;
 }
 
-// Global store for in-memory persistence (same as candle logic)
 const globalForCache = global as unknown as { memoryStore: MemoryStore };
 const memoryStore: MemoryStore = globalForCache.memoryStore || {
   stock: {},
@@ -47,8 +43,6 @@ const adviceGenerationInProgress = new Map<string, Promise<AdviceObject>>();
 async function saveToDatabase(ticker: string, advice: AdviceObject) {
   try {
     await connectDB();
-
-    // Updates tickeradvices collection using the TickerAdvice model
     await TickerAdvice.findOneAndUpdate(
       { ticker },
       {
@@ -58,7 +52,6 @@ async function saveToDatabase(ticker: string, advice: AdviceObject) {
       },
       { upsert: true, new: true },
     );
-
     console.log(`[${ticker}] Database sync successful: Saved to MongoDB.`);
   } catch (error) {
     console.error(`[${ticker}] Database sync failed:`, error);
@@ -94,10 +87,7 @@ async function generateAndCacheAdvice(
       newAdvice = await getGeminiAdvice(signals, recentStockData, ticker, "us");
     }
 
-    // 1. Update In-Memory cache
     cachedTickerData.advice = newAdvice;
-
-    // 2. Queue MongoDB persistence
     saveToDatabase(ticker, newAdvice);
 
     console.log(
@@ -117,11 +107,10 @@ async function generateAndCacheAdvice(
 }
 
 export async function POST(request: Request) {
-  let body: { ticker: string; apiType: ApiType };
+  let body: { ticker: string; apiType: ApiType; refresh?: boolean };
   try {
     body = await request.json();
   } catch (error) {
-    // FIX: Log the error to satisfy ESLint no-unused-vars
     console.error("[/api/advice] Body parsing error:", error);
     return NextResponse.json(
       { error: "Invalid request body" },
@@ -129,7 +118,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { ticker, apiType } = body;
+  const { ticker, apiType, refresh } = body;
   const progressKey = `${apiType}-${ticker}`;
 
   if (!ticker || !apiType) {
@@ -141,7 +130,6 @@ export async function POST(request: Request) {
 
   let cachedTickerData = memoryStore[apiType][ticker];
 
-  // Auto-Fetch if data is missing in memory
   if (
     !cachedTickerData ||
     !cachedTickerData.data ||
@@ -160,19 +148,15 @@ export async function POST(request: Request) {
       if (!fetchRes.ok) throw new Error(`Source API error: ${fetchRes.status}`);
 
       const responseData = await fetchRes.json();
-
-      // Update local memory with the retrieved data
       memoryStore[apiType][ticker] = {
         ...memoryStore[apiType][ticker],
         ...responseData,
       };
       cachedTickerData = memoryStore[apiType][ticker];
-
       console.log(
         `[${ticker}/${apiType}/advice] Auto-fetch complete. Memory sync done.`,
       );
     } catch (err) {
-      // FIX: Log the err to satisfy ESLint no-unused-vars
       console.error(`[${ticker}/${apiType}/advice] Auto-fetch failed:`, err);
       return NextResponse.json(
         { error: "Data recovery failed" },
@@ -181,15 +165,20 @@ export async function POST(request: Request) {
     }
   }
 
-  // Return cached advice if valid
-  if (cachedTickerData?.advice && !cachedTickerData.advice.error) {
+  // [MODIFIED] Bypass memory cache if 'refresh' flag is true
+  if (!refresh && cachedTickerData?.advice && !cachedTickerData.advice.error) {
     console.log(
       `[${ticker}/${apiType}/advice] Memory Hit: Returning cached response.`,
     );
     return NextResponse.json({ ...cachedTickerData.advice, isCached: true });
   }
 
-  // Concurrency check
+  if (refresh) {
+    console.log(
+      `[${ticker}/${apiType}/advice] Refresh flag detected. Bypassing memory cache.`,
+    );
+  }
+
   if (adviceGenerationInProgress.has(progressKey)) {
     console.log(
       `[${ticker}/${apiType}/advice] Analysis in progress. Waiting for existing promise...`,
@@ -198,7 +187,6 @@ export async function POST(request: Request) {
     return NextResponse.json(advice);
   }
 
-  // Run new analysis
   const generationPromise = generateAndCacheAdvice(
     apiType,
     ticker,

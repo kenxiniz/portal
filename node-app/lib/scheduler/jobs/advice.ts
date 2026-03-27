@@ -1,81 +1,102 @@
+/* lib/scheduler/jobs/advice.ts */
+
 import axios, { AxiosError } from "axios";
-import path from "path";
-import fs from "fs/promises";
+import { connectDB } from "@/lib/mongodb";
+import { TickerAdvice } from "@/lib/models/advice";
 import { schedulerConfig } from "../config";
 import stockConfig from "../../stock.json";
 
 let isAdviceRunning = false;
 
+/**
+ * Triggers the API to generate daily AI advice for all monitored stocks.
+ * Now forces fresh generation by passing the refresh flag.
+ */
 export async function generateDailyAdvice(): Promise<void> {
   if (isAdviceRunning) {
-    console.log("Advice generation is already running. Skipping trigger.");
+    console.log("[AdviceJob] Generation is already in progress. Skipping.");
     return;
   }
 
   isAdviceRunning = true;
   const usStocks = stockConfig.us_stocks;
-  console.log(`Starting advice generation for ${usStocks.length} US stocks...`);
+  console.log(
+    `[AdviceJob] Starting generation for ${usStocks.length} US stocks.`,
+  );
 
   try {
     for (const stock of usStocks) {
       try {
-        console.log(`Triggering advice generation for ${stock.ticker}...`);
+        console.log(
+          `[AdviceJob] Triggering FORCED analysis for ${stock.ticker}...`,
+        );
+
         const response = await axios.post(
           `${schedulerConfig.apiBaseUrl}/api/advice`,
           {
             ticker: stock.ticker,
             apiType: "kisStock",
+            refresh: true, // [NEW] Force fresh generation by bypassing memory cache
           },
         );
 
         if (response.data && response.data.isCached) {
           console.log(
-            `[${stock.ticker}] Cached advice found. Skipping 1-minute wait.`,
+            `[AdviceJob] ${stock.ticker}: Existing valid advice found in cache. (Unexpected for refresh)`,
           );
           continue;
         }
+
+        console.log(
+          `[AdviceJob] ${stock.ticker}: New advice generated successfully.`,
+        );
       } catch (error) {
         const axiosError = error as AxiosError;
         console.error(
-          `Failed to generate advice for ${stock.ticker}:`,
+          `[AdviceJob] Failed to generate advice for ${stock.ticker}:`,
           axiosError.response?.data || axiosError.message,
         );
       }
 
-      console.log("Waiting 1 minute before next request...");
+      // Wait 1 minute between requests to avoid Gemini API rate limits
+      console.log("[AdviceJob] Waiting 60 seconds before next request...");
       await new Promise((resolve) => setTimeout(resolve, 60000));
     }
-    console.log("Daily advice generation completed.");
+    console.log("[AdviceJob] Daily advice generation sequence completed.");
   } finally {
     isAdviceRunning = false;
   }
 }
 
+/**
+ * Resets the advice cache in MongoDB by setting advice fields to null.
+ * This ensures fresh advice is generated during the next cycle.
+ */
 export async function resetAdviceCache(): Promise<void> {
-  const cachePath = path.join(schedulerConfig.cacheDir, "kis-stock-cache.json");
   try {
-    console.log("Starting advice cache reset...");
-    try {
-      await fs.access(cachePath);
-    } catch {
-      console.log("Cache file not found. Nothing to reset.");
-      return;
-    }
+    console.log("[CacheReset] Connecting to MongoDB for cache maintenance...");
+    await connectDB();
 
-    const fileContent = await fs.readFile(cachePath, "utf-8");
-    const cacheData = JSON.parse(fileContent);
+    console.log("[CacheReset] Starting mass reset of ticker advice entries...");
 
-    let resetCount = 0;
-    for (const key in cacheData) {
-      if (cacheData[key].advice) {
-        cacheData[key].advice = null;
-        resetCount++;
-      }
-    }
+    const result = await TickerAdvice.updateMany(
+      {},
+      {
+        $set: { advice: null },
+        $currentDate: { updatedAt: true },
+      },
+    );
 
-    await fs.writeFile(cachePath, JSON.stringify(cacheData, null, 2), "utf-8");
-    console.log(`Advice cache reset completed. Cleared ${resetCount} entries.`);
+    console.log(
+      `[CacheReset] MongoDB update finished. Matched: ${result.matchedCount}, Modified: ${result.modifiedCount}`,
+    );
+
+    console.log("[CacheReset] Advice cache reset completed successfully.");
   } catch (error) {
-    console.error("Failed to reset advice cache:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(
+      "[CacheReset] Critical failure during MongoDB cache reset:",
+      errorMessage,
+    );
   }
 }
