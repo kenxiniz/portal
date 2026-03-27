@@ -50,11 +50,13 @@ async function saveToDatabase(ticker: string, advice: AdviceObject) {
         advice: advice,
         updatedAt: new Date(),
       },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: "after" },
     );
-    console.log(`[${ticker}] Database sync successful: Saved to MongoDB.`);
+    console.log(
+      `[INFO] [${ticker}] Database sync successful: Saved to MongoDB.`,
+    );
   } catch (error) {
-    console.error(`[${ticker}] Database sync failed:`, error);
+    console.error(`[ERROR] [${ticker}] Database sync failed:`, error);
   }
 }
 
@@ -64,7 +66,7 @@ async function generateAndCacheAdvice(
   cachedTickerData: CachedStockData,
 ): Promise<AdviceObject> {
   console.log(
-    `[${ticker}/${apiType}/advice] Starting Gemini analysis process...`,
+    `[INFO] [${ticker}/${apiType}/advice] Starting Gemini analysis process...`,
   );
 
   const signals: TradingSignal[] = cachedTickerData.signals || [];
@@ -87,16 +89,25 @@ async function generateAndCacheAdvice(
       newAdvice = await getGeminiAdvice(signals, recentStockData, ticker, "us");
     }
 
+    // [CRITICAL FIX] Prevent saving error objects to DB or Cache
+    if (newAdvice.error) {
+      console.error(
+        `[ERROR] [${ticker}/${apiType}/advice] API returned an error object. Skipping DB and Cache updates.`,
+      );
+      return newAdvice;
+    }
+
     cachedTickerData.advice = newAdvice;
+    // Ensure saveToDatabase does not overwrite existing good data with errors
     saveToDatabase(ticker, newAdvice);
 
     console.log(
-      `[${ticker}/${apiType}/advice] Memory updated and DB persistence triggered.`,
+      `[INFO] [${ticker}/${apiType}/advice] Memory updated and DB persistence triggered.`,
     );
     return newAdvice;
   } catch (e) {
     console.error(
-      `[${ticker}/${apiType}/advice] Gemini advice generation failed:`,
+      `[ERROR] [${ticker}/${apiType}/advice] Gemini advice generation failed:`,
       e,
     );
     return {
@@ -111,7 +122,7 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch (error) {
-    console.error("[/api/advice] Body parsing error:", error);
+    console.error("[ERROR] [/api/advice] Body parsing error:", error);
     return NextResponse.json(
       { error: "Invalid request body" },
       { status: 400 },
@@ -136,7 +147,7 @@ export async function POST(request: Request) {
     !cachedTickerData.signals
   ) {
     console.log(
-      `[${ticker}/${apiType}/advice] Memory cache miss. Fetching data...`,
+      `[INFO] [${ticker}/${apiType}/advice] Memory cache miss. Fetching data...`,
     );
     try {
       const baseUrl =
@@ -154,10 +165,13 @@ export async function POST(request: Request) {
       };
       cachedTickerData = memoryStore[apiType][ticker];
       console.log(
-        `[${ticker}/${apiType}/advice] Auto-fetch complete. Memory sync done.`,
+        `[INFO] [${ticker}/${apiType}/advice] Auto-fetch complete. Memory sync done.`,
       );
     } catch (err) {
-      console.error(`[${ticker}/${apiType}/advice] Auto-fetch failed:`, err);
+      console.error(
+        `[ERROR] [${ticker}/${apiType}/advice] Auto-fetch failed:`,
+        err,
+      );
       return NextResponse.json(
         { error: "Data recovery failed" },
         { status: 500 },
@@ -165,23 +179,93 @@ export async function POST(request: Request) {
     }
   }
 
-  // [MODIFIED] Bypass memory cache if 'refresh' flag is true
   if (!refresh && cachedTickerData?.advice && !cachedTickerData.advice.error) {
     console.log(
-      `[${ticker}/${apiType}/advice] Memory Hit: Returning cached response.`,
+      `[INFO] [${ticker}/${apiType}/advice] Memory Hit: Returning cached response.`,
     );
     return NextResponse.json({ ...cachedTickerData.advice, isCached: true });
   }
 
   if (refresh) {
     console.log(
-      `[${ticker}/${apiType}/advice] Refresh flag detected. Bypassing memory cache.`,
+      `[INFO] [${ticker}/${apiType}/advice] Refresh flag detected. Bypassing memory cache.`,
+    );
+  }
+
+  let fallbackAdvice: AdviceObject | null = null;
+
+  try {
+    console.log(
+      `[DEBUG] [${ticker}/${apiType}/advice] Starting DB connection and lookup.`,
+    );
+    await connectDB();
+    const existingRecord = await TickerAdvice.findOne({ ticker });
+
+    if (
+      existingRecord &&
+      existingRecord.advice &&
+      !existingRecord.advice.error
+    ) {
+      fallbackAdvice = existingRecord.advice;
+      console.log(
+        `[INFO] [${ticker}/${apiType}/advice] DB Record found. Saved as potential fallback.`,
+      );
+
+      if (existingRecord.updatedAt) {
+        const kstOptions: Intl.DateTimeFormatOptions = {
+          timeZone: "Asia/Seoul",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        };
+
+        const recordDateStr = new Intl.DateTimeFormat(
+          "en-CA",
+          kstOptions,
+        ).format(new Date(existingRecord.updatedAt));
+        const todayDateStr = new Intl.DateTimeFormat(
+          "en-CA",
+          kstOptions,
+        ).format(new Date());
+
+        console.log(
+          `[DEBUG] [${ticker}/${apiType}/advice] Record Date: ${recordDateStr}, Today Date: ${todayDateStr}, Refresh: ${refresh}`,
+        );
+
+        if (!refresh && recordDateStr === todayDateStr) {
+          console.log(
+            `[INFO] [${ticker}/${apiType}/advice] DB Hit: Found today's advice in database.`,
+          );
+          cachedTickerData.advice = existingRecord.advice;
+          return NextResponse.json({
+            ...existingRecord.advice,
+            isCached: true,
+          });
+        } else if (!refresh) {
+          console.log(
+            `[INFO] [${ticker}/${apiType}/advice] DB Hit but outdated: Need new advice for today.`,
+          );
+        } else {
+          console.log(
+            `[INFO] [${ticker}/${apiType}/advice] Refresh flag is true. Bypassing date check to force update.`,
+          );
+        }
+      }
+    } else {
+      console.log(
+        `[INFO] [${ticker}/${apiType}/advice] DB Miss or corrupted data: No valid existing record found.`,
+      );
+    }
+  } catch (dbError) {
+    console.error(
+      `[ERROR] [${ticker}/${apiType}/advice] DB verification failed:`,
+      dbError,
     );
   }
 
   if (adviceGenerationInProgress.has(progressKey)) {
     console.log(
-      `[${ticker}/${apiType}/advice] Analysis in progress. Waiting for existing promise...`,
+      `[INFO] [${ticker}/${apiType}/advice] Analysis in progress. Waiting for existing promise...`,
     );
     const advice = await adviceGenerationInProgress.get(progressKey)!;
     return NextResponse.json(advice);
@@ -196,9 +280,24 @@ export async function POST(request: Request) {
 
   try {
     const advice = await generationPromise;
+
+    if (advice.error && fallbackAdvice) {
+      console.log(
+        `[WARN] [${ticker}/${apiType}/advice] Gemini API failed. Using outdated DB record as fallback.`,
+      );
+      // Fallback response explicitly returned
+      return NextResponse.json({
+        ...fallbackAdvice,
+        isCached: true,
+        isFallback: true,
+      });
+    }
+
     return NextResponse.json({ ...advice, isCached: false });
   } finally {
     adviceGenerationInProgress.delete(progressKey);
-    console.log(`[${ticker}/${apiType}/advice] Analysis sequence finished.`);
+    console.log(
+      `[INFO] [${ticker}/${apiType}/advice] Analysis sequence finished.`,
+    );
   }
 }
