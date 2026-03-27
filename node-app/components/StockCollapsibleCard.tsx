@@ -200,6 +200,9 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   const isMainDataLoading = tickerState.loading && !tickerState.data;
   const isAdviceAvailable = !!adviceObject;
 
+  // Get current close price for profit calculation
+  const currentPrice = tickerState.data?.at(-1)?.close;
+
   return (
     <div
       ref={cardContainerRef}
@@ -271,19 +274,44 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                       </TableHeader>
                       <TableBody>
                         {historicalSignals.map((signal, index) => {
-                          // Check for high-risk warning (reverse market direction)
+                          const isBuySignal = signal.type.includes("buy");
+                          const isLatestOpenPosition =
+                            index === historicalSignals.length - 1 &&
+                            isBuySignal;
+
+                          // Check for high-risk warning
                           const showHighRiskWarning =
                             timeframe === "1d" &&
                             ((isInverseStock && signal.type === "buy") ||
                               (!isInverseStock &&
                                 signal.type === "inverse-buy"));
 
-                          // [NEW] Check for positive momentum badge (Gazua!)
+                          // Check for Gazua badge
                           const showGazuaBadge =
                             timeframe === "1d" &&
                             ((!isInverseStock && signal.type === "buy") ||
                               (isInverseStock &&
                                 signal.type === "inverse-buy"));
+
+                          // Calculate current profit rate if it's an open position
+                          let currentProfitRate = null;
+                          if (
+                            isLatestOpenPosition &&
+                            currentPrice &&
+                            signal.entryPrice
+                          ) {
+                            if (signal.type === "buy") {
+                              currentProfitRate =
+                                ((currentPrice - signal.entryPrice) /
+                                  signal.entryPrice) *
+                                100;
+                            } else if (signal.type === "inverse-buy") {
+                              currentProfitRate =
+                                ((signal.entryPrice - currentPrice) /
+                                  signal.entryPrice) *
+                                100;
+                            }
+                          }
 
                           return (
                             <TableRow
@@ -308,7 +336,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                       고위험 (매매 참고용)
                                     </span>
                                   )}
-                                  {/* [NEW] Positive momentum badge for 1d signals */}
                                   {showGazuaBadge && (
                                     <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800 whitespace-nowrap">
                                       가즈아!
@@ -335,11 +362,31 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                       </span>
                                     </div>
                                   )}
-                                {signal.type.includes("buy") &&
+                                {isBuySignal &&
                                   signal.entryPrice !== undefined && (
-                                    <span className="text-blue-600 dark:text-blue-400">
-                                      {formatPrice(signal.entryPrice)}
-                                    </span>
+                                    <div className="flex flex-col items-end justify-center">
+                                      <span className="text-blue-600 dark:text-blue-400">
+                                        {formatPrice(signal.entryPrice)}
+                                      </span>
+                                      {/* [NEW] Show real-time profit for active buy signals */}
+                                      {currentProfitRate !== null && (
+                                        <span
+                                          className={cn(
+                                            "text-[10px] font-bold whitespace-nowrap",
+                                            currentProfitRate >= 0
+                                              ? "text-green-600"
+                                              : "text-red-600",
+                                          )}
+                                        >
+                                          {currentProfitRate > 0 ? "+" : ""}
+                                          {currentProfitRate.toFixed(2)}% (
+                                          {currentProfitRate > 0
+                                            ? "개이득"
+                                            : "눈물"}
+                                          )
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
                               </TableCell>
                             </TableRow>

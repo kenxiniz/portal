@@ -39,16 +39,8 @@ export default function KisStockPage() {
 
   const [openedTicker, setOpenedTicker] = useState<string | null>(null);
 
-  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>(() => {
-    if (typeof window !== "undefined") {
-      const urlParams = new URLSearchParams(window.location.search);
-      const tfParam = urlParams.get("tf");
-      if (tfParam === "1h" || tfParam === "15m" || tfParam === "1d") {
-        return tfParam as Timeframe;
-      }
-    }
-    return "1d";
-  });
+  // Initialize with '1d'. It will be immediately corrected by the useEffect on mount.
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>("1d");
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
@@ -60,10 +52,9 @@ export default function KisStockPage() {
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
   const adviceTriggered = useRef(false);
-  const previousTimeframe = useRef<Timeframe>(selectedTimeframe);
+  const previousTimeframe = useRef<Timeframe>("1d");
   const nextSyncTimeRef = useRef<number | null>(null);
 
-  // [FIXED] Removed tickerStates from dependency by using functional update internally
   const fetchStockData = useCallback(
     async (
       ticker: string,
@@ -71,7 +62,6 @@ export default function KisStockPage() {
       forceRefresh: boolean = false,
     ) => {
       setTickerStates((prev) => {
-        // Prevent unnecessary state updates if already loading
         if (prev[ticker]?.loading === true && !forceRefresh) return prev;
         return {
           ...prev,
@@ -201,10 +191,26 @@ export default function KisStockPage() {
     setIsSyncing(false);
   };
 
+  // [FIXED] Consolidated initial load and timeframe change logic
   useEffect(() => {
     if (!fullLoadInitiated.current) {
       fullLoadInitiated.current = true;
-      loadAllTickersSequentially(selectedTimeframe);
+
+      let initialTf: Timeframe = "1d";
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tfParam = urlParams.get("tf");
+        if (tfParam === "1h" || tfParam === "15m" || tfParam === "1d") {
+          initialTf = tfParam as Timeframe;
+        }
+      }
+
+      // Sync state with URL BEFORE fetching data
+      setSelectedTimeframe(initialTf);
+      previousTimeframe.current = initialTf;
+
+      // Fetch data with the exactly targeted timeframe from the URL
+      loadAllTickersSequentially(initialTf);
       return;
     }
 
@@ -221,6 +227,12 @@ export default function KisStockPage() {
         });
         return resetState;
       });
+
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("tf", selectedTimeframe);
+        window.history.replaceState({}, "", url.toString());
+      }
 
       loadAllTickersSequentially(selectedTimeframe, false, true, false);
     }
