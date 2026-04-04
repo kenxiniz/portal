@@ -17,9 +17,11 @@ import {
 } from "../../../../lib/koreanKisApi";
 import { TickerAdvice } from "../../../../lib/models/advice";
 
+// Force Next.js to completely disable caching for this API route
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// --- Global In-Memory Cache Setup ---
 type CachePayload = {
   data: StockDataPoint[];
   signals: TradingSignal[];
@@ -41,35 +43,18 @@ if (process.env.NODE_ENV !== "production") {
   globalCache.kStockApiCache = apiCache;
 }
 
+// Helper to get today's date string in KST
 const getTodayKST = () => {
   const now = new Date();
   const kstOffset = 9 * 60 * 60 * 1000;
   return new Date(now.getTime() + kstOffset).toISOString().split("T")[0];
 };
 
-const parseSafeDate = (dateStr: string) => {
-  if (!dateStr) return new Date();
-  if (dateStr.includes("-") || dateStr.includes("T")) return new Date(dateStr);
-
-  if (/^\d{8}$/.test(dateStr)) {
-    return new Date(
-      `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`,
-    );
-  }
-
-  if (/^\d{14}$/.test(dateStr)) {
-    return new Date(
-      `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}T${dateStr.slice(8, 10)}:${dateStr.slice(10, 12)}:${dateStr.slice(12, 14)}Z`,
-    );
-  }
-
-  return new Date(dateStr);
-};
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const ticker = url.pathname.split("/").pop();
 
+  // Get query parameters
   const timeframe = url.searchParams.get("timeframe") || "1d";
   const forceRefresh = url.searchParams.get("refresh") === "true";
 
@@ -83,74 +68,56 @@ export async function GET(request: Request) {
   try {
     await connectDB();
 
-    console.log(`\n========== DEBUG [${ticker}] START ==========`);
-    console.log(
-      `[DEBUG 1] Attempting to fetch advice for ticker: '${ticker}' from DB...`,
-    );
-
-    // --- Step 1: Fetch Advice from DB ---
+    // Fetch AI advice directly from DB before checking memory cache
     const adviceDoc = (await TickerAdvice.findOne({ ticker }).lean()) as {
       advice?: object;
     } | null;
-
     const latestAdvice = adviceDoc?.advice || null;
 
-    console.log(
-      `[DEBUG 2] DB Query Result -> adviceDoc exists? ${!!adviceDoc}`,
-    );
-    console.log(
-      `[DEBUG 3] Extracted latestAdvice ->`,
-      latestAdvice ? "Found valid advice object" : "NULL",
-    );
-
-    if (latestAdvice) {
-      console.log(
-        `[DEBUG 3-1] Advice snippet:`,
-        JSON.stringify(latestAdvice).substring(0, 100) + "...",
-      );
-    }
-
-    // --- Step 2: Check In-Memory Cache ---
+    // --- Step 0: Check In-Memory Cache ---
     if (!forceRefresh && apiCache.has(cacheKey)) {
       const cachedData = apiCache.get(cacheKey)!;
+
       const isToday = cachedData.fetchDate === todayStr;
       const isIntradayFresh =
         timeframe === "1d" ||
         Date.now() - cachedData.timestamp < 1000 * 60 * 15;
 
       if (isToday && isIntradayFresh) {
-        console.log(
-          `[DEBUG 4] Cache HIT. Injecting latestAdvice into cached payload.`,
-        );
+        console.log(`[${ticker}] Cache HIT (Memory) for ${timeframe}`);
+
+        // Inject the latest advice into the cached payload before returning
         cachedData.payload.advice = latestAdvice as AdviceObject | null;
-        console.log(`========== DEBUG [${ticker}] END ==========\n`);
         return NextResponse.json(cachedData.payload);
       }
     }
 
-    console.log(`[DEBUG 5] Cache MISS or expired. Fetching candles...`);
+    console.log(`[${ticker}] Request: ${timeframe}, Refresh: ${forceRefresh}`);
 
-    // --- Step 3: Check Database for Candles ---
+    // --- Step 1: Check Database ---
     let dbData = await getCandles("KR", ticker, timeframe, 500, forceRefresh);
     const fromDB = dbData && dbData.length > 0;
 
     if (fromDB) {
-      console.log(`[DEBUG 6] Candles fetched from DB.`);
+      console.log(`[${ticker}] Cache HIT (Database) for ${timeframe}`);
     }
 
-    // --- Step 4: Fetch from KIS API ---
+    // --- Step 2: Fetch from REST API (if DB miss or force refresh) ---
     if (forceRefresh || !fromDB) {
-      console.log(`[DEBUG 7] Syncing ${timeframe} candles from KIS API...`);
+      console.log(`[${ticker}] Syncing ${timeframe} data from KIS API...`);
+
       let apiData: StockDataPoint[] = [];
 
       if (timeframe === "1d") {
         apiData = await getDailyKoreanStockData(ticker);
       } else {
         const gap = timeframe === "1h" ? 60 : 15;
-        apiData = await getMinuteKoreanStockData(ticker, gap);
+        // Explicitly passing maxPages (12) to ensure we fetch enough history (~1200 items)
+        apiData = await getMinuteKoreanStockData(ticker, gap, 12);
       }
 
       if (apiData && apiData.length > 0) {
+        // Use bulk insert instead of loop for massive performance boost
         const formattedCandles = apiData.map((candle) => ({
           timestamp: candle.date,
           open: candle.open,
@@ -165,67 +132,56 @@ export async function GET(request: Request) {
       }
     }
 
-    // --- Step 5: Transform & Calculate Indicators ---
     if (dbData && dbData.length > 0) {
+      // 4. Transform for Technical Analysis
       const sortedData = [...dbData].sort(
         (a, b) =>
-          parseSafeDate(a.timestamp).getTime() -
-          parseSafeDate(b.timestamp).getTime(),
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
       );
 
-      const mappedData = sortedData.map((c) => {
-        const dateObj = parseSafeDate(c.timestamp);
-        let dateString = c.timestamp;
-        try {
-          dateString =
-            timeframe === "1d"
-              ? dateObj.toISOString().split("T")[0]
-              : dateObj.toISOString().replace("Z", "").replace("T", " ");
-        } catch {
-          // Handled without unused variable to pass linting
-          console.error(`[DEBUG] Date mapping error for ${c.timestamp}`);
-        }
+      const mappedData = sortedData.map((c) => ({
+        date:
+          timeframe === "1d"
+            ? new Date(c.timestamp).toISOString().split("T")[0]
+            : new Date(c.timestamp)
+                .toISOString()
+                .replace("Z", "")
+                .replace("T", " "),
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      }));
 
-        return {
-          date: dateString,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-          volume: c.volume,
-        };
-      });
-
+      // 5. Calculate Indicators
       const processedData = calculateBollingerBands(calculateRSI(mappedData));
       const signals = analyzeAllTradingSignals(
         processedData,
         timeframe as "1d" | "1h" | "15m",
       );
 
+      // Define payload matching the proper interface
       const responsePayload: CachePayload = {
         data: processedData,
         signals,
         advice: latestAdvice as AdviceObject | null,
       };
 
+      // --- Save to In-Memory Cache ---
       apiCache.set(cacheKey, {
         fetchDate: todayStr,
         timestamp: Date.now(),
         payload: responsePayload,
       });
 
-      console.log(
-        `[DEBUG 8] Fresh data generated. Payload advice exists? ${!!responsePayload.advice}`,
-      );
-      console.log(`========== DEBUG [${ticker}] END ==========\n`);
       return NextResponse.json(responsePayload);
     }
 
-    console.log(`========== DEBUG [${ticker}] END (No Data) ==========\n`);
     return NextResponse.json({ data: [], signals: [], advice: latestAdvice });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
-    console.error(`[K-Stock API Route - ${ticker}] Error:`, msg);
+    console.error(`[API Route - ${ticker}] Error:`, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

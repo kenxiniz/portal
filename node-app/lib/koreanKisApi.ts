@@ -12,22 +12,22 @@ let tokenExpiresAt: number | null = null;
 
 // Interfaces for KR Stock
 interface KisKrStockItem {
-  stck_bsop_date: string; // Date (YYYYMMDD)
-  stck_oprc: string; // Open
-  stck_hgpr: string; // High
-  stck_lwpr: string; // Low
-  stck_clpr: string; // Close
-  acml_vol: string; // Volume
+  stck_bsop_date: string;
+  stck_oprc: string;
+  stck_hgpr: string;
+  stck_lwpr: string;
+  stck_clpr: string;
+  acml_vol: string;
 }
 
 interface KisKrMinuteStockItem {
-  stck_bsop_date: string; // Date
-  stck_cntg_hour: string; // Time (HHMMSS)
-  stck_oprc: string; // Open
-  stck_hgpr: string; // High
-  stck_lwpr: string; // Low
-  stck_prpr: string; // Last (Current)
-  cntg_vol: string; // Volume
+  stck_bsop_date: string;
+  stck_cntg_hour: string;
+  stck_oprc: string;
+  stck_hgpr: string;
+  stck_lwpr: string;
+  stck_prpr: string;
+  cntg_vol: string;
 }
 
 async function getAccessToken(): Promise<string> {
@@ -122,10 +122,68 @@ export async function getDailyKrStockData(
 
 export const getDailyKoreanStockData = getDailyKrStockData;
 
+/**
+ * Helper to aggregate 1-minute candles into requested timeframe (15m or 60m)
+ */
+function aggregateCandles(
+  data: StockDataPoint[],
+  gap: number,
+): StockDataPoint[] {
+  const aggregated: StockDataPoint[] = [];
+  let currentBucket: StockDataPoint | null = null;
+  let currentBucketKey = "";
+
+  for (const item of data) {
+    const dateObj = new Date(item.date);
+    const h = dateObj.getHours();
+    const m = dateObj.getMinutes();
+
+    // Determine the minute bucket (e.g., 0, 15, 30, 45 for gap=15)
+    const bucketM = gap === 60 ? 0 : Math.floor(m / gap) * gap;
+
+    const yyyy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
+    const dd = String(dateObj.getDate()).padStart(2, "0");
+    const hhStr = String(h).padStart(2, "0");
+    const mmStr = String(bucketM).padStart(2, "0");
+
+    // Create a precise key representing this time block
+    const bucketKey = `${yyyy}-${mm}-${dd}T${hhStr}:${mmStr}:00`;
+
+    if (currentBucketKey !== bucketKey) {
+      if (currentBucket) {
+        aggregated.push({ ...currentBucket });
+      }
+      currentBucketKey = bucketKey;
+      currentBucket = {
+        date: bucketKey,
+        open: item.open,
+        high: item.high,
+        low: item.low,
+        close: item.close,
+        volume: item.volume,
+      };
+    } else if (currentBucket) {
+      // Expand the candle
+      currentBucket.high = Math.max(currentBucket.high, item.high);
+      currentBucket.low = Math.min(currentBucket.low, item.low);
+      currentBucket.close = item.close; // Last close wins
+      currentBucket.volume += item.volume;
+    }
+  }
+
+  // Push the final bucket
+  if (currentBucket) {
+    aggregated.push({ ...currentBucket });
+  }
+
+  return aggregated;
+}
+
 export async function getMinuteKrStockData(
   ticker: string,
   gap: number = 15,
-  maxPages: number = 12, // Increased to fetch enough history (approx 1200 records)
+  maxPages: number = 60, // 60 pages * 120 items = ~7200 minutes (enough to form 1h/15m charts)
 ): Promise<StockDataPoint[]> {
   const stockInfo = stockConfig.k_stocks.find((t) => t.ticker === ticker);
   if (!stockInfo)
@@ -136,31 +194,36 @@ export async function getMinuteKrStockData(
 
   let continueFetching = true;
   let pageCount = 0;
-  let currentHour = ""; // Empty for the first request (latest data)
+
+  // Start fetching from today's closing time
+  let currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  let currentHour = "153000";
+  let lastFirstKey = "";
 
   console.log(
-    `[INFO] [${ticker}] Starting pagination for KR intraday data (${gap}m)`,
+    `[INFO] [${ticker}] Fetching raw 1m data to aggregate into ${gap}m candles using FHKST03010230...`,
   );
 
   while (continueFetching && pageCount < maxPages) {
     try {
       const response = await axios.get(
-        `${KIS_API_URL}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice`,
+        `${KIS_API_URL}/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice`,
         {
           headers: {
             "Content-Type": "application/json; charset=utf-8",
             Authorization: `Bearer ${token}`,
             appkey: KIS_APP_KEY,
             appsecret: KIS_APP_SECRET,
-            tr_id: "FHKST03010200",
+            tr_id: "FHKST03010230", // Using Daily Minute Chart API
             custtype: "P",
           },
           params: {
             FID_COND_MRKT_DIV_CODE: "J",
             FID_INPUT_ISCD: ticker,
-            FID_INPUT_HOUR_1: currentHour,
-            FID_ETC_CLS_CODE: gap.toString(),
+            FID_INPUT_DATE_1: currentDate, // Required for this API
+            FID_INPUT_HOUR_1: currentHour, // Required for this API
             FID_PW_DATA_INCU_YN: "Y",
+            FID_FAKE_TICK_INCU_YN: "", // Space/Blank required by doc
           },
         },
       );
@@ -171,9 +234,16 @@ export async function getMinuteKrStockData(
 
       const output2 = response.data.output2 || [];
       if (output2.length === 0) {
-        continueFetching = false;
         break;
       }
+
+      // Loop prevention: KIS API sometimes repeats the last chunk if no more data
+      const chunkFirstKey =
+        output2[0].stck_bsop_date + output2[0].stck_cntg_hour;
+      if (lastFirstKey === chunkFirstKey) {
+        break;
+      }
+      lastFirstKey = chunkFirstKey;
 
       const chunk: StockDataPoint[] = output2
         .map((item: KisKrMinuteStockItem) => ({
@@ -188,20 +258,21 @@ export async function getMinuteKrStockData(
 
       allData.push(...chunk);
 
-      // Pagination: Get the time of the last candle to fetch previous block
+      // Pagination setup for next call
       const lastItem = output2[output2.length - 1];
+      currentDate = lastItem.stck_bsop_date;
       currentHour = lastItem.stck_cntg_hour;
 
       pageCount++;
 
-      // If we got fewer than 100 items, we've reached the end of available history
-      if (output2.length < 100) {
+      // KIS usually returns 120 items per call. Stop if we get significantly less.
+      if (output2.length < 50) {
         continueFetching = false;
       }
 
-      // Delay to respect API rate limits
+      // 100ms delay to prevent rate limiting
       if (continueFetching) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
     } catch (error) {
       console.error(
@@ -212,13 +283,19 @@ export async function getMinuteKrStockData(
     }
   }
 
-  console.log(
-    `[INFO] [${ticker}] Completed fetching KR intraday. Total records: ${allData.length}`,
-  );
-
-  return Array.from(
+  // 1. Deduplicate and sort the raw 1m data chronologically (oldest first)
+  const sortedRawData = Array.from(
     new Map(allData.map((item) => [item.date, item])).values(),
   ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  // 2. Aggregate the massive 1-minute dataset into requested gaps (15m or 60m)
+  const aggregatedData = aggregateCandles(sortedRawData, gap);
+
+  console.log(
+    `[INFO] [${ticker}] Aggregated ${sortedRawData.length} raw 1m candles into ${aggregatedData.length} ${gap}m candles.`,
+  );
+
+  return aggregatedData;
 }
 
 export const getMinuteKoreanStockData = getMinuteKrStockData;
