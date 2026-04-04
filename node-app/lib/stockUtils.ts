@@ -284,15 +284,16 @@ export const analyzeAllTradingSignals = (
     if (potentialSecondTrough && firstTrough) {
       if (currentPoint.close > potentialSecondTrough.close) {
         const buySignal: TradingSignal = {
-          date: potentialSecondTrough.date,
+          // [FIX] Record the date of the current candle where the signal is confirmed
+          date: currentPoint.date,
           startDate: firstTrough.date,
           type: "buy",
           reason: "매수 (RSI 쌍바닥)",
-          entryPrice: potentialSecondTrough.close,
+          // [FIX] The entry price should be the close price of the confirming candle
+          entryPrice: currentPoint.close,
           details: `RSI 상승 다이버전스`,
         };
         signals.push(buySignal);
-        // [FIX] Always update to the latest buy signal to base profit calculation on the most recent entry
         lastBuySignal = buySignal;
         firstTrough = null;
         firstTroughIndex = null;
@@ -339,15 +340,16 @@ export const analyzeAllTradingSignals = (
     if (potentialSecondPeak && firstPeak) {
       if (currentPoint.close < potentialSecondPeak.close) {
         const inverseBuySignal: TradingSignal = {
-          date: potentialSecondPeak.date,
+          // [FIX] Record the date of the current candle where the signal is confirmed
+          date: currentPoint.date,
           startDate: firstPeak.date,
           type: "inverse-buy",
           reason: "인버스 매수 (RSI 쌍봉)",
-          entryPrice: potentialSecondPeak.close,
+          // [FIX] The entry price should be the close price of the confirming candle
+          entryPrice: currentPoint.close,
           details: `RSI 하락 다이버전스`,
         };
         signals.push(inverseBuySignal);
-        // [FIX] Always update to the latest inverse buy signal to base profit calculation on the most recent entry
         lastInverseBuySignal = inverseBuySignal;
         firstPeak = null;
         firstPeakIndex = null;
