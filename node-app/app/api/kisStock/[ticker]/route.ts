@@ -12,8 +12,6 @@ import {
   AdviceObject,
 } from "../../../../lib/stockUtils";
 import { getDailyStockData, getMinuteStockData } from "../../../../lib/kisApi";
-
-// [FIX 1] Remove local AdviceSchema and import the official TickerAdvice model
 import { TickerAdvice } from "../../../../lib/models/advice";
 
 // Force Next.js to completely disable caching for this API route
@@ -55,7 +53,6 @@ export async function GET(request: Request) {
 
   // Get query parameters
   const timeframe = url.searchParams.get("timeframe") || "1d";
-  const forceRefresh = url.searchParams.get("refresh") === "true";
 
   if (!ticker) {
     return NextResponse.json({ error: "Ticker is required" }, { status: 400 });
@@ -67,14 +64,14 @@ export async function GET(request: Request) {
   try {
     await connectDB();
 
-    // [FIX 2] Fetch AI advice directly from DB before checking memory cache
+    // Fetch AI advice directly from DB before checking memory cache
     const adviceDoc = (await TickerAdvice.findOne({ ticker }).lean()) as {
       advice?: object;
     } | null;
     const latestAdvice = adviceDoc?.advice || null;
 
-    // --- Step 0: Check In-Memory Cache ---
-    if (!forceRefresh && apiCache.has(cacheKey)) {
+    // --- Step 0: Check In-Memory Cache (Always prioritized) ---
+    if (apiCache.has(cacheKey)) {
       const cachedData = apiCache.get(cacheKey)!;
 
       const isToday = cachedData.fetchDate === todayStr;
@@ -83,27 +80,34 @@ export async function GET(request: Request) {
         Date.now() - cachedData.timestamp < 1000 * 60 * 15;
 
       if (isToday && isIntradayFresh) {
-        console.log(`[${ticker}] Cache HIT (Memory) for ${timeframe}`);
+        console.log(
+          `[INFO] [${ticker}] US Cache HIT (Memory) for ${timeframe}`,
+        );
 
-        // [FIX 3] Inject the latest advice into the cached payload before returning
+        // Inject the latest advice into the cached payload before returning
         cachedData.payload.advice = latestAdvice as AdviceObject | null;
         return NextResponse.json(cachedData.payload);
       }
     }
 
-    console.log(`[${ticker}] Request: ${timeframe}, Refresh: ${forceRefresh}`);
+    console.log(`[INFO] [${ticker}] Requesting: ${timeframe}`);
 
-    // --- Step 1: Check Database ---
-    let dbData = await getCandles("US", ticker, timeframe, 500, forceRefresh);
+    // --- Step 1: Check Database (Prioritized over API call) ---
+    // ForceRefresh is false to strictly check DB first
+    let dbData = await getCandles("US", ticker, timeframe, 500, false);
     const fromDB = dbData && dbData.length > 0;
 
     if (fromDB) {
-      console.log(`[${ticker}] Cache HIT (Database) for ${timeframe}`);
+      console.log(
+        `[INFO] [${ticker}] US Cache HIT (Database) for ${timeframe}`,
+      );
     }
 
-    // --- Step 2: Fetch from REST API (if DB miss or force refresh) ---
-    if (forceRefresh || !fromDB) {
-      console.log(`[${ticker}] Syncing ${timeframe} data from KIS API...`);
+    // --- Step 2: Fetch from REST API (Only if DB miss) ---
+    if (!fromDB) {
+      console.log(
+        `[INFO] [${ticker}] US Syncing ${timeframe} data from KIS API...`,
+      );
 
       let apiData: StockDataPoint[] = [];
 
@@ -163,7 +167,7 @@ export async function GET(request: Request) {
       const responsePayload: CachePayload = {
         data: processedData,
         signals,
-        advice: latestAdvice as AdviceObject | null, // [FIX 4] Map the latest advice
+        advice: latestAdvice as AdviceObject | null,
       };
 
       // --- Save to In-Memory Cache ---
@@ -179,7 +183,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ data: [], signals: [], advice: latestAdvice });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
-    console.error(`[API Route - ${ticker}] Error:`, msg);
+    console.error(`[ERROR] [US API Route - ${ticker}]`, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

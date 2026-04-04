@@ -19,6 +19,7 @@ import {
   CrosshairMode,
   LogicalRange,
   IChartApi,
+  ISeriesApi,
 } from "lightweight-charts";
 
 interface StockChartDisplayProps {
@@ -44,10 +45,31 @@ export const StockChartDisplay = forwardRef<
   ) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const rsiChartContainerRef = useRef<HTMLDivElement>(null);
+
     const chartRef = useRef<{ main: IChartApi | null; rsi: IChartApi | null }>({
       main: null,
       rsi: null,
     });
+
+    const seriesRef = useRef<{
+      candle: ISeriesApi<"Candlestick"> | null;
+      upper: ISeriesApi<"Line"> | null;
+      lower: ISeriesApi<"Line"> | null;
+      rsi: ISeriesApi<"Line"> | null;
+      dummy: ISeriesApi<"Candlestick"> | null;
+    }>({
+      candle: null,
+      upper: null,
+      lower: null,
+      rsi: null,
+      dummy: null,
+    });
+
+    const isInitialZoomApplied = useRef(false);
+
+    useEffect(() => {
+      isInitialZoomApplied.current = false;
+    }, [timeframe]);
 
     useImperativeHandle(ref, () => ({
       moveToDate(date: string) {
@@ -73,16 +95,9 @@ export const StockChartDisplay = forwardRef<
       },
     }));
 
+    // --- EFFECT 1: Initialize Charts & Series (Always runs and keeps DOM nodes stable) ---
     useEffect(() => {
-      if (
-        loading ||
-        !Array.isArray(data) ||
-        data.length === 0 ||
-        !chartContainerRef.current ||
-        !rsiChartContainerRef.current
-      ) {
-        return;
-      }
+      if (!chartContainerRef.current || !rsiChartContainerRef.current) return;
 
       const isPcScreen = window.innerWidth >= 1024;
       const mainChartHeight = isPcScreen ? 400 : 250;
@@ -90,46 +105,6 @@ export const StockChartDisplay = forwardRef<
 
       chartContainerRef.current.style.height = `${mainChartHeight}px`;
       rsiChartContainerRef.current.style.height = `${rsiChartHeight}px`;
-
-      const formatTimeForChart = (dateString: string): Time => {
-        if (timeframe === "1d") {
-          return dateString.split("T")[0].split(" ")[0] as Time;
-        } else {
-          const safeDateStr = dateString.includes(" ")
-            ? dateString.replace(" ", "T")
-            : dateString;
-          const dateObj = new Date(safeDateStr);
-          const timestamp = Math.floor(dateObj.getTime() / 1000);
-
-          return isNaN(timestamp) ? (0 as Time) : (timestamp as Time);
-        }
-      };
-
-      const cleanData = data
-        .filter((d) => d && d.date)
-        .map((d) => ({ ...d, chartTime: formatTimeForChart(d.date) }))
-        .filter((d) => d.chartTime !== 0);
-
-      cleanData.sort((a, b) => {
-        if (typeof a.chartTime === "number" && typeof b.chartTime === "number")
-          return a.chartTime - b.chartTime;
-        if (typeof a.chartTime === "string" && typeof b.chartTime === "string")
-          return (
-            new Date(a.chartTime).getTime() - new Date(b.chartTime).getTime()
-          );
-        return 0;
-      });
-
-      const uniqueValidData = cleanData.filter(
-        (v, i, a) => a.findIndex((t) => t.chartTime === v.chartTime) === i,
-      );
-
-      if (uniqueValidData.length === 0) {
-        console.warn(
-          "[CHART WARNING] No valid data points available for rendering.",
-        );
-        return;
-      }
 
       const mainChart = createChart(chartContainerRef.current, {
         layout: {
@@ -146,6 +121,7 @@ export const StockChartDisplay = forwardRef<
           timeVisible: timeframe !== "1d",
           secondsVisible: false,
           rightBarStaysOnScroll: false,
+          shiftVisibleRangeOnNewBar: true,
         },
         crosshair: { mode: CrosshairMode.Normal },
         localization: {
@@ -190,7 +166,7 @@ export const StockChartDisplay = forwardRef<
 
       chartRef.current = { main: mainChart, rsi: rsiChart };
 
-      const candlestickSeries = mainChart.addSeries(CandlestickSeries, {
+      const candleSeries = mainChart.addSeries(CandlestickSeries, {
         upColor: "#E53935",
         downColor: "#1E88E5",
         borderUpColor: "black",
@@ -198,6 +174,133 @@ export const StockChartDisplay = forwardRef<
         wickUpColor: "#E53935",
         wickDownColor: "#1E88E5",
       });
+
+      const upperSeries = mainChart.addSeries(LineSeries, {
+        color: "#ccc",
+        lineWidth: 1,
+        lineStyle: 2,
+      });
+      const lowerSeries = mainChart.addSeries(LineSeries, {
+        color: "#ccc",
+        lineWidth: 1,
+        lineStyle: 2,
+      });
+
+      const rsiLineSeries = rsiChart.addSeries(LineSeries, {
+        color: "#82ca9d",
+        lineWidth: 2,
+      });
+
+      rsiLineSeries.createPriceLine({
+        price: 70,
+        color: "red",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "과매수",
+      });
+      rsiLineSeries.createPriceLine({
+        price: 30,
+        color: "green",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "과매도",
+      });
+
+      const dummySeries = rsiChart.addSeries(CandlestickSeries, {
+        visible: false,
+      });
+
+      seriesRef.current = {
+        candle: candleSeries,
+        upper: upperSeries,
+        lower: lowerSeries,
+        rsi: rsiLineSeries,
+        dummy: dummySeries,
+      };
+
+      mainChart
+        .timeScale()
+        .subscribeVisibleLogicalRangeChange(
+          (logicalRange: LogicalRange | null) => {
+            if (logicalRange)
+              rsiChart.timeScale().setVisibleLogicalRange(logicalRange);
+          },
+        );
+
+      const handleResize = () => {
+        if (chartContainerRef.current)
+          mainChart.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+          });
+        if (rsiChartContainerRef.current)
+          rsiChart.applyOptions({
+            width: rsiChartContainerRef.current.clientWidth,
+          });
+      };
+      window.addEventListener("resize", handleResize);
+
+      return () => {
+        window.removeEventListener("resize", handleResize);
+        mainChart.remove();
+        rsiChart.remove();
+        chartRef.current = { main: null, rsi: null };
+        seriesRef.current = {
+          candle: null,
+          upper: null,
+          lower: null,
+          rsi: null,
+          dummy: null,
+        };
+      };
+    }, [gridStrokeColor, timeframe]);
+
+    // --- EFFECT 2: Update Data (Safe against empty data and rapid refreshes) ---
+    useEffect(() => {
+      if (
+        !data ||
+        data.length === 0 ||
+        !seriesRef.current.candle ||
+        !chartRef.current.main
+      ) {
+        return;
+      }
+
+      const formatTimeForChart = (dateString: string): Time => {
+        if (timeframe === "1d") {
+          return dateString.split("T")[0].split(" ")[0] as Time;
+        } else {
+          const safeDateStr = dateString.includes(" ")
+            ? dateString.replace(" ", "T")
+            : dateString;
+          const dateObj = new Date(safeDateStr);
+          const timestamp = Math.floor(dateObj.getTime() / 1000);
+
+          return isNaN(timestamp) ? (0 as Time) : (timestamp as Time);
+        }
+      };
+
+      const cleanData = data
+        .filter((d) => d && d.date)
+        .map((d) => ({ ...d, chartTime: formatTimeForChart(d.date) }))
+        .filter((d) => d.chartTime !== 0);
+
+      cleanData.sort((a, b) => {
+        if (typeof a.chartTime === "number" && typeof b.chartTime === "number")
+          return a.chartTime - b.chartTime;
+        if (typeof a.chartTime === "string" && typeof b.chartTime === "string")
+          return (
+            new Date(a.chartTime).getTime() - new Date(b.chartTime).getTime()
+          );
+        return 0;
+      });
+
+      const uniqueValidData = cleanData.filter(
+        (v, i, a) => a.findIndex((t) => t.chartTime === v.chartTime) === i,
+      );
+
+      if (uniqueValidData.length === 0) return;
 
       const candlestickChartData: CandlestickData[] = uniqueValidData.map(
         (d) => {
@@ -226,23 +329,6 @@ export const StockChartDisplay = forwardRef<
         },
       );
 
-      try {
-        candlestickSeries.setData(candlestickChartData);
-      } catch (err) {
-        console.error("[CHART ERROR] Failed to set candlestick data:", err);
-      }
-
-      const upperBandSeries = mainChart.addSeries(LineSeries, {
-        color: "#ccc",
-        lineWidth: 1,
-        lineStyle: 2,
-      });
-      const lowerBandSeries = mainChart.addSeries(LineSeries, {
-        color: "#ccc",
-        lineWidth: 1,
-        lineStyle: 2,
-      });
-
       const upperData = uniqueValidData
         .filter(
           (d) =>
@@ -261,124 +347,84 @@ export const StockChartDisplay = forwardRef<
         )
         .map((d) => ({ time: d.chartTime, value: d.bollingerBands!.lower }));
 
-      try {
-        upperBandSeries.setData(upperData);
-        lowerBandSeries.setData(lowerData);
-      } catch (err) {
-        console.error("[CHART ERROR] Failed to set bollinger bands data:", err);
-      }
-
-      const rsiSeries = rsiChart.addSeries(LineSeries, {
-        color: "#82ca9d",
-        lineWidth: 2,
-      });
-
       const rsiData = uniqueValidData
         .filter((d) => typeof d.rsi === "number" && !isNaN(d.rsi))
         .map((d) => ({ time: d.chartTime, value: d.rsi! }));
 
       try {
-        rsiSeries.setData(rsiData);
-        rsiSeries.createPriceLine({
-          price: 70,
-          color: "red",
-          lineWidth: 1,
-          lineStyle: 2,
-          axisLabelVisible: true,
-          title: "과매수",
-        });
-        rsiSeries.createPriceLine({
-          price: 30,
-          color: "green",
-          lineWidth: 1,
-          lineStyle: 2,
-          axisLabelVisible: true,
-          title: "과매도",
-        });
+        seriesRef.current.candle.setData(candlestickChartData);
+        seriesRef.current.upper?.setData(upperData);
+        seriesRef.current.lower?.setData(lowerData);
+        seriesRef.current.rsi?.setData(rsiData);
+        seriesRef.current.dummy?.setData(candlestickChartData);
       } catch (err) {
-        console.error("[CHART ERROR] Failed to set RSI data:", err);
+        console.error("[CHART ERROR] Failed to update series data:", err);
       }
 
-      const dummySyncSeries = rsiChart.addSeries(CandlestickSeries, {
-        visible: false,
-      });
-      try {
-        dummySyncSeries.setData(candlestickChartData);
-      } catch (err) {
-        console.error("[CHART ERROR] Failed to set dummy sync data:", err);
-      }
-
-      if (uniqueValidData.length > 1) {
-        const lastDataPoint = uniqueValidData[uniqueValidData.length - 1];
+      if (!isInitialZoomApplied.current && uniqueValidData.length > 0) {
         const screenWidth = window.innerWidth;
-
-        // [MODIFIED] Applied requested bar counts for each screen size
         let visibleBarsCount = 75; // Mobile (default)
         if (screenWidth >= 1024)
-          visibleBarsCount = 150; // PC (1024px+)
-        else if (screenWidth >= 768) visibleBarsCount = 100; // Tablet (768px+)
+          visibleBarsCount = 150; // PC
+        else if (screenWidth >= 768) visibleBarsCount = 100; // Tablet
 
-        const startIndex = Math.max(
-          0,
-          uniqueValidData.length - visibleBarsCount,
-        );
-        const firstDataPoint = uniqueValidData[startIndex];
+        const lastIndex = uniqueValidData.length - 1;
 
         try {
-          mainChart.timeScale().setVisibleRange({
-            from: firstDataPoint.chartTime,
-            to: lastDataPoint.chartTime,
+          chartRef.current.main.timeScale().setVisibleLogicalRange({
+            from: lastIndex - visibleBarsCount,
+            to: lastIndex + 2,
           });
+          isInitialZoomApplied.current = true;
         } catch (err) {
-          console.error("[CHART ERROR] Failed to set visible range:", err);
+          console.error("[CHART ERROR] Failed to set logical range:", err);
         }
       }
+    }, [data, signals, timeframe]);
 
-      mainChart
-        .timeScale()
-        .subscribeVisibleLogicalRangeChange(
-          (logicalRange: LogicalRange | null) => {
-            if (logicalRange)
-              rsiChart.timeScale().setVisibleLogicalRange(logicalRange);
-          },
-        );
-
-      const handleResize = () => {
-        if (chartContainerRef.current)
-          mainChart.applyOptions({
-            width: chartContainerRef.current.clientWidth,
-          });
-        if (rsiChartContainerRef.current)
-          rsiChart.applyOptions({
-            width: rsiChartContainerRef.current.clientWidth,
-          });
-      };
-      window.addEventListener("resize", handleResize);
-
-      return () => {
-        window.removeEventListener("resize", handleResize);
-        if (chartRef.current.main) chartRef.current.main.remove();
-        if (chartRef.current.rsi) chartRef.current.rsi.remove();
-      };
-    }, [data, signals, gridStrokeColor, loading, error, timeframe]);
-
-    if (loading)
-      return (
-        <p className="text-slate-700 dark:text-slate-300">데이터 로딩 중...</p>
-      );
-    if (error)
-      return (
-        <div
-          className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
-          role="alert"
-        >
-          <strong className="font-bold">Error:</strong>
-          <span className="block sm:inline ml-2">{error}</span>
-        </div>
-      );
+    const hasData = Array.isArray(data) && data.length > 0;
 
     return (
-      <div className="flex flex-col gap-1">
+      <div className="relative flex flex-col gap-1 w-full min-h-[350px]">
+        {/* Initial loading screen (when data is completely empty) overlaying the chart area */}
+        {loading && !hasData && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-white dark:bg-slate-900 rounded">
+            <p className="text-slate-700 dark:text-slate-300 font-medium">
+              데이터 로딩 중...
+            </p>
+          </div>
+        )}
+
+        {/* Background/Manual refresh overlay (when data exists but we are fetching updates) */}
+        {loading && hasData && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/30 dark:bg-slate-900/30 rounded backdrop-blur-[0.5px]">
+            <span className="text-xs font-medium text-slate-800 dark:text-slate-200 bg-white/80 dark:bg-slate-800/80 px-3 py-1 rounded shadow-sm">
+              데이터 갱신 중...
+            </span>
+          </div>
+        )}
+
+        {/* Error overlay on initial load */}
+        {error && !hasData && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-white dark:bg-slate-900 rounded">
+            <div
+              className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
+              role="alert"
+            >
+              <strong className="font-bold">Error:</strong>
+              <span className="block sm:inline ml-2">{error}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Non-intrusive error alert on background refresh */}
+        {error && hasData && (
+          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-20 bg-red-100 border border-red-400 text-red-700 px-4 py-1 rounded shadow text-xs">
+            갱신 실패: {error}
+          </div>
+        )}
+
+        {/* Chart DOM nodes are ALWAYS rendered. They will simply be empty until data arrives. */}
         <div ref={chartContainerRef} style={{ width: "100%" }} />
         <div ref={rsiChartContainerRef} style={{ width: "100%" }} />
       </div>
