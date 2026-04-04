@@ -14,21 +14,28 @@ let lastCacheUpdateDate = "";
 
 /**
  * Filter tickers that already have valid advice for today from Memory or DB.
- * @param tickers List of tickers to check
+ * @param tickers List of ticker strings to check
  * @param market 'us_stocks' or 'k_stocks'
  */
-async function getTickersRequiringUpdate(tickers: string[], market: string): Promise<string[]> {
+async function getTickersRequiringUpdate(
+  tickers: string[],
+  market: string,
+): Promise<string[]> {
   const todayStr = new Date().toISOString().split("T")[0];
 
   // Reset memory cache if the day has changed
   if (lastCacheUpdateDate !== todayStr) {
-    console.log(`[AdviceJob] Date changed from ${lastCacheUpdateDate} to ${todayStr}. Clearing memory cache.`);
+    console.log(
+      `[AdviceJob] Date changed from ${lastCacheUpdateDate} to ${todayStr}. Clearing memory cache.`,
+    );
     memoryCache.clear();
     lastCacheUpdateDate = todayStr;
   }
 
   // 1. Check Memory Cache
-  const missingInMem = tickers.filter((ticker) => !memoryCache.has(`${market}:${ticker}`));
+  const missingInMem = tickers.filter(
+    (ticker) => !memoryCache.has(`${market}:${ticker}`),
+  );
   if (missingInMem.length === 0) return [];
 
   // 2. Check Database
@@ -71,10 +78,16 @@ export async function generateDailyAdvice(): Promise<void> {
 
   try {
     // 1. Process US Market
-    const usTickersToProcess = await getTickersRequiringUpdate(stockConfig.us_stocks, "us_stocks");
+    // Convert object array to string array using .map() to fix Type Error
+    const usTickersToProcess = await getTickersRequiringUpdate(
+      stockConfig.us_stocks.map((s: { ticker: string }) => s.ticker),
+      "us_stocks",
+    );
 
     if (usTickersToProcess.length > 0) {
-      console.log(`[AdviceJob] Triggering analysis for ${usTickersToProcess.length} US stocks (Cache MISS)...`);
+      console.log(
+        `[AdviceJob] Triggering analysis for ${usTickersToProcess.length} US stocks (Cache MISS)...`,
+      );
       try {
         await axios.post(`${schedulerConfig.apiBaseUrl}/api/advice`, {
           isBatch: true,
@@ -82,7 +95,9 @@ export async function generateDailyAdvice(): Promise<void> {
           tickers: usTickersToProcess, // Send only filtered tickers
           refresh: false, // Do not force, use cache-first logic in API handler
         });
-        console.log("[AdviceJob] US market batch generation completed successfully.");
+        console.log(
+          "[AdviceJob] US market batch generation completed successfully.",
+        );
       } catch (error) {
         const axiosError = error as AxiosError;
         console.error(
@@ -91,18 +106,28 @@ export async function generateDailyAdvice(): Promise<void> {
         );
       }
     } else {
-      console.log("[AdviceJob] All US stocks are up to date. Skipping API call.");
+      console.log(
+        "[AdviceJob] All US stocks are up to date. Skipping API call.",
+      );
     }
 
-    // Wait 60 seconds between market batches
-    console.log("[AdviceJob] Waiting 60 seconds before processing KR market...");
+    // Wait 60 seconds between market batches to avoid rate limits
+    console.log(
+      "[AdviceJob] Waiting 60 seconds before processing KR market...",
+    );
     await new Promise((resolve) => setTimeout(resolve, 60000));
 
     // 2. Process KR Market
-    const krTickersToProcess = await getTickersRequiringUpdate(stockConfig.k_stocks, "k_stocks");
+    // Convert object array to string array using .map() to fix Type Error
+    const krTickersToProcess = await getTickersRequiringUpdate(
+      stockConfig.k_stocks.map((s: { ticker: string }) => s.ticker),
+      "k_stocks",
+    );
 
     if (krTickersToProcess.length > 0) {
-      console.log(`[AdviceJob] Triggering analysis for ${krTickersToProcess.length} KR stocks (Cache MISS)...`);
+      console.log(
+        `[AdviceJob] Triggering analysis for ${krTickersToProcess.length} KR stocks (Cache MISS)...`,
+      );
       try {
         await axios.post(`${schedulerConfig.apiBaseUrl}/api/advice`, {
           isBatch: true,
@@ -110,7 +135,9 @@ export async function generateDailyAdvice(): Promise<void> {
           tickers: krTickersToProcess,
           refresh: false,
         });
-        console.log("[AdviceJob] KR market batch generation completed successfully.");
+        console.log(
+          "[AdviceJob] KR market batch generation completed successfully.",
+        );
       } catch (error) {
         const axiosError = error as AxiosError;
         console.error(
@@ -119,15 +146,22 @@ export async function generateDailyAdvice(): Promise<void> {
         );
       }
     } else {
-      console.log("[AdviceJob] All KR stocks are up to date. Skipping API call.");
+      console.log(
+        "[AdviceJob] All KR stocks are up to date. Skipping API call.",
+      );
     }
 
-    console.log("[AdviceJob] Daily advice batch generation sequence completed.");
+    console.log(
+      "[AdviceJob] Daily advice batch generation sequence completed.",
+    );
   } finally {
     isAdviceRunning = false;
   }
 }
 
+/**
+ * Resets the advice cache in both DB and memory.
+ */
 export async function resetAdviceCache(): Promise<void> {
   try {
     console.log("[CacheReset] Connecting to MongoDB for cache maintenance...");

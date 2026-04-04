@@ -136,80 +136,117 @@ export async function POST(request: Request) {
     );
 
     for (const t of targetTickers) {
-      let cachedTickerData = memoryStore[apiType][t];
+      // Step 0: Ensure Memory Object exists with correct types
+      if (!memoryStore[apiType][t]) {
+        memoryStore[apiType][t] = {
+          data: [],
+          signals: [],
+          lastFetch: "",
+        };
+      }
 
+      let currentCachedData = memoryStore[apiType][t];
+      let adviceFound = false;
+
+      // Tier 1: Memory Check
       if (
-        !cachedTickerData ||
-        !cachedTickerData.data ||
-        !cachedTickerData.signals
+        !refresh &&
+        currentCachedData.advice &&
+        !currentCachedData.advice.error
       ) {
         console.log(
-          `[INFO] [${t}/${apiType}/advice] Memory cache miss. Fetching data...`,
+          `[INFO] [${t}/${apiType}/advice] Memory Hit: Returning cached advice.`,
         );
-        try {
-          const baseUrl =
-            process.env.NEXT_PUBLIC_BASE_URL || "http://node-app:3000";
-          const fetchRes = await fetch(`${baseUrl}/api/${apiType}/${t}`, {
-            method: "GET",
-          });
-          if (!fetchRes.ok)
-            throw new Error(`Source API error: ${fetchRes.status}`);
-
-          const responseJson = await fetchRes.json();
-          memoryStore[apiType][t] = {
-            ...memoryStore[apiType][t],
-            ...responseJson,
-          };
-          cachedTickerData = memoryStore[apiType][t];
-          console.log(`[INFO] [${t}/${apiType}/advice] Auto-fetch complete.`);
-        } catch (err) {
-          console.error(
-            `[ERROR] [${t}/${apiType}/advice] Auto-fetch failed:`,
-            err,
-          );
-          responseData[t] = { error: true, message: "Data recovery failed" };
-          continue;
-        }
+        responseData[t] = { ...currentCachedData.advice, isCached: true };
+        adviceFound = true;
       }
 
-      let dbHit = false;
+      // Tier 2: Database Check
+      if (!adviceFound) {
+        try {
+          await connectDB();
+          const existingRecord = await TickerAdvice.findOne({ ticker: t });
 
-      try {
-        await connectDB();
-        const existingRecord = await TickerAdvice.findOne({ ticker: t });
+          if (
+            existingRecord &&
+            existingRecord.advice &&
+            !existingRecord.advice.error
+          ) {
+            // Store as fallback in case API fails later
+            fallbacks[t] = existingRecord.advice;
 
-        if (
-          existingRecord &&
-          existingRecord.advice &&
-          !existingRecord.advice.error
-        ) {
-          fallbacks[t] = existingRecord.advice;
+            if (existingRecord.updatedAt) {
+              const recordDateStr = new Intl.DateTimeFormat(
+                "en-CA",
+                kstOptions,
+              ).format(new Date(existingRecord.updatedAt));
 
-          if (existingRecord.updatedAt) {
-            const recordDateStr = new Intl.DateTimeFormat(
-              "en-CA",
-              kstOptions,
-            ).format(new Date(existingRecord.updatedAt));
-
-            if (!refresh && recordDateStr === todayDateStr) {
-              console.log(
-                `[INFO] [${t}/${apiType}/advice] DB Hit: Found today's advice.`,
-              );
-              cachedTickerData.advice = existingRecord.advice;
-              responseData[t] = { ...existingRecord.advice, isCached: true };
-              dbHit = true;
+              if (!refresh && recordDateStr === todayDateStr) {
+                console.log(
+                  `[INFO] [${t}/${apiType}/advice] DB Hit: Found today's advice.`,
+                );
+                memoryStore[apiType][t].advice = existingRecord.advice;
+                responseData[t] = { ...existingRecord.advice, isCached: true };
+                adviceFound = true;
+              }
             }
           }
+        } catch (dbError) {
+          console.error(
+            `[ERROR] [${t}/${apiType}/advice] DB lookup failed:`,
+            dbError,
+          );
         }
-      } catch (dbError) {
-        console.error(
-          `[ERROR] [${t}/${apiType}/advice] DB lookup failed:`,
-          dbError,
-        );
       }
 
-      if (!dbHit) {
-        // [MODIFIED] Fixed ESLint warning by defining explicit type for stockConfig iteration instead of 'any'
+      // Tier 3: Prepare for API Call
+      if (!adviceFound) {
+        // Data Recovery: If raw data (candles/signals) is missing, fetch it first
+        if (
+          !currentCachedData.data ||
+          currentCachedData.data.length === 0 ||
+          !currentCachedData.signals
+        ) {
+          console.log(
+            `[INFO] [${t}/${apiType}/advice] Missing raw data. Fetching from source API...`,
+          );
+          try {
+            const baseUrl =
+              process.env.NEXT_PUBLIC_BASE_URL || "http://node-app:3000";
+            const fetchRes = await fetch(`${baseUrl}/api/${apiType}/${t}`, {
+              method: "GET",
+            });
+            if (!fetchRes.ok)
+              throw new Error(`Source API error: ${fetchRes.status}`);
+
+            const responseJson = await fetchRes.json();
+            memoryStore[apiType][t] = {
+              ...memoryStore[apiType][t],
+              ...responseJson,
+            };
+            currentCachedData = memoryStore[apiType][t];
+          } catch (err) {
+            console.error(
+              `[ERROR] [${t}/${apiType}/advice] Data recovery failed:`,
+              err,
+            );
+            // Last resort fallback to DB if available
+            if (fallbacks[t]) {
+              responseData[t] = {
+                ...fallbacks[t],
+                isCached: true,
+                isFallback: true,
+              };
+            } else {
+              responseData[t] = {
+                error: true,
+                message: "Data recovery failed for analysis",
+              };
+            }
+            continue;
+          }
+        }
+
         itemsForGemini.push({
           ticker: t,
           stockName:
@@ -218,12 +255,13 @@ export async function POST(request: Request) {
                   (s: { ticker: string; name: string }) => s.ticker === t,
                 )?.name
               : undefined,
-          signals: cachedTickerData.signals || [],
-          recentStockData: (cachedTickerData.data || []).slice(-7),
+          signals: currentCachedData.signals || [],
+          recentStockData: (currentCachedData.data || []).slice(-7),
         });
       }
     }
 
+    // Trigger Batch API Call for Tier 3
     if (itemsForGemini.length > 0) {
       console.log(
         `[INFO] [Batch/${apiType}] Triggering Gemini API for ${itemsForGemini.length} items.`,
@@ -237,7 +275,7 @@ export async function POST(request: Request) {
 
         if (!newAdvice || newAdvice.error) {
           console.warn(
-            `[WARN] [${t}/${apiType}/advice] Gemini failure. Attempting fallback.`,
+            `[WARN] [${t}/${apiType}/advice] Gemini failure. Attempting DB fallback.`,
           );
           if (fallbacks[t]) {
             responseData[t] = {
@@ -254,6 +292,7 @@ export async function POST(request: Request) {
           continue;
         }
 
+        // Successfully generated: Update Memory and DB
         memoryStore[apiType][t].advice = newAdvice;
         await saveToDatabase(t, newAdvice);
         responseData[t] = { ...newAdvice, isCached: false };

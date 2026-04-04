@@ -11,7 +11,10 @@ import {
   TradingSignal,
   AdviceObject,
 } from "../../../../lib/stockUtils";
-import { getDailyKoreanStockData } from "../../../../lib/koreanKisApi";
+import {
+  getDailyKoreanStockData,
+  getMinuteKoreanStockData,
+} from "../../../../lib/koreanKisApi";
 import { TickerAdvice } from "../../../../lib/models/advice";
 
 export const dynamic = "force-dynamic";
@@ -143,9 +146,8 @@ export async function GET(request: Request) {
       if (timeframe === "1d") {
         apiData = await getDailyKoreanStockData(ticker);
       } else {
-        console.warn(
-          `[${ticker}] Intraday for KR stock is not yet implemented. Assuming 1d for now or returning empty.`,
-        );
+        const gap = timeframe === "1h" ? 60 : 15;
+        apiData = await getMinuteKoreanStockData(ticker, gap);
       }
 
       if (apiData && apiData.length > 0) {
@@ -157,6 +159,7 @@ export async function GET(request: Request) {
           close: candle.close,
           volume: candle.volume,
         }));
+
         await saveCandlesBulk("KR", ticker, timeframe, formattedCandles);
         dbData = await getCandles("KR", ticker, timeframe, 500, true);
       }
@@ -179,7 +182,8 @@ export async function GET(request: Request) {
               ? dateObj.toISOString().split("T")[0]
               : dateObj.toISOString().replace("Z", "").replace("T", " ");
         } catch {
-          // fallback
+          // Handled without unused variable to pass linting
+          console.error(`[DEBUG] Date mapping error for ${c.timestamp}`);
         }
 
         return {
