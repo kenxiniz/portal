@@ -2,8 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { connectDB } from "../../../../lib/mongodb";
-import { getCandles, saveCandle } from "../../../../lib/candle/service";
-// Import explicitly defined types to replace 'any'
+import { getCandles, saveCandlesBulk } from "../../../../lib/candle/service";
 import {
   calculateRSI,
   calculateBollingerBands,
@@ -13,31 +12,23 @@ import {
   AdviceObject,
 } from "../../../../lib/stockUtils";
 import { getDailyStockData, getMinuteStockData } from "../../../../lib/kisApi";
-import mongoose from "mongoose";
+
+// [FIX 1] Remove local AdviceSchema and import the official TickerAdvice model
+import { TickerAdvice } from "../../../../lib/models/advice";
 
 // Force Next.js to completely disable caching for this API route
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Advice Schema (Independent from candles)
-const AdviceSchema = new mongoose.Schema({
-  ticker: { type: String, required: true, unique: true },
-  advice: { type: Object, default: null },
-  updatedAt: { type: Date, default: Date.now },
-});
-const TickerAdvice =
-  mongoose.models.TickerAdvice || mongoose.model("TickerAdvice", AdviceSchema);
-
 // --- Global In-Memory Cache Setup ---
-// Use globalThis to persist cache across module reloads in Next.js development
 type CachePayload = {
   data: StockDataPoint[];
-  signals: TradingSignal[]; // Resolved: Replaced 'any[]' with 'TradingSignal[]'
-  advice: AdviceObject | null; // Resolved: Replaced 'any' with 'AdviceObject | null'
+  signals: TradingSignal[];
+  advice: AdviceObject | null;
 };
 
 type CacheEntry = {
-  fetchDate: string; // YYYY-MM-DD format
+  fetchDate: string;
   timestamp: number;
   payload: CachePayload;
 };
@@ -57,7 +48,6 @@ const getTodayKST = () => {
   const kstOffset = 9 * 60 * 60 * 1000;
   return new Date(now.getTime() + kstOffset).toISOString().split("T")[0];
 };
-// ------------------------------------------
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -74,38 +64,37 @@ export async function GET(request: Request) {
   const cacheKey = `${ticker}-${timeframe}`;
   const todayStr = getTodayKST();
 
-  // --- Step 0: Check In-Memory Cache ---
-  if (!forceRefresh && apiCache.has(cacheKey)) {
-    const cachedData = apiCache.get(cacheKey);
-
-    // Check if the cache is from today.
-    // For intraday (1h, 15m), you might want to add a stricter TTL (e.g., 5-15 mins).
-    const isToday = cachedData?.fetchDate === todayStr;
-    const isIntradayFresh =
-      timeframe === "1d" ||
-      Date.now() - (cachedData?.timestamp || 0) < 1000 * 60 * 15;
-
-    if (isToday && isIntradayFresh) {
-      console.log(`[${ticker}] Cache HIT (Memory) for ${timeframe}`);
-      return NextResponse.json(cachedData.payload);
-    }
-  }
-
   try {
     await connectDB();
-    console.log(`[${ticker}] Request: ${timeframe}, Refresh: ${forceRefresh}`);
 
-    // Fetch AI Advice from DB
+    // [FIX 2] Fetch AI advice directly from DB before checking memory cache
     const adviceDoc = (await TickerAdvice.findOne({ ticker }).lean()) as {
       advice?: object;
     } | null;
-    const advice = adviceDoc?.advice || null;
+    const latestAdvice = adviceDoc?.advice || null;
+
+    // --- Step 0: Check In-Memory Cache ---
+    if (!forceRefresh && apiCache.has(cacheKey)) {
+      const cachedData = apiCache.get(cacheKey)!;
+
+      const isToday = cachedData.fetchDate === todayStr;
+      const isIntradayFresh =
+        timeframe === "1d" ||
+        Date.now() - cachedData.timestamp < 1000 * 60 * 15;
+
+      if (isToday && isIntradayFresh) {
+        console.log(`[${ticker}] Cache HIT (Memory) for ${timeframe}`);
+
+        // [FIX 3] Inject the latest advice into the cached payload before returning
+        cachedData.payload.advice = latestAdvice as AdviceObject | null;
+        return NextResponse.json(cachedData.payload);
+      }
+    }
+
+    console.log(`[${ticker}] Request: ${timeframe}, Refresh: ${forceRefresh}`);
 
     // --- Step 1: Check Database ---
-    // Increase limit from 100 to 500 to show enough intraday bars
     let dbData = await getCandles("US", ticker, timeframe, 500, forceRefresh);
-
-    // Resolved: Changed 'let' to 'const' because the value is not reassigned
     const fromDB = dbData && dbData.length > 0;
 
     if (fromDB) {
@@ -126,28 +115,23 @@ export async function GET(request: Request) {
       }
 
       if (apiData && apiData.length > 0) {
-        // [WARNING] This loop causes N+1 DB queries and is very slow.
-        // Consider implementing a bulkInsert in candle/service.ts
-        const savePromises = apiData.map((candle) =>
-          saveCandle("US", ticker, timeframe, {
-            timestamp: candle.date,
-            open: candle.open,
-            high: candle.high,
-            low: candle.low,
-            close: candle.close,
-            volume: candle.volume,
-          }),
-        );
-        // Execute saves concurrently to improve speed slightly, but bulk insert is best
-        await Promise.all(savePromises);
+        // Use bulk insert instead of loop for massive performance boost
+        const formattedCandles = apiData.map((candle) => ({
+          timestamp: candle.date,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+        }));
 
-        // Increase limit from 100 to 500 here as well
+        await saveCandlesBulk("US", ticker, timeframe, formattedCandles);
         dbData = await getCandles("US", ticker, timeframe, 500, true);
       }
     }
 
     if (dbData && dbData.length > 0) {
-      // 4. Transform for Technical Analysis (ICandle -> StockDataPoint)
+      // 4. Transform for Technical Analysis
       const sortedData = [...dbData].sort(
         (a, b) =>
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
@@ -170,8 +154,6 @@ export async function GET(request: Request) {
 
       // 5. Calculate Indicators
       const processedData = calculateBollingerBands(calculateRSI(mappedData));
-
-      // Pass the timeframe to analyzeAllTradingSignals to support time-based exits
       const signals = analyzeAllTradingSignals(
         processedData,
         timeframe as "1d" | "1h" | "15m",
@@ -181,7 +163,7 @@ export async function GET(request: Request) {
       const responsePayload: CachePayload = {
         data: processedData,
         signals,
-        advice: advice as AdviceObject | null,
+        advice: latestAdvice as AdviceObject | null, // [FIX 4] Map the latest advice
       };
 
       // --- Save to In-Memory Cache ---
@@ -194,7 +176,7 @@ export async function GET(request: Request) {
       return NextResponse.json(responsePayload);
     }
 
-    return NextResponse.json({ data: [], signals: [], advice });
+    return NextResponse.json({ data: [], signals: [], advice: latestAdvice });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     console.error(`[API Route - ${ticker}] Error:`, msg);
