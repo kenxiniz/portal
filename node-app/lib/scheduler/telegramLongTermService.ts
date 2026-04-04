@@ -280,8 +280,8 @@ export class TelegramLongTermService {
 
           const sign = profitRate > 0 ? "+" : "";
           const color =
-            profitRate > 0 ? "개이득" : profitRate < 0 ? "눈물" : "본전";
-          profitRateText = `\n<b>💸 현재 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
+            profitRate > 0 ? "개이득 중" : profitRate < 0 ? "눈물" : "본전";
+          profitRateText = `\n<b>💸 지금까지 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
         }
       }
 

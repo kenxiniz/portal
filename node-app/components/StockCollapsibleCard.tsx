@@ -383,7 +383,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                           {currentProfitRate > 0 ? "+" : ""}
                                           {currentProfitRate.toFixed(2)}% (
                                           {currentProfitRate > 0
-                                            ? "개이득"
+                                            ? "개이득 중"
                                             : "눈물"}
                                           )
                                         </span>

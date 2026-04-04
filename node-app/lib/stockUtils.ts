@@ -1,5 +1,41 @@
 /* lib/stockUtils.ts */
 
+// --- Configuration ---
+// Utility to get environment variables as numbers with fallback
+const getEnvNumber = (key: string, defaultValue: number): number => {
+  const val = process.env[key] || process.env[`NEXT_PUBLIC_${key}`];
+  if (val !== undefined && val !== "") {
+    const parsed = Number(val);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return defaultValue;
+};
+
+// Define trading parameters utilizing environment variables
+const TRADING_CONFIG = {
+  get stopLossPercent() {
+    return getEnvNumber("STOP_LOSS_PERCENT", -5.0);
+  },
+  get timeLimit1dDays() {
+    return getEnvNumber("TIME_LIMIT_1D_DAYS", 30);
+  },
+  get timeLimitOtherDays() {
+    return getEnvNumber("TIME_LIMIT_OTHER_DAYS", 7);
+  },
+  get rsiOversold() {
+    return getEnvNumber("RSI_OVERSOLD", 30);
+  },
+  get rsiOverbought() {
+    return getEnvNumber("RSI_OVERBOUGHT", 70);
+  },
+  get divergenceMinDays() {
+    return getEnvNumber("DIVERGENCE_MIN_DAYS", 5);
+  },
+  get divergenceMaxDays() {
+    return getEnvNumber("DIVERGENCE_MAX_DAYS", 90);
+  },
+};
+
 // --- Interfaces ---
 
 export interface StockDataPoint {
@@ -147,7 +183,9 @@ export const analyzeAllTradingSignals = (
   let potentialSecondPeak: StockDataPoint | null = null;
 
   const expirationMs =
-    timeframe === "1d" ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+    timeframe === "1d"
+      ? TRADING_CONFIG.timeLimit1dDays * 24 * 60 * 60 * 1000
+      : TRADING_CONFIG.timeLimitOtherDays * 24 * 60 * 60 * 1000;
 
   for (let i = 1; i < data.length; i++) {
     const currentPoint = data[i];
@@ -178,11 +216,11 @@ export const analyzeAllTradingSignals = (
           lastBuySignal.entryPrice) *
         100;
 
-      if (profitRate <= -5.0) {
+      if (profitRate <= TRADING_CONFIG.stopLossPercent) {
         signals.push({
           date: currentPoint.date,
           type: "sell",
-          reason: "자동 손절 (-5% 도달)",
+          reason: `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달)`,
           realizedPrice: currentPoint.close,
           profitRate: profitRate,
           details: `손절가 도달: ${profitRate.toFixed(2)}%`,
@@ -216,11 +254,11 @@ export const analyzeAllTradingSignals = (
           lastInverseBuySignal.entryPrice) *
         100;
 
-      if (profitRate <= -5.0) {
+      if (profitRate <= TRADING_CONFIG.stopLossPercent) {
         signals.push({
           date: currentPoint.date,
           type: "sell",
-          reason: "자동 손절 (-5% 도달)",
+          reason: `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달)`,
           realizedPrice: currentPoint.close,
           profitRate: profitRate,
           details: `손절가 도달: ${profitRate.toFixed(2)}%`,
@@ -266,7 +304,10 @@ export const analyzeAllTradingSignals = (
 
     if (!potentialSecondTrough) {
       if (!firstTrough) {
-        if (prevPoint.rsi < 30 && currentPoint.rsi > prevPoint.rsi) {
+        if (
+          prevPoint.rsi < TRADING_CONFIG.rsiOversold &&
+          currentPoint.rsi > prevPoint.rsi
+        ) {
           firstTrough = prevPoint;
           firstTroughIndex = i - 1;
         }
@@ -280,10 +321,10 @@ export const analyzeAllTradingSignals = (
         if (currentPoint.rsi < firstTrough.rsi!) {
           firstTrough = null;
           firstTroughIndex = null;
-        } else if (daysSinceFirstTrough > 90) {
+        } else if (daysSinceFirstTrough > TRADING_CONFIG.divergenceMaxDays) {
           firstTrough = null;
           firstTroughIndex = null;
-        } else if (daysSinceFirstTrough > 5) {
+        } else if (daysSinceFirstTrough > TRADING_CONFIG.divergenceMinDays) {
           if (
             currentPoint.close < firstTrough.close &&
             currentPoint.rsi > firstTrough.rsi!
@@ -318,7 +359,10 @@ export const analyzeAllTradingSignals = (
 
     if (!potentialSecondPeak) {
       if (!firstPeak) {
-        if (prevPoint.rsi > 70 && currentPoint.rsi < prevPoint.rsi) {
+        if (
+          prevPoint.rsi > TRADING_CONFIG.rsiOverbought &&
+          currentPoint.rsi < prevPoint.rsi
+        ) {
           firstPeak = prevPoint;
           firstPeakIndex = i - 1;
         }
@@ -332,10 +376,10 @@ export const analyzeAllTradingSignals = (
         if (currentPoint.rsi > firstPeak.rsi!) {
           firstPeak = null;
           firstPeakIndex = null;
-        } else if (daysSinceFirstPeak > 90) {
+        } else if (daysSinceFirstPeak > TRADING_CONFIG.divergenceMaxDays) {
           firstPeak = null;
           firstPeakIndex = null;
-        } else if (daysSinceFirstPeak > 5) {
+        } else if (daysSinceFirstPeak > TRADING_CONFIG.divergenceMinDays) {
           if (
             currentPoint.close > firstPeak.close &&
             currentPoint.rsi < firstPeak.rsi!
