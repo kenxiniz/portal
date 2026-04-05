@@ -3,6 +3,8 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
+// Next.js 라우팅을 위한 useRouter 임포트 추가
+import { useRouter } from "next/navigation";
 import { useThemeDetector } from "@/hooks/useThemeDetector";
 import {
   TickerState,
@@ -12,7 +14,7 @@ import {
 } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Globe, MapPin } from "lucide-react";
 
 const tickers = stockConfig.k_stocks.map((t) => t.ticker);
 
@@ -21,6 +23,8 @@ type Timeframe = "1d" | "1h" | "15m";
 const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function KStockPage() {
+  const router = useRouter(); // 라우터 객체 초기화
+
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(
     () => {
       const initialState: Record<string, TickerState> = {};
@@ -39,7 +43,6 @@ export default function KStockPage() {
 
   const [openedTicker, setOpenedTicker] = useState<string | null>(null);
 
-  // Initialize with '1d'. It will be immediately corrected by the useEffect on mount.
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>("1d");
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -204,11 +207,9 @@ export default function KStockPage() {
         }
       }
 
-      // Sync state with URL BEFORE fetching data
       setSelectedTimeframe(initialTf);
       previousTimeframe.current = initialTf;
 
-      // Fetch data with the exactly targeted timeframe from the URL
       loadAllTickersSequentially(initialTf);
       return;
     }
@@ -291,11 +292,15 @@ export default function KStockPage() {
   return (
     <div className="flex flex-col items-center p-2 sm:p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
       <div className="flex flex-col md:flex-row justify-between items-center w-full md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mb-6 md:mb-8 gap-4">
-        <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0">
-          한국 ETF
-        </h1>
+        {/* 상단 타이틀 및 마켓 전환 탭 영역 */}
+        <div className="flex flex-col md:flex-row items-center gap-4">
+          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0">
+            한국 ETF
+          </h1>
+        </div>
 
         <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+          {/* Timeframe buttons moved to the left side */}
           <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center">
             <button
               onClick={() => setSelectedTimeframe("1d")}
@@ -329,21 +334,41 @@ export default function KStockPage() {
             </button>
           </div>
 
-          <button
-            onClick={handleManualSync}
-            disabled={isSyncing}
-            className={`flex items-center justify-center px-4 py-2.5 rounded-md text-sm font-medium transition-all w-full md:w-auto min-w-[160px]
+          {/* Grouping Market Toggle and Sync Button in a flex-row to ensure they are on the same line */}
+          <div className="flex flex-row items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+            <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg shrink-0">
+              <button
+                onClick={() => router.push("/kis-stock")}
+                className="flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
+                <Globe className="w-4 h-4 mr-2" />
+                미국
+              </button>
+              <button
+                onClick={() => router.push("/k-stock")}
+                className="flex items-center px-4 py-2 rounded-md text-sm font-bold transition-colors bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400 shadow-sm"
+              >
+                <MapPin className="w-4 h-4 mr-2" />
+                한국
+              </button>
+            </div>
+
+            <button
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className={`flex items-center justify-center px-4 py-2.5 rounded-md text-sm font-medium transition-all shrink-0 min-w-[160px]
                   ${
                     isSyncing
                       ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
                       : "bg-blue-600 text-white hover:bg-blue-700 shadow-md active:scale-95"
                   }`}
-          >
-            <RefreshCw
-              className={`w-4 h-4 mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
-            />
-            {getSyncButtonText()}
-          </button>
+            >
+              <RefreshCw
+                className={`w-4 h-4 mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
+              />
+              {getSyncButtonText()}
+            </button>
+          </div>
         </div>
       </div>
 

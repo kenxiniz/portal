@@ -62,11 +62,14 @@ export interface TradingSignal {
   entryPrice?: number;
   profitRate?: number;
   realizedPrice?: number;
+  // [FIX] Telegram Scheduler에서 현재가를 가져올 수 있도록 추가
+  currentPrice?: number;
 }
 
 export interface AdviceObject {
   error: boolean;
   message: string;
+  action?: string; // Telegram service uses this
 }
 
 export interface TickerState {
@@ -222,6 +225,7 @@ export const analyzeAllTradingSignals = (
           type: "sell",
           reason: `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달)`,
           realizedPrice: currentPoint.close,
+          currentPrice: currentPoint.close,
           profitRate: profitRate,
           details: `손절가 도달: ${profitRate.toFixed(2)}%`,
         });
@@ -235,6 +239,7 @@ export const analyzeAllTradingSignals = (
               ? "시간 제한 익절 (기간 만료)"
               : "시간 제한 손절 (기간 만료)",
           realizedPrice: currentPoint.close,
+          currentPrice: currentPoint.close,
           profitRate: profitRate,
           details: `보유 한도 초과: ${profitRate.toFixed(2)}%`,
         });
@@ -260,6 +265,7 @@ export const analyzeAllTradingSignals = (
           type: "sell",
           reason: `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달)`,
           realizedPrice: currentPoint.close,
+          currentPrice: currentPoint.close,
           profitRate: profitRate,
           details: `손절가 도달: ${profitRate.toFixed(2)}%`,
         });
@@ -273,6 +279,7 @@ export const analyzeAllTradingSignals = (
               ? "시간 제한 익절 (인버스 만료)"
               : "시간 제한 손절 (인버스 만료)",
           realizedPrice: currentPoint.close,
+          currentPrice: currentPoint.close,
           profitRate: profitRate,
           details: `보유 한도 초과: ${profitRate.toFixed(2)}%`,
         });
@@ -284,13 +291,12 @@ export const analyzeAllTradingSignals = (
     if (potentialSecondTrough && firstTrough) {
       if (currentPoint.close > potentialSecondTrough.close) {
         const buySignal: TradingSignal = {
-          // [FIX] Record the date of the current candle where the signal is confirmed
           date: currentPoint.date,
           startDate: firstTrough.date,
           type: "buy",
           reason: "매수 (RSI 쌍바닥)",
-          // [FIX] The entry price should be the close price of the confirming candle
           entryPrice: currentPoint.close,
+          currentPrice: currentPoint.close, // [FIX] Added currentPrice
           details: `RSI 상승 다이버전스`,
         };
         signals.push(buySignal);
@@ -340,13 +346,12 @@ export const analyzeAllTradingSignals = (
     if (potentialSecondPeak && firstPeak) {
       if (currentPoint.close < potentialSecondPeak.close) {
         const inverseBuySignal: TradingSignal = {
-          // [FIX] Record the date of the current candle where the signal is confirmed
           date: currentPoint.date,
           startDate: firstPeak.date,
           type: "inverse-buy",
           reason: "인버스 매수 (RSI 쌍봉)",
-          // [FIX] The entry price should be the close price of the confirming candle
           entryPrice: currentPoint.close,
+          currentPrice: currentPoint.close, // [FIX] Added currentPrice
           details: `RSI 하락 다이버전스`,
         };
         signals.push(inverseBuySignal);
@@ -408,6 +413,7 @@ export const analyzeAllTradingSignals = (
           type: "sell",
           reason: profitRate >= 0 ? "수익 실현 (BB 상단)" : "손실 (BB 상단)",
           realizedPrice: currentPoint.close,
+          currentPrice: currentPoint.close, // [FIX] Added currentPrice
           profitRate: profitRate,
           details: `BB상단: ${currentPoint.bollingerBands.upper.toFixed(2)}`,
         });
@@ -426,6 +432,7 @@ export const analyzeAllTradingSignals = (
           type: "sell",
           reason: profitRate >= 0 ? "수익 실현 (BB 하단)" : "손실 (BB 하단)",
           realizedPrice: currentPoint.close,
+          currentPrice: currentPoint.close, // [FIX] Added currentPrice
           profitRate: profitRate,
           details: `BB하단: ${currentPoint.bollingerBands.lower.toFixed(2)}`,
         });
@@ -447,11 +454,14 @@ export const analyzeAllTradingSignals = (
       (s) => s.date === lastDataPoint.date,
     );
 
+    // [FIX] 'hold' 시그널 생성 시 텔레그램에서 수익률 계산이 가능하도록 현재가를 강제 주입
     if (!hasSignalOnLastDate) {
       uniqueSignals.push({
         date: lastDataPoint.date,
         type: "hold",
         reason: "관망 (중립 구간)",
+        realizedPrice: lastDataPoint.close, // fallback for legacy code
+        currentPrice: lastDataPoint.close, // new explicit field
       });
     }
   }

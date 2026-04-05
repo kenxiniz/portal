@@ -52,6 +52,18 @@
       "ticker": "SBIT",
       "exchange": "AMS",
       "isInverse": true
+    },
+    {
+      "ticker": "SOXX",
+      "exchange": "NAS"
+    },
+    {
+      "ticker": "QQQM",
+      "exchange": "NAS"
+    },
+    {
+      "ticker": "VOO",
+      "exchange": "AMS"
     }
   ],
   "k_stocks": [

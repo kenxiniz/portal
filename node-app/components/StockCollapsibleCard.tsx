@@ -106,12 +106,19 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   currency = "USD",
   timeframe = "1d",
 }) => {
-  const latestSignal =
-    Array.isArray(tickerState.signals) && tickerState.signals.length > 0
-      ? tickerState.signals.at(-1)
-      : null;
   const chartRef = useRef<StockChartDisplayHandles>(null);
   const cardContainerRef = useRef<HTMLDivElement>(null);
+
+  const targetSignal = useMemo(() => {
+    if (!Array.isArray(tickerState.signals) || tickerState.signals.length === 0)
+      return null;
+    for (let i = tickerState.signals.length - 1; i >= 0; i--) {
+      if (tickerState.signals[i].type !== "hold") {
+        return tickerState.signals[i];
+      }
+    }
+    return null;
+  }, [tickerState.signals]);
 
   const isInverseStock = useMemo(() => {
     const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
@@ -126,6 +133,12 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
 
     return false;
   }, [tickerSymbol]);
+
+  const oneYearAgo = useMemo(() => {
+    const date = new Date();
+    date.setFullYear(date.getFullYear() - 1);
+    return date;
+  }, []);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -155,39 +168,120 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     }
   };
 
-  const getCardTitleClassName = () => {
-    if (!latestSignal) return "";
-    const { type, profitRate } = latestSignal;
-    if (type.includes("buy")) {
-      return "text-blue-500 dark:text-blue-400";
+  const currentPrice = tickerState.data?.at(-1)?.close;
+
+  const currentProfitRate = useMemo(() => {
+    if (!targetSignal || !currentPrice || targetSignal.entryPrice === undefined)
+      return null;
+
+    if (targetSignal.type === "buy") {
+      return (
+        ((currentPrice - targetSignal.entryPrice) / targetSignal.entryPrice) *
+        100
+      );
+    } else if (targetSignal.type === "inverse-buy") {
+      return (
+        ((targetSignal.entryPrice - currentPrice) / targetSignal.entryPrice) *
+        100
+      );
     }
-    if (type === "sell") {
-      const numericProfitRate =
-        typeof profitRate === "number"
-          ? profitRate
-          : parseFloat(profitRate || "0");
-      return numericProfitRate >= 0
+    return null;
+  }, [targetSignal, currentPrice]);
+
+  // 1. 하단에 표시할 매매 내역(historicalSignals)을 결정합니다.
+  // 일봉은 최근 1년, 분봉은 차트 전체 기간을 사용합니다.
+  const historicalSignals = useMemo(() => {
+    if (!Array.isArray(tickerState.signals)) return [];
+
+    let oldestChartDate = new Date(0);
+    if (tickerState.data && tickerState.data.length > 0) {
+      const firstDateStr = tickerState.data[0].date.includes(" ")
+        ? tickerState.data[0].date.replace(" ", "T")
+        : tickerState.data[0].date;
+      oldestChartDate = new Date(firstDateStr);
+    }
+
+    return tickerState.signals.filter((s) => {
+      if (s.type === "hold") return false;
+
+      const safeDateStr = s.date.includes(" ")
+        ? s.date.replace(" ", "T")
+        : s.date;
+      const signalDate = new Date(safeDateStr);
+
+      if (timeframe === "1d") {
+        return signalDate >= oneYearAgo;
+      } else {
+        return signalDate >= oldestChartDate;
+      }
+    });
+  }, [tickerState.signals, tickerState.data, timeframe, oneYearAgo]);
+
+  // 2. 상단 타이틀에 표시할 누적 수익률을 계산합니다.
+  // 방금 위에서 구한 historicalSignals 배열을 그대로 사용하여
+  // 화면에 보이는 매도 내역의 수익률만 복리로 누적합니다.
+  const cumulativeProfitRate = useMemo(() => {
+    if (historicalSignals.length === 0) return null;
+
+    let capital = 1000000;
+    let hasTrades = false;
+    let currentPositionType: string | null = null;
+
+    historicalSignals.forEach((signal) => {
+      if (signal.type === "buy" || signal.type === "inverse-buy") {
+        currentPositionType = signal.type;
+      } else if (signal.type === "sell") {
+        if (currentPositionType) {
+          const isHighRisk =
+            (isInverseStock && currentPositionType === "buy") ||
+            (!isInverseStock && currentPositionType === "inverse-buy");
+
+          if (
+            !isHighRisk &&
+            signal.profitRate !== undefined &&
+            signal.profitRate !== null
+          ) {
+            const rate = Number(signal.profitRate);
+            if (!isNaN(rate)) {
+              capital = capital * (1 + rate / 100);
+              hasTrades = true;
+            }
+          }
+          currentPositionType = null;
+        }
+      }
+    });
+
+    if (!hasTrades) return null;
+
+    return ((capital - 1000000) / 1000000) * 100;
+  }, [historicalSignals, isInverseStock]);
+
+  const getCardTitleClassName = () => {
+    if (!targetSignal) return "";
+    const { type } = targetSignal;
+
+    if (type.includes("buy") && currentProfitRate !== null) {
+      const isHighRisk =
+        (isInverseStock && type === "buy") ||
+        (!isInverseStock && type === "inverse-buy");
+
+      if (isHighRisk) {
+        return "text-slate-500 dark:text-slate-400";
+      }
+
+      return currentProfitRate >= 0
+        ? "text-blue-500 dark:text-blue-400"
+        : "text-red-500 dark:text-red-400";
+    }
+
+    if (type === "sell" && cumulativeProfitRate !== null) {
+      return cumulativeProfitRate >= 0
         ? "text-green-500 dark:text-green-400"
         : "text-red-500 dark:text-red-400";
     }
     return "";
   };
-
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-
-  const historicalSignals = Array.isArray(tickerState.signals)
-    ? tickerState.signals.filter((s) => {
-        if (s.type === "hold") return false;
-
-        const safeDateStr = s.date.includes(" ")
-          ? s.date.replace(" ", "T")
-          : s.date;
-        const signalDate = new Date(safeDateStr);
-
-        return signalDate >= oneYearAgo;
-      })
-    : [];
 
   const handleSignalClick = (signal: TradingSignal) => {
     const targetDate = signal.date;
@@ -199,9 +293,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   const hasAdviceError = adviceObject?.error === true;
   const isMainDataLoading = tickerState.loading && !tickerState.data;
   const isAdviceAvailable = !!adviceObject;
-
-  // Get current close price for profit calculation
-  const currentPrice = tickerState.data?.at(-1)?.close;
 
   return (
     <div
@@ -221,12 +312,42 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
               )}
             >
               <CardTitle
-                className={cn(
-                  "text-xl font-semibold truncate mr-2",
-                  getCardTitleClassName(),
-                )}
+                className={cn("text-xl truncate mr-2", getCardTitleClassName())}
               >
-                {displayName}
+                <span className="font-bold">{displayName}</span>
+
+                {targetSignal &&
+                  targetSignal.type.includes("buy") &&
+                  currentProfitRate !== null && (
+                    <span className="font-normal text-base ml-1.5">
+                      {(() => {
+                        const isHighRisk =
+                          (isInverseStock && targetSignal.type === "buy") ||
+                          (!isInverseStock &&
+                            targetSignal.type === "inverse-buy");
+                        const sign = currentProfitRate > 0 ? "+" : "";
+
+                        if (isHighRisk) {
+                          return `[인버스 보유 중: ${sign}${currentProfitRate.toFixed(2)}% (매매 참고용)]`;
+                        } else {
+                          return `[보유 중: ${sign}${currentProfitRate.toFixed(2)}%]`;
+                        }
+                      })()}
+                    </span>
+                  )}
+
+                {targetSignal &&
+                  targetSignal.type === "sell" &&
+                  cumulativeProfitRate !== null && (
+                    <span className="font-normal text-base ml-1.5">
+                      [
+                      {timeframe === "1d"
+                        ? "최근 1년 누적 수익률"
+                        : "차트 내 누적 수익률"}
+                      : {cumulativeProfitRate > 0 ? "+" : ""}
+                      {cumulativeProfitRate.toFixed(2)}%]
+                    </span>
+                  )}
               </CardTitle>
               <div className="flex items-center space-x-2 shrink-0">
                 {isMainDataLoading && (
@@ -255,7 +376,9 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
               {historicalSignals.length > 0 ? (
                 <div className="my-4">
                   <h4 className="text-sm font-semibold mb-2 text-slate-600 dark:text-slate-400">
-                    과거 신호 내역
+                    {timeframe === "1d"
+                      ? "최근 1년 신호 내역"
+                      : "차트 내 매매 신호 내역"}
                   </h4>
                   <div className="overflow-x-auto rounded-md border dark:border-slate-700">
                     <Table>
@@ -279,34 +402,31 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             index === historicalSignals.length - 1 &&
                             isBuySignal;
 
-                          // Check for high-risk warning (reverse market direction)
                           const showHighRiskWarning =
                             timeframe === "1d" &&
                             ((isInverseStock && signal.type === "buy") ||
                               (!isInverseStock &&
                                 signal.type === "inverse-buy"));
 
-                          // Check for positive momentum badge
                           const showGazuaBadge =
                             timeframe === "1d" &&
                             ((!isInverseStock && signal.type === "buy") ||
                               (isInverseStock &&
                                 signal.type === "inverse-buy"));
 
-                          // Calculate current profit rate if it's an open position
-                          let currentProfitRate = null;
+                          let rowCurrentProfitRate = null;
                           if (
                             isLatestOpenPosition &&
                             currentPrice &&
                             signal.entryPrice
                           ) {
                             if (signal.type === "buy") {
-                              currentProfitRate =
+                              rowCurrentProfitRate =
                                 ((currentPrice - signal.entryPrice) /
                                   signal.entryPrice) *
                                 100;
                             } else if (signal.type === "inverse-buy") {
-                              currentProfitRate =
+                              rowCurrentProfitRate =
                                 ((signal.entryPrice - currentPrice) /
                                   signal.entryPrice) *
                                 100;
@@ -331,7 +451,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                   {showHighRiskWarning && (
                                     <span
                                       className="text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800 whitespace-nowrap"
-                                      title="인버스 투자는 리스크가 매우 큽니다. 실제 매매보다는 시장 방향성 참고용으로만 활용해 주세요."
+                                      title="인버스 투자는 리스크가 매우 큽니다."
                                     >
                                       고위험 (매매 참고용)
                                     </span>
@@ -357,7 +477,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                       >
                                         {Number(signal.profitRate).toFixed(2)}%
                                       </span>
-                                      {/* [FIXED] Force display of realizedPrice to prevent duplicate % rendering from faulty signal.details */}
                                       <span className="text-gray-500 text-[10px] whitespace-nowrap">
                                         {signal.realizedPrice !== undefined
                                           ? formatPrice(signal.realizedPrice)
@@ -371,18 +490,18 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                       <span className="text-blue-600 dark:text-blue-400">
                                         {formatPrice(signal.entryPrice)}
                                       </span>
-                                      {currentProfitRate !== null && (
+                                      {rowCurrentProfitRate !== null && (
                                         <span
                                           className={cn(
                                             "text-[10px] font-bold whitespace-nowrap",
-                                            currentProfitRate >= 0
+                                            rowCurrentProfitRate >= 0
                                               ? "text-green-600"
                                               : "text-red-600",
                                           )}
                                         >
-                                          {currentProfitRate > 0 ? "+" : ""}
-                                          {currentProfitRate.toFixed(2)}% (
-                                          {currentProfitRate > 0
+                                          {rowCurrentProfitRate > 0 ? "+" : ""}
+                                          {rowCurrentProfitRate.toFixed(2)}% (
+                                          {rowCurrentProfitRate > 0
                                             ? "개이득 중"
                                             : "눈물"}
                                           )
@@ -450,7 +569,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                   <p className="text-xs text-center text-gray-500">
                     {tickerState.error
                       ? "데이터 오류로 조언을 생성할 수 없습니다."
-                      : "AI 조언이 아직 준비되지 않았습니다. (매일 오전 업데이트)"}
+                      : "AI 조언이 아직 준비되지 않았습니다."}
                   </p>
                 )}
               </div>

@@ -32,18 +32,37 @@ interface StockConfigItem {
   isInverse?: boolean;
 }
 
+// ESLint 에러 방지 및 주가 데이터 안전 추출용 확장 인터페이스
+interface ExtendedTradingSignal extends TradingSignal {
+  price?: number;
+  close?: number;
+  currentPrice?: number;
+}
+
+interface ExtendedStockSignalInfo extends StockSignalInfo {
+  currentPrice?: number;
+  profitRate?: number;
+}
+
 export class TelegramLongTermService {
   private botToken: string | undefined = process.env.TELEGRAM_BOT_TOKEN;
-  private longTermChatId: string | undefined;
+  private longTermChatIds: string[] = [];
 
   private static sentSignalCache: Record<string, string> = {};
 
   constructor() {
-    this.longTermChatId = process.env.TELEGRAM_CHAT_ID?.trim();
+    const rawChatIds = process.env.TELEGRAM_CHAT_ID?.trim();
 
-    if (!this.botToken || !this.longTermChatId) {
+    if (rawChatIds) {
+      this.longTermChatIds = rawChatIds
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+    }
+
+    if (!this.botToken || this.longTermChatIds.length === 0) {
       console.warn(
-        "Telegram bot token or long-term chat ID is missing in environment variables.",
+        "Telegram bot token or long-term chat IDs are missing in environment variables.",
       );
     }
   }
@@ -52,44 +71,45 @@ export class TelegramLongTermService {
     message: string,
     replyMarkup?: ReplyMarkup,
   ): Promise<void> {
-    if (!this.botToken || !this.longTermChatId) {
+    if (!this.botToken || this.longTermChatIds.length === 0) {
       console.error(
-        "Cannot send message: Telegram credentials or long-term chat ID is not configured.",
+        "Cannot send message: Telegram credentials or long-term chat IDs are not configured.",
       );
       return;
     }
 
     const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
     console.log(
-      `Attempting to send Telegram message to long-term chat: ${this.longTermChatId}`,
+      `Attempting to send Telegram message to ${this.longTermChatIds.length} long-term chat(s).`,
     );
 
-    try {
-      const payload: SendMessagePayload = {
-        chat_id: this.longTermChatId,
-        text: message,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      };
+    const sendPromises = this.longTermChatIds.map(async (chatId) => {
+      try {
+        const payload: SendMessagePayload = {
+          chat_id: chatId,
+          text: message,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        };
 
-      if (replyMarkup) {
-        payload.reply_markup = replyMarkup;
+        if (replyMarkup) {
+          payload.reply_markup = replyMarkup;
+        }
+
+        await axios.post(url, payload);
+        console.log(`Successfully sent Telegram message to chat: ${chatId}`);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        const axiosError = error as AxiosError;
+        console.error(
+          `Failed to send Telegram message to chat ${chatId}:`,
+          axiosError.response?.data || errorMessage,
+        );
       }
+    });
 
-      await axios.post(url, payload);
-      console.log(
-        `Successfully sent Telegram message to long-term chat: ${this.longTermChatId}`,
-      );
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      const axiosError = error as AxiosError;
-      console.error(
-        `Failed to send Telegram message to long-term chat ${this.longTermChatId}:`,
-        axiosError.response?.data || errorMessage,
-      );
-      throw error;
-    }
+    await Promise.all(sendPromises);
   }
 
   public async notifyInChunks<T>(
@@ -133,7 +153,7 @@ export class TelegramLongTermService {
   ): Promise<void> {
     if (
       !this.botToken ||
-      !this.longTermChatId ||
+      this.longTermChatIds.length === 0 ||
       !signals ||
       signals.length === 0
     ) {
@@ -144,108 +164,185 @@ export class TelegramLongTermService {
 
     if (latestSignal.type.includes("buy") || latestSignal.type === "sell") {
       const signalDate = latestSignal.date;
-      const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
-      const chatId = this.longTermChatId;
-      const cacheKey = `${chatId}_${ticker}_${timeframe}`;
-      const lastSentDate = TelegramLongTermService.sentSignalCache[cacheKey];
+      const displayDate = this.formatSignalTime(signalDate);
+      const timeframeDisplay = "일봉";
 
-      if (lastSentDate !== signalDate) {
-        TelegramLongTermService.sentSignalCache[cacheKey] = signalDate;
+      const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
+        (s) => s.ticker === ticker,
+      );
+      const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
+        (s) => s.ticker === ticker,
+      );
+      const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
 
-        const displayDate = this.formatSignalTime(signalDate);
-        const timeframeDisplay = "일봉";
+      let subTag = "";
+      if (latestSignal.type.includes("buy")) {
+        const isMatchingMarketGrowth =
+          (!isInverse && latestSignal.type === "buy") ||
+          (isInverse && latestSignal.type === "inverse-buy");
 
-        const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
-          (s) => s.ticker === ticker,
-        );
-        const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
-          (s) => s.ticker === ticker,
-        );
-        const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
-
-        let subTag = "";
-        if (latestSignal.type.includes("buy")) {
-          const isMatchingMarketGrowth =
-            (!isInverse && latestSignal.type === "buy") ||
-            (isInverse && latestSignal.type === "inverse-buy");
-
-          subTag = isMatchingMarketGrowth
-            ? "🚀 [가즈아!]"
-            : "⚠️ [고위험-매매참고]";
-        }
-
-        let message = "";
-
-        if (latestSignal.type.includes("buy")) {
-          const priceStr = latestSignal.entryPrice
-            ? `$${latestSignal.entryPrice.toFixed(2)}`
-            : "N/A";
-
-          message += `🚨 <b>[${timeframeDisplay} 매수 신호 감지]</b> ${subTag}\n\n`;
-          message += `<b>종목:</b> ${ticker}\n`;
-          message += `<b>발생 시간:</b> ${displayDate}\n`;
-          message += `<b>매수가:</b> ${priceStr}\n`;
-          message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
-        } else if (latestSignal.type === "sell") {
-          const profitRateNum = Number(latestSignal.profitRate) || 0;
-          const isProfit = profitRateNum >= 0;
-          const headerIcon = isProfit ? "💰" : "📉";
-          const headerText = isProfit ? "익절(수익)" : "손절";
-
-          message += `${headerIcon} <b>[${timeframeDisplay} ${headerText} 신호 감지]</b>\n\n`;
-          message += `<b>종목:</b> ${ticker}\n`;
-          message += `<b>발생 시간:</b> ${displayDate}\n`;
-          message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
-          message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
-        }
-
-        const targetPath = encodeURIComponent(
-          `kis-stock?ticker=${ticker}&tf=${timeframe}`,
-        );
-        const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
-        message += `<a href="${redirectLink}">👉 상세 차트 바로가기</a>\n\n`;
-
-        try {
-          const payload: SendMessagePayload = {
-            chat_id: chatId,
-            text: message,
-            parse_mode: "HTML",
-            disable_web_page_preview: true,
-          };
-
-          await axios.post(url, payload);
-          console.log(
-            `[Scheduler] Sent long-term realtime signal for ${ticker}`,
-          );
-        } catch (error) {
-          TelegramLongTermService.sentSignalCache[cacheKey] =
-            lastSentDate || "";
-          console.error(`[Scheduler] Failed to send long-term signal:`, error);
-        }
+        subTag = isMatchingMarketGrowth
+          ? "🚀 [가즈아!]"
+          : "⚠️ [고위험-매매참고]";
       }
+
+      let message = "";
+
+      if (latestSignal.type.includes("buy")) {
+        const priceStr = latestSignal.entryPrice
+          ? `$${latestSignal.entryPrice.toFixed(2)}`
+          : "N/A";
+
+        message += `🚨 <b>[${timeframeDisplay} 매수 신호 감지]</b> ${subTag}\n\n`;
+        message += `<b>종목:</b> ${ticker}\n`;
+        message += `<b>발생 시간:</b> ${displayDate}\n`;
+        message += `<b>매수가:</b> ${priceStr}\n`;
+        message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
+      } else if (latestSignal.type === "sell") {
+        let profitRateNum = Number(latestSignal.profitRate);
+        if (isNaN(profitRateNum)) profitRateNum = 0;
+
+        const isProfit = profitRateNum >= 0;
+        const headerIcon = isProfit ? "💰" : "📉";
+        const headerText = isProfit ? "익절(수익)" : "손절";
+
+        message += `${headerIcon} <b>[${timeframeDisplay} ${headerText} 신호 감지]</b>\n\n`;
+        message += `<b>종목:</b> ${ticker}\n`;
+        message += `<b>발생 시간:</b> ${displayDate}\n`;
+        message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
+        message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
+      }
+
+      const targetPath = encodeURIComponent(
+        `kis-stock?ticker=${ticker}&tf=${timeframe}`,
+      );
+      const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
+      message += `<a href="${redirectLink}">👉 상세 차트 바로가기</a>\n\n`;
+
+      const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
+
+      const sendPromises = this.longTermChatIds.map(async (chatId) => {
+        const cacheKey = `${chatId}_${ticker}_${timeframe}`;
+        const lastSentDate = TelegramLongTermService.sentSignalCache[cacheKey];
+
+        if (lastSentDate !== signalDate) {
+          TelegramLongTermService.sentSignalCache[cacheKey] = signalDate;
+
+          try {
+            const payload: SendMessagePayload = {
+              chat_id: chatId,
+              text: message,
+              parse_mode: "HTML",
+              disable_web_page_preview: true,
+            };
+
+            await axios.post(url, payload);
+          } catch (error) {
+            TelegramLongTermService.sentSignalCache[cacheKey] =
+              lastSentDate || "";
+            const axiosError = error as AxiosError;
+            console.error(
+              `[Scheduler] Failed to send long-term signal to ${chatId}:`,
+              axiosError.response?.data || axiosError.message || String(error),
+            );
+          }
+        }
+      });
+
+      await Promise.all(sendPromises);
     }
   }
 
-  public createLottoSetsMessage =
-    (drawNo: number) =>
-    (sets: LottoSet[]): string => {
-      let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
-      message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
-
-      sets.forEach((set, index) => {
-        message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
-      });
-
-      return message;
-    };
-
   public createStockStatusMessage = (signals: StockSignalInfo[]): string => {
-    console.log("Generating long-term stock status message report.");
-
     let message = `<b>🚀 오늘의 주식 폼 미쳤다! 📈</b>\n`;
     message += `오늘의 투자 인사이트, 켄신님이 콕 집어드려요.\n`;
     message += `━━━━━━━━━━━━━━━━━━\n\n`;
 
+    let holdingSummary = `<b>💸 [내 계좌 요약 (보유 중)]</b>\n`;
+    let holdingCount = 0;
+
+    // 상단 수익률 요약 로직
+    signals.forEach((item) => {
+      const { name, currentSignal, lastMeaningfulSignal } = item;
+      const isHold = currentSignal.type === "hold";
+      const targetSignal =
+        isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
+
+      if (
+        isHold ||
+        currentSignal.type === "buy" ||
+        currentSignal.type === "inverse-buy"
+      ) {
+        if (
+          targetSignal.type === "buy" ||
+          targetSignal.type === "inverse-buy"
+        ) {
+          holdingCount++;
+
+          if (targetSignal.entryPrice) {
+            const entryPrice = targetSignal.entryPrice;
+            const extItem = item as ExtendedStockSignalInfo;
+            const extCurrentSignal = currentSignal as ExtendedTradingSignal;
+
+            const currentPrice =
+              extItem.currentPrice ||
+              extCurrentSignal.currentPrice ||
+              extCurrentSignal.price ||
+              extCurrentSignal.close ||
+              currentSignal.realizedPrice;
+
+            let profitRate: number | null = null;
+
+            if (currentPrice) {
+              if (targetSignal.type === "buy") {
+                profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
+              } else if (targetSignal.type === "inverse-buy") {
+                profitRate = ((entryPrice - currentPrice) / entryPrice) * 100;
+              }
+            } else if (
+              extCurrentSignal.profitRate !== undefined &&
+              extCurrentSignal.profitRate !== null
+            ) {
+              profitRate = Number(extCurrentSignal.profitRate);
+            } else if (
+              extItem.profitRate !== undefined &&
+              extItem.profitRate !== null
+            ) {
+              profitRate = Number(extItem.profitRate);
+            }
+
+            const inverseTag =
+              targetSignal.type === "inverse-buy" ? " [인버스]" : "";
+
+            if (profitRate !== null && !isNaN(profitRate)) {
+              const sign = profitRate > 0 ? "+" : "";
+              const statusLabel =
+                profitRate > 0
+                  ? "개이득 중 😍"
+                  : profitRate < 0
+                    ? "눈물 😭"
+                    : "본전 😐";
+
+              holdingSummary += `▪️ <b>${name}${inverseTag}:</b> ${statusLabel} (${sign}${profitRate.toFixed(2)}%)\n`;
+            } else {
+              holdingSummary += `▪️ <b>${name}${inverseTag}:</b> 수익률 계산 불가 <i>(현재가 지연)</i>\n`;
+            }
+          } else {
+            const inverseTag =
+              targetSignal.type === "inverse-buy" ? " [인버스]" : "";
+            holdingSummary += `▪️ <b>${name}${inverseTag}:</b> 수익률 계산 불가 <i>(진입가 지연)</i>\n`;
+          }
+        }
+      }
+    });
+
+    if (holdingCount === 0) {
+      holdingSummary += `현재 보유 중인 종목이 없습니다 (현금 관망 🧘‍♂️)\n`;
+    }
+
+    message += holdingSummary + `\n━━━━━━━━━━━━━━━━━━\n\n`;
+
+    // 하단 상세 목록 로직
     signals.forEach((item: StockSignalInfo, index: number) => {
       const { name, currentSignal, lastMeaningfulSignal, advice } = item;
       const isHold = currentSignal.type === "hold";
@@ -258,7 +355,6 @@ export class TelegramLongTermService {
         statusText = "인버스 매수 (방어모드!)";
       else if (targetSignal.type === "sell") statusText = "지금이 익절 타이밍";
 
-      // [MODIFIED] Added dynamic MZ-style profit rate formatting for HOLD status
       let profitRateText = "";
       if (
         isHold &&
@@ -266,28 +362,52 @@ export class TelegramLongTermService {
       ) {
         statusText = "존버 가보자고! (매수 유지)";
 
-        // Calculate current holding profit rate if current price and entry price exist
-        if (targetSignal.entryPrice && currentSignal.realizedPrice) {
+        if (targetSignal.entryPrice) {
           const entryPrice = targetSignal.entryPrice;
-          const currentPrice = currentSignal.realizedPrice;
-          let profitRate = 0;
+          const extItem = item as ExtendedStockSignalInfo;
+          const extCurrentSignal = currentSignal as ExtendedTradingSignal;
 
-          if (targetSignal.type === "buy") {
-            profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
-          } else if (targetSignal.type === "inverse-buy") {
-            profitRate = ((entryPrice - currentPrice) / entryPrice) * 100;
+          const currentPrice =
+            extItem.currentPrice ||
+            extCurrentSignal.currentPrice ||
+            extCurrentSignal.price ||
+            extCurrentSignal.close ||
+            currentSignal.realizedPrice;
+
+          let profitRate: number | null = null;
+
+          if (currentPrice) {
+            if (targetSignal.type === "buy") {
+              profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
+            } else if (targetSignal.type === "inverse-buy") {
+              profitRate = ((entryPrice - currentPrice) / entryPrice) * 100;
+            }
+          } else if (
+            extCurrentSignal.profitRate !== undefined &&
+            extCurrentSignal.profitRate !== null
+          ) {
+            profitRate = Number(extCurrentSignal.profitRate);
+          } else if (
+            extItem.profitRate !== undefined &&
+            extItem.profitRate !== null
+          ) {
+            profitRate = Number(extItem.profitRate);
           }
 
-          const sign = profitRate > 0 ? "+" : "";
-          const color =
-            profitRate > 0 ? "개이득 중" : profitRate < 0 ? "눈물" : "본전";
-          profitRateText = `\n<b>💸 지금까지 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
+          if (profitRate !== null && !isNaN(profitRate)) {
+            const sign = profitRate > 0 ? "+" : "";
+            // 어색한 '개이득 중 진행 중' 표현을 '개이득 진행 중'으로 나오게끔 '중' 글자를 제외했습니다.
+            const color =
+              profitRate > 0 ? "개이득" : profitRate < 0 ? "눈물" : "본전";
+            profitRateText = `\n<b>💸 지금까지 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
+          } else {
+            profitRateText = `\n<b>💸 지금까지 수익률:</b> <i>계산 불가 (현재가 데이터 누락)</i>`;
+          }
         }
       }
 
       message += `<b>${index + 1}. 💎 ${name}</b>\n`;
       message += `<b>🔥 시그널:</b> <code>${statusText}</code>`;
-      // Append profit rate text if holding
       if (profitRateText) {
         message += profitRateText;
       }
@@ -320,10 +440,22 @@ export class TelegramLongTermService {
       const targetPath = encodeURIComponent(`kis-stock?ticker=${name}&tf=1d`);
       const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
       message += `\n<a href="${redirectLink}">👉 [${name}] 상세 차트 확인하기</a>\n`;
-
       message += `\n━━━━━━━━━━━━━━━━━━\n`;
     });
 
     return message;
   };
+
+  public createLottoSetsMessage =
+    (drawNo: number) =>
+    (sets: LottoSet[]): string => {
+      let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
+      message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
+
+      sets.forEach((set, index) => {
+        message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
+      });
+
+      return message;
+    };
 }

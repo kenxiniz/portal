@@ -39,6 +39,7 @@ export class TelegramShortTermService {
   constructor() {
     const rawShortTermIds = process.env.TELEGRAM_CHAT_IDS;
 
+    // 환경 변수 문자열을 쉼표(,) 기준으로 분리하여 배열로 저장 (중복 제거 포함)
     if (rawShortTermIds) {
       const parsedIds = rawShortTermIds
         .split(",")
@@ -119,6 +120,7 @@ export class TelegramShortTermService {
       const signalDate = latestSignal.date;
       const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
 
+      // 배열을 순회하며 모든 방에 메시지 전송 (병렬 처리)
       const sendPromises = this.shortTermChatIds.map(async (chatId) => {
         const cacheKey = `${chatId}_${ticker}_${timeframe}`;
         const lastSentDate = TelegramShortTermService.sentSignalCache[cacheKey];
@@ -137,6 +139,7 @@ export class TelegramShortTermService {
           );
           const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
 
+          // 메시지 생성을 1번만 수행
           let message = "";
 
           if (
@@ -225,6 +228,7 @@ export class TelegramShortTermService {
         }
       });
 
+      // 모든 비동기 전송 요청이 끝날 때까지 대기 (Promise.allSettled를 사용하여 일부 실패 시에도 전체 로직 보호)
       await Promise.allSettled(sendPromises);
     }
   }

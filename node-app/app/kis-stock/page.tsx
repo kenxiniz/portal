@@ -3,6 +3,8 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
+// Next.js 라우팅을 위한 useRouter 임포트 추가
+import { useRouter } from "next/navigation";
 import { useThemeDetector } from "@/hooks/useThemeDetector";
 import {
   TickerState,
@@ -12,7 +14,7 @@ import {
 } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Globe, MapPin } from "lucide-react";
 
 const tickers = stockConfig.us_stocks.map((t) => t.ticker);
 
@@ -21,6 +23,8 @@ type Timeframe = "1d" | "1h" | "15m";
 const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function KisStockPage() {
+  const router = useRouter(); // 라우터 객체 초기화
+
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(
     () => {
       const initialState: Record<string, TickerState> = {};
@@ -77,7 +81,7 @@ export default function KisStockPage() {
         const noCacheTimestamp = Date.now();
         const endpoint = `/api/kisStock/${ticker}?timeframe=${timeframe}${forceRefresh ? "&refresh=true" : ""}&t=${noCacheTimestamp}`;
 
-        const response = await fetch(endpoint);
+        const response = await fetch(endpoint, { cache: "no-store" });
 
         if (!response.ok) {
           const errorData = await response.json();
@@ -96,16 +100,25 @@ export default function KisStockPage() {
           advice: AdviceObject | null;
         } = await response.json();
 
-        setTickerStates((prev) => ({
-          ...prev,
-          [ticker]: {
-            data: data,
-            signals: signals,
-            loading: false,
-            error: null,
-            advice: advice || prev[ticker]?.advice || null,
-          },
-        }));
+        setTickerStates((prev) => {
+          const prevState = prev[ticker];
+          // 서버가 API 호출 제한 등으로 빈 배열([])을 반환하는지 체크합니다. (차트 증발 방지)
+          const hasNewData = Array.isArray(data) && data.length > 0;
+
+          return {
+            ...prev,
+            [ticker]: {
+              data: hasNewData ? data : prevState.data,
+              signals: hasNewData ? signals : prevState.signals,
+              loading: false,
+              error:
+                !hasNewData && prevState.data && prevState.data.length > 0
+                  ? "API 호출 지연으로 최신 데이터를 가져오지 못해 기존 차트를 유지합니다."
+                  : null,
+              advice: advice || prevState.advice || null,
+            },
+          };
+        });
       } catch (e: unknown) {
         const errorMessage =
           e instanceof Error ? e.message : "An unknown error occurred";
@@ -115,7 +128,11 @@ export default function KisStockPage() {
           [ticker]: {
             ...prev[ticker],
             loading: false,
-            error: `Failed to load data for ${ticker}. Error: ${errorMessage}`,
+            // 에러가 발생해도 기존 데이터가 있다면 화면을 비우지 않고 유지합니다.
+            error:
+              prev[ticker]?.data && prev[ticker].data!.length > 0
+                ? `갱신 실패: ${errorMessage} (기존 데이터 유지)`
+                : `Failed to load data for ${ticker}. Error: ${errorMessage}`,
           },
         }));
       }
@@ -191,7 +208,6 @@ export default function KisStockPage() {
     setIsSyncing(false);
   };
 
-  // [FIXED] Consolidated initial load and timeframe change logic
   useEffect(() => {
     if (!fullLoadInitiated.current) {
       fullLoadInitiated.current = true;
@@ -223,7 +239,14 @@ export default function KisStockPage() {
       setTickerStates((prev) => {
         const resetState: Record<string, TickerState> = {};
         Object.keys(prev).forEach((key) => {
-          resetState[key] = { ...prev[key], loading: true, error: null };
+          // 타임프레임이 변경될 때만 차트를 초기화합니다.
+          resetState[key] = {
+            ...prev[key],
+            data: null,
+            signals: [],
+            loading: true,
+            error: null,
+          };
         });
         return resetState;
       });
@@ -292,11 +315,15 @@ export default function KisStockPage() {
   return (
     <div className="flex flex-col items-center p-2 sm:p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
       <div className="flex flex-col md:flex-row justify-between items-center w-full md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mb-6 md:mb-8 gap-4">
-        <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0">
-          미국 주식
-        </h1>
+        {/* 상단 타이틀 및 마켓 전환 탭 영역 */}
+        <div className="flex flex-col md:flex-row items-center gap-4">
+          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0">
+            미국 주식
+          </h1>
+        </div>
 
         <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+          {/* Timeframe buttons moved to the left side */}
           <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center">
             <button
               onClick={() => setSelectedTimeframe("1d")}
@@ -330,21 +357,41 @@ export default function KisStockPage() {
             </button>
           </div>
 
-          <button
-            onClick={handleManualSync}
-            disabled={isSyncing}
-            className={`flex items-center justify-center px-4 py-2.5 rounded-md text-sm font-medium transition-all w-full md:w-auto min-w-[160px]
+          {/* Grouping Market Toggle and Sync Button in a flex-row to ensure they are on the same line */}
+          <div className="flex flex-row items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+            <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg shrink-0">
+              <button
+                onClick={() => router.push("/kis-stock")}
+                className="flex items-center px-4 py-2 rounded-md text-sm font-bold transition-colors bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400 shadow-sm"
+              >
+                <Globe className="w-4 h-4 mr-2" />
+                미국
+              </button>
+              <button
+                onClick={() => router.push("/k-stock")}
+                className="flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
+                <MapPin className="w-4 h-4 mr-2" />
+                한국
+              </button>
+            </div>
+
+            <button
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className={`flex items-center justify-center px-4 py-2.5 rounded-md text-sm font-medium transition-all shrink-0 min-w-[160px]
                   ${
                     isSyncing
                       ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
                       : "bg-blue-600 text-white hover:bg-blue-700 shadow-md active:scale-95"
                   }`}
-          >
-            <RefreshCw
-              className={`w-4 h-4 mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
-            />
-            {getSyncButtonText()}
-          </button>
+            >
+              <RefreshCw
+                className={`w-4 h-4 mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
+              />
+              {getSyncButtonText()}
+            </button>
+          </div>
         </div>
       </div>
 
