@@ -340,11 +340,8 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                   targetSignal.type === "sell" &&
                   cumulativeProfitRate !== null && (
                     <span className="font-normal text-base ml-1.5">
-                      [
-                      {timeframe === "1d"
-                        ? "최근 1년 누적 수익률"
-                        : "차트 내 누적 수익률"}
-                      : {cumulativeProfitRate > 0 ? "+" : ""}
+                      [{timeframe === "1d" ? "1년 수익률" : "누적 수익률"}:{" "}
+                      {cumulativeProfitRate > 0 ? "+" : ""}
                       {cumulativeProfitRate.toFixed(2)}%]
                     </span>
                   )}

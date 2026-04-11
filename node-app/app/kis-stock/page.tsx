@@ -3,7 +3,6 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
-// Next.js 라우팅을 위한 useRouter 임포트 추가
 import { useRouter } from "next/navigation";
 import { useThemeDetector } from "@/hooks/useThemeDetector";
 import {
@@ -14,8 +13,9 @@ import {
 } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
-import { RefreshCw, Globe, MapPin } from "lucide-react";
+import { RefreshCw, Globe, MapPin, Sparkles } from "lucide-react";
 
+// US Stocks를 불러옵니다.
 const tickers = stockConfig.us_stocks.map((t) => t.ticker);
 
 type Timeframe = "1d" | "1h" | "15m";
@@ -23,7 +23,7 @@ type Timeframe = "1d" | "1h" | "15m";
 const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function KisStockPage() {
-  const router = useRouter(); // 라우터 객체 초기화
+  const router = useRouter();
 
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(
     () => {
@@ -42,11 +42,10 @@ export default function KisStockPage() {
   );
 
   const [openedTicker, setOpenedTicker] = useState<string | null>(null);
-
-  // Initialize with '1d'. It will be immediately corrected by the useEffect on mount.
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>("1d");
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isAiSyncing, setIsAiSyncing] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
   const [timeUntilNextSync, setTimeUntilNextSync] = useState<number>(
@@ -58,6 +57,7 @@ export default function KisStockPage() {
   const adviceTriggered = useRef(false);
   const previousTimeframe = useRef<Timeframe>("1d");
   const nextSyncTimeRef = useRef<number | null>(null);
+  const isForceRefreshingRef = useRef(false);
 
   const fetchStockData = useCallback(
     async (
@@ -65,8 +65,10 @@ export default function KisStockPage() {
       timeframe: Timeframe,
       forceRefresh: boolean = false,
     ) => {
+      const shouldBypassCache = forceRefresh || isForceRefreshingRef.current;
+
       setTickerStates((prev) => {
-        if (prev[ticker]?.loading === true && !forceRefresh) return prev;
+        if (prev[ticker]?.loading === true && !shouldBypassCache) return prev;
         return {
           ...prev,
           [ticker]: { ...prev[ticker], loading: true, error: null },
@@ -75,11 +77,12 @@ export default function KisStockPage() {
 
       try {
         console.log(
-          `[DATA FETCH] Fetching ${ticker} data for timeframe: ${timeframe}, refresh: ${forceRefresh}`,
+          `[DATA FETCH] Fetching ${ticker} data for timeframe: ${timeframe}, refresh: ${shouldBypassCache}`,
         );
 
         const noCacheTimestamp = Date.now();
-        const endpoint = `/api/kisStock/${ticker}?timeframe=${timeframe}${forceRefresh ? "&refresh=true" : ""}&t=${noCacheTimestamp}`;
+        // US 주식 API 라우트 호출 (/api/kisStock/)
+        const endpoint = `/api/kisStock/${ticker}?timeframe=${timeframe}${shouldBypassCache ? "&refresh=true" : ""}&t=${noCacheTimestamp}`;
 
         const response = await fetch(endpoint, { cache: "no-store" });
 
@@ -102,7 +105,6 @@ export default function KisStockPage() {
 
         setTickerStates((prev) => {
           const prevState = prev[ticker];
-          // 서버가 API 호출 제한 등으로 빈 배열([])을 반환하는지 체크합니다. (차트 증발 방지)
           const hasNewData = Array.isArray(data) && data.length > 0;
 
           return {
@@ -113,7 +115,7 @@ export default function KisStockPage() {
               loading: false,
               error:
                 !hasNewData && prevState.data && prevState.data.length > 0
-                  ? "API 호출 지연으로 최신 데이터를 가져오지 못해 기존 차트를 유지합니다."
+                  ? "API call delayed. Keeping existing chart data."
                   : null,
               advice: advice || prevState.advice || null,
             },
@@ -128,10 +130,9 @@ export default function KisStockPage() {
           [ticker]: {
             ...prev[ticker],
             loading: false,
-            // 에러가 발생해도 기존 데이터가 있다면 화면을 비우지 않고 유지합니다.
             error:
               prev[ticker]?.data && prev[ticker].data!.length > 0
-                ? `갱신 실패: ${errorMessage} (기존 데이터 유지)`
+                ? `Sync failed: ${errorMessage} (Keeping existing data)`
                 : `Failed to load data for ${ticker}. Error: ${errorMessage}`,
           },
         }));
@@ -146,7 +147,7 @@ export default function KisStockPage() {
       adviceTriggered.current = true;
 
       try {
-        console.log("Triggering background advice generation...");
+        console.log("Triggering background advice generation for US-Stock...");
         await fetch("/api/trigger-advice", { method: "POST" });
       } catch (error) {
         console.error("Failed to trigger advice generation:", error);
@@ -203,9 +204,59 @@ export default function KisStockPage() {
   const handleManualSync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
-    console.log("[MANUAL SYNC] Starting forced refresh for all tickers");
+    isForceRefreshingRef.current = true;
+
+    console.log("[MANUAL SYNC] Starting forced refresh for all US tickers");
     await loadAllTickersSequentially(selectedTimeframe, true, false, false);
+
+    isForceRefreshingRef.current = false;
     setIsSyncing(false);
+  };
+
+  const handleAiSync = async () => {
+    if (isAiSyncing) return;
+    setIsAiSyncing(true);
+    console.log(
+      "[MANUAL AI SYNC] Starting forced AI advice refresh for US-Stock",
+    );
+
+    try {
+      const response = await fetch("/api/advice", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          isBatch: true,
+          apiType: "kisStock", // US Stock type
+          refresh: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const newAdviceData = await response.json();
+
+      setTickerStates((prev) => {
+        const newState = { ...prev };
+        Object.keys(newAdviceData).forEach((ticker) => {
+          if (newState[ticker]) {
+            newState[ticker] = {
+              ...newState[ticker],
+              advice: newAdviceData[ticker],
+            };
+          }
+        });
+        return newState;
+      });
+      console.log("[MANUAL AI SYNC] AI advice refresh completed successfully.");
+    } catch (error) {
+      console.error("[ERROR] Failed to force refresh AI advice:", error);
+    } finally {
+      setIsAiSyncing(false);
+    }
   };
 
   useEffect(() => {
@@ -221,32 +272,23 @@ export default function KisStockPage() {
         }
       }
 
-      // Sync state with URL BEFORE fetching data
       setSelectedTimeframe(initialTf);
       previousTimeframe.current = initialTf;
 
-      // Fetch data with the exactly targeted timeframe from the URL
       loadAllTickersSequentially(initialTf);
       return;
     }
 
     if (previousTimeframe.current !== selectedTimeframe) {
       console.log(
-        `[TIMEFRAME CHANGED] Updating all tickers to ${selectedTimeframe}`,
+        `[TIMEFRAME CHANGED] Updating all US tickers to ${selectedTimeframe}`,
       );
       previousTimeframe.current = selectedTimeframe;
 
       setTickerStates((prev) => {
         const resetState: Record<string, TickerState> = {};
         Object.keys(prev).forEach((key) => {
-          // 타임프레임이 변경될 때만 차트를 초기화합니다.
-          resetState[key] = {
-            ...prev[key],
-            data: null,
-            signals: [],
-            loading: true,
-            error: null,
-          };
+          resetState[key] = { ...prev[key], loading: true, error: null };
         });
         return resetState;
       });
@@ -268,7 +310,7 @@ export default function KisStockPage() {
 
         if (remainingTime <= 0) {
           console.log(
-            "[AUTO SYNC] Countdown reached 0. Initiating background data refresh...",
+            "[AUTO SYNC] Countdown reached 0. Initiating background US data refresh...",
           );
           nextSyncTimeRef.current = Date.now() + AUTO_REFRESH_INTERVAL_MS;
           setTimeUntilNextSync(AUTO_REFRESH_INTERVAL_MS);
@@ -309,22 +351,22 @@ export default function KisStockPage() {
       );
     }
 
-    return `${formattedCountdown} 후 갱신`;
+    return `${formattedCountdown} 갱신`;
   };
 
   return (
     <div className="flex flex-col items-center p-2 sm:p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
-      <div className="flex flex-col md:flex-row justify-between items-center w-full md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mb-6 md:mb-8 gap-4">
-        {/* 상단 타이틀 및 마켓 전환 탭 영역 */}
+      <div className="flex flex-col md:flex-row justify-between items-center w-full md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mb-6 md:mb-8 gap-4 overflow-hidden">
+        {/* 상단 타이틀 */}
         <div className="flex flex-col md:flex-row items-center gap-4">
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0">
-            미국 주식
+          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0 whitespace-nowrap">
+            미국 주식/ETF
           </h1>
         </div>
 
-        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-          {/* Timeframe buttons moved to the left side */}
-          <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center">
+        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto overflow-hidden">
+          {/* Timeframe buttons */}
+          <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center shrink-0">
             <button
               onClick={() => setSelectedTimeframe("1d")}
               className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -357,29 +399,53 @@ export default function KisStockPage() {
             </button>
           </div>
 
-          {/* Grouping Market Toggle and Sync Button in a flex-row to ensure they are on the same line */}
-          <div className="flex flex-row items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+          <div
+            className="flex flex-row items-center gap-1.5 sm:gap-2 w-full md:w-auto justify-start md:justify-end flex-nowrap overflow-x-auto pb-2 md:pb-0"
+            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+          >
+            <style
+              dangerouslySetInnerHTML={{
+                __html: `div::-webkit-scrollbar { display: none; }`,
+              }}
+            />
+
             <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg shrink-0">
               <button
                 onClick={() => router.push("/kis-stock")}
-                className="flex items-center px-4 py-2 rounded-md text-sm font-bold transition-colors bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400 shadow-sm"
+                className="flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-bold transition-colors bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400 shadow-sm whitespace-nowrap"
               >
-                <Globe className="w-4 h-4 mr-2" />
+                <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0" />
                 미국
               </button>
               <button
                 onClick={() => router.push("/k-stock")}
-                className="flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                className="flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-colors text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white whitespace-nowrap"
               >
-                <MapPin className="w-4 h-4 mr-2" />
+                <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0" />
                 한국
               </button>
             </div>
 
             <button
+              onClick={handleAiSync}
+              disabled={isAiSyncing}
+              className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap
+                  ${
+                    isAiSyncing
+                      ? "bg-purple-100 text-purple-400 cursor-not-allowed dark:bg-purple-900/30 dark:text-purple-500"
+                      : "bg-purple-600 text-white hover:bg-purple-700 shadow-md active:scale-95"
+                  }`}
+            >
+              <Sparkles
+                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isAiSyncing ? "animate-pulse" : ""}`}
+              />
+              {isAiSyncing ? "AI 갱신 중" : "AI 갱신"}
+            </button>
+
+            <button
               onClick={handleManualSync}
               disabled={isSyncing}
-              className={`flex items-center justify-center px-4 py-2.5 rounded-md text-sm font-medium transition-all shrink-0 min-w-[160px]
+              className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap min-w-[120px] sm:min-w-[140px]
                   ${
                     isSyncing
                       ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
@@ -387,7 +453,7 @@ export default function KisStockPage() {
                   }`}
             >
               <RefreshCw
-                className={`w-4 h-4 mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
+                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
               />
               {getSyncButtonText()}
             </button>
@@ -399,17 +465,24 @@ export default function KisStockPage() {
         {tickers.map((ticker) => {
           const state = tickerStates[ticker];
           if (!state) return null;
+
+          const stockInfo = stockConfig.us_stocks.find(
+            (s) => s.ticker === ticker,
+          ) as { ticker: string; exchange: string; name?: string } | undefined;
+
+          const displayName = stockInfo?.name || ticker;
+
           return (
             <StockCollapsibleCard
               key={ticker}
               tickerSymbol={ticker}
-              displayName={ticker}
-              apiType="kisStock"
+              displayName={displayName}
+              apiType="kisStock" // 미국 주식 API 타입
               tickerState={state}
               gridStrokeColor={gridStrokeColor}
               isOpen={openedTicker === ticker}
               onOpenChange={() => handleOpenChange(ticker)}
-              currency="USD"
+              currency="USD" // 미국 달러
               timeframe={selectedTimeframe}
             />
           );

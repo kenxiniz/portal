@@ -14,11 +14,9 @@ import {
 import { getDailyStockData, getMinuteStockData } from "../../../../lib/kisApi";
 import { TickerAdvice } from "../../../../lib/models/advice";
 
-// Force Next.js to completely disable caching for this API route
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// --- Global In-Memory Cache Setup ---
 type CachePayload = {
   data: StockDataPoint[];
   signals: TradingSignal[];
@@ -40,7 +38,6 @@ if (process.env.NODE_ENV !== "production") {
   globalCache.stockApiCache = apiCache;
 }
 
-// Helper to get today's date string in KST
 const getTodayKST = () => {
   const now = new Date();
   const kstOffset = 9 * 60 * 60 * 1000;
@@ -50,9 +47,8 @@ const getTodayKST = () => {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const ticker = url.pathname.split("/").pop();
-
-  // Get query parameters
   const timeframe = url.searchParams.get("timeframe") || "1d";
+  const isForceRefresh = url.searchParams.get("refresh") === "true";
 
   if (!ticker) {
     return NextResponse.json({ error: "Ticker is required" }, { status: 400 });
@@ -64,63 +60,93 @@ export async function GET(request: Request) {
   try {
     await connectDB();
 
-    // Fetch AI advice directly from DB before checking memory cache
     const adviceDoc = (await TickerAdvice.findOne({ ticker }).lean()) as {
       advice?: object;
     } | null;
     const latestAdvice = adviceDoc?.advice || null;
 
-    // --- Step 0: Check In-Memory Cache (Always prioritized) ---
-    if (apiCache.has(cacheKey)) {
+    // --- Step 1: Memory Cache ---
+    // 10초 TTL 유지: 다중 컴포넌트 동시 요청 시 500 에러 방어
+    if (apiCache.has(cacheKey) && !isForceRefresh) {
       const cachedData = apiCache.get(cacheKey)!;
-
       const isToday = cachedData.fetchDate === todayStr;
-      const isIntradayFresh =
-        timeframe === "1d" ||
-        Date.now() - cachedData.timestamp < 1000 * 60 * 15;
+      const isFresh = Date.now() - cachedData.timestamp < 10 * 1000;
 
-      if (isToday && isIntradayFresh) {
+      if (isToday && isFresh) {
         console.log(
           `[INFO] [${ticker}] US Cache HIT (Memory) for ${timeframe}`,
         );
-
-        // Inject the latest advice into the cached payload before returning
         cachedData.payload.advice = latestAdvice as AdviceObject | null;
         return NextResponse.json(cachedData.payload);
       }
     }
 
-    console.log(`[INFO] [${ticker}] Requesting: ${timeframe}`);
+    // --- Step 2: Fetch DB & Deduplicate Early ---
+    // 서버 메모리 부하를 줄이기 위해 1500개만 가져와서 즉시 중복 제거
+    const rawDbData = await getCandles("US", ticker, timeframe, 1500, false);
+    const dbMap = new Map();
 
-    // --- Step 1: Check Database (Prioritized over API call) ---
-    // ForceRefresh is false to strictly check DB first
-    let dbData = await getCandles("US", ticker, timeframe, 500, false);
-    const fromDB = dbData && dbData.length > 0;
-
-    if (fromDB) {
-      console.log(
-        `[INFO] [${ticker}] US Cache HIT (Database) for ${timeframe}`,
-      );
+    if (rawDbData && rawDbData.length > 0) {
+      for (const c of rawDbData) {
+        dbMap.set(new Date(c.timestamp).getTime(), c);
+      }
     }
 
-    // --- Step 2: Fetch from REST API (Only if DB miss) ---
-    if (!fromDB) {
-      console.log(
-        `[INFO] [${ticker}] US Syncing ${timeframe} data from KIS API...`,
-      );
+    const uniqueDbCandles = Array.from(dbMap.values()).sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
 
-      let apiData: StockDataPoint[] = [];
+    let latestDbTimestamp = 0;
+    if (uniqueDbCandles.length > 0) {
+      latestDbTimestamp = new Date(
+        uniqueDbCandles[uniqueDbCandles.length - 1].timestamp,
+      ).getTime();
+    }
 
+    // --- Step 3: Self-Healing & Calculate API Fetch Boundary ---
+    let stopTimestamp = 0;
+    const now = Date.now();
+
+    // 만약 DB에 중복이 너무 많아서 진짜 유효한 캔들이 30개도 안 된다면?
+    // 과거 데이터가 밀려난 상황이므로, DB를 무시하고 40일치(분봉은 5일치)를 강제로 다시 긁어옵니다 (자가 치유).
+    if (uniqueDbCandles.length < 30) {
       if (timeframe === "1d") {
-        apiData = await getDailyStockData(ticker);
+        stopTimestamp = now - 40 * 24 * 60 * 60 * 1000;
       } else {
-        const gap = timeframe === "1h" ? 60 : 15;
-        apiData = await getMinuteStockData(ticker, gap);
+        stopTimestamp = now - 5 * 24 * 60 * 60 * 1000;
       }
+      console.log(
+        `[WARN] [${ticker}] DB is bloated or empty. Force fetching history down to: ${new Date(stopTimestamp).toISOString()}`,
+      );
+    } else {
+      // 정상적일 경우 가장 최신 날짜까지만 가져와서 낭비 최소화
+      stopTimestamp = latestDbTimestamp;
+    }
 
-      if (apiData && apiData.length > 0) {
-        // Use bulk insert instead of loop for massive performance boost
-        const formattedCandles = apiData.map((candle) => ({
+    // --- Step 4: Fetch from API ---
+    let apiData: StockDataPoint[] = [];
+
+    if (timeframe === "1d") {
+      apiData = await getDailyStockData(ticker, stopTimestamp);
+    } else {
+      const gap = timeframe === "1h" ? 60 : 15;
+      apiData = await getMinuteStockData(ticker, gap, 10, stopTimestamp);
+    }
+
+    // --- Step 5: Strictly Filter & Save (Fixes DB Bloat and OOM) ---
+    if (apiData && apiData.length > 0) {
+      // DB의 가장 최신 시간과 같거나 그 이후의 데이터(오늘/어제 누락분)만 정확히 골라냅니다.
+      const newDataToSave = apiData.filter((candle) => {
+        return new Date(candle.date).getTime() >= latestDbTimestamp;
+      });
+
+      if (newDataToSave.length > 0) {
+        console.log(
+          `[INFO] [${ticker}] Upserting ${newDataToSave.length} exact matching records to DB...`,
+        );
+
+        const formattedCandles = newDataToSave.map((candle) => ({
           timestamp: candle.date,
           open: candle.open,
           high: candle.high,
@@ -130,16 +156,41 @@ export async function GET(request: Request) {
         }));
 
         await saveCandlesBulk("US", ticker, timeframe, formattedCandles);
-        dbData = await getCandles("US", ticker, timeframe, 500, true);
       }
     }
 
-    if (dbData && dbData.length > 0) {
-      // 4. Transform for Technical Analysis
-      const sortedData = [...dbData].sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
+    // --- Step 6: Memory Merge (Bulletproof Chart Rendering) ---
+    // DB 조회 결과와 방금 API에서 가져온 따끈따끈한 결과를 메모리 상에서 합칩니다.
+    const finalMap = new Map();
+
+    // 1. 기존 유효 DB 데이터 세팅
+    for (const c of uniqueDbCandles) {
+      finalMap.set(new Date(c.timestamp).getTime(), c);
+    }
+
+    // 2. API 최신 데이터 덮어쓰기 (오늘 가격 실시간 반영)
+    if (apiData && apiData.length > 0) {
+      for (const c of apiData) {
+        finalMap.set(new Date(c.date).getTime(), {
+          timestamp: c.date,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+        });
+      }
+    }
+
+    const finalData = Array.from(finalMap.values());
+
+    if (finalData.length > 0) {
+      const sortedData = finalData
+        .sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        )
+        .slice(-500); // 최종 차트에 쓸 500개만 깔끔하게 컷
 
       const mappedData = sortedData.map((c) => ({
         date:
@@ -156,21 +207,18 @@ export async function GET(request: Request) {
         volume: c.volume,
       }));
 
-      // 5. Calculate Indicators
       const processedData = calculateBollingerBands(calculateRSI(mappedData));
       const signals = analyzeAllTradingSignals(
         processedData,
         timeframe as "1d" | "1h" | "15m",
       );
 
-      // Define payload matching the proper interface
       const responsePayload: CachePayload = {
         data: processedData,
         signals,
         advice: latestAdvice as AdviceObject | null,
       };
 
-      // --- Save to In-Memory Cache ---
       apiCache.set(cacheKey, {
         fetchDate: todayStr,
         timestamp: Date.now(),

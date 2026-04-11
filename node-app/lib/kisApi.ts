@@ -1,5 +1,5 @@
 /* /lib/kisApi.ts */
-import axios from "axios";
+import axios, { AxiosRequestConfig } from "axios";
 import { StockDataPoint } from "./stockUtils";
 import stockConfig from "./stock.json";
 
@@ -7,8 +7,12 @@ const KIS_API_URL = "https://openapi.koreainvestment.com:9443";
 const KIS_APP_KEY = process.env.KIS_APP_KEY;
 const KIS_APP_SECRET = process.env.KIS_APP_SECRET;
 
-let accessToken: string | null = null;
-let tokenExpiresAt: number | null = null;
+// 미국 주식과 한국 주식이 완벽하게 토큰을 공유하기 위한 Global Cache
+const globalKisToken = global as typeof globalThis & {
+  kisAccessToken?: string | null;
+  kisTokenExpiresAt?: number | null;
+  kisTokenPromise?: Promise<string> | null;
+};
 
 // Interfaces
 interface KisStockItem {
@@ -25,42 +29,100 @@ interface KisMinuteStockItem {
   open: string;
   high: string;
   low: string;
-  evol: string; // Update: Field name for volume in minute chart is 'evol'
-  xhms: string; // Update: Field name for time is 'xhms'
-  xymd: string; // Update: Field name for date is 'xymd'
+  evol: string;
+  xhms: string;
+  xymd: string;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchWithRetry(
+  url: string,
+  options: AxiosRequestConfig,
+  retries: number = 3,
+  delayMs: number = 1000,
+) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await axios(url, options);
+      return response;
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        if (i === retries - 1) throw error;
+
+        if (status === 500 || status === 429 || !status) {
+          const waitTime = delayMs * (i + 1);
+          console.log(`[INFO] Waiting ${waitTime}ms before retrying...`);
+          await sleep(waitTime);
+        } else {
+          throw error;
+        }
+      } else {
+        throw error;
+      }
+    }
+  }
+  throw new Error("API request failed after retries");
 }
 
 async function getAccessToken(): Promise<string> {
   const now = Date.now();
-  if (accessToken && tokenExpiresAt && now < tokenExpiresAt) {
-    return accessToken;
+
+  // 1. 이미 유효한 토큰이 전역 캐시에 있으면 즉시 반환
+  if (
+    globalKisToken.kisAccessToken &&
+    globalKisToken.kisTokenExpiresAt &&
+    now < globalKisToken.kisTokenExpiresAt
+  ) {
+    return globalKisToken.kisAccessToken;
+  }
+
+  // 2. 다른 파일이나 프로세스에서 이미 토큰을 발급받고 있다면, 그 작업이 끝날 때까지 대기
+  if (globalKisToken.kisTokenPromise) {
+    console.log("[INFO] Waiting for shared KIS token promise (US)...");
+    return globalKisToken.kisTokenPromise;
   }
 
   if (!KIS_APP_KEY || !KIS_APP_SECRET) {
     throw new Error("KIS_APP_KEY and KIS_APP_SECRET must be set");
   }
 
-  try {
-    const response = await axios.post(`${KIS_API_URL}/oauth2/tokenP`, {
-      grant_type: "client_credentials",
-      appkey: KIS_APP_KEY,
-      appsecret: KIS_APP_SECRET,
-    });
+  // 3. 토큰 발급 시작 및 전역 Promise Lock 설정
+  globalKisToken.kisTokenPromise = (async () => {
+    try {
+      const response = await fetchWithRetry(`${KIS_API_URL}/oauth2/tokenP`, {
+        method: "POST",
+        data: {
+          grant_type: "client_credentials",
+          appkey: KIS_APP_KEY,
+          appsecret: KIS_APP_SECRET,
+        },
+      });
 
-    accessToken = response.data.access_token;
-    tokenExpiresAt = now + (response.data.expires_in - 60) * 1000;
+      globalKisToken.kisAccessToken = response.data.access_token;
+      globalKisToken.kisTokenExpiresAt =
+        Date.now() + (response.data.expires_in - 60) * 1000;
 
-    console.log("KIS Access Token has been issued successfully.");
-    return accessToken!;
-  } catch (error) {
-    console.error("Failed to get KIS access token:", error);
-    throw new Error("Failed to get KIS access token");
-  }
+      console.log(
+        "[INFO] Shared KIS Access Token has been issued successfully.",
+      );
+      return globalKisToken.kisAccessToken!;
+    } catch (error) {
+      console.error("[ERROR] Failed to get KIS access token:", error);
+      throw new Error("Failed to get KIS access token");
+    } finally {
+      globalKisToken.kisTokenPromise = null;
+    }
+  })();
+
+  return globalKisToken.kisTokenPromise;
 }
 
 async function getDailyOverseasStockData(
   ticker: string,
   exchange: string,
+  stopTimestamp: number = 0,
 ): Promise<StockDataPoint[]> {
   const token = await getAccessToken();
   const allData: StockDataPoint[] = [];
@@ -73,7 +135,7 @@ async function getDailyOverseasStockData(
   while (continueFetching) {
     const params = new URLSearchParams({
       AUTH: "",
-      EXCD: exchange.toUpperCase(), // [FIX] Ensure exchange code is uppercase
+      EXCD: exchange.toUpperCase(),
       SYMB: ticker,
       GUBN: "0",
       BYMD: currentBymd,
@@ -81,16 +143,17 @@ async function getDailyOverseasStockData(
     }).toString();
 
     try {
-      const response = await axios.get(
+      const response = await fetchWithRetry(
         `${KIS_API_URL}/uapi/overseas-price/v1/quotations/dailyprice?${params}`,
         {
+          method: "GET",
           headers: {
             "Content-Type": "application/json; charset=utf-8",
             Authorization: `Bearer ${token}`,
             appkey: KIS_APP_KEY,
             appsecret: KIS_APP_SECRET,
             tr_id: "HHDFS76240000",
-            custtype: "P", // [FIX] Add customer type header (P = Personal)
+            custtype: "P",
           },
         },
       );
@@ -106,21 +169,23 @@ async function getDailyOverseasStockData(
         volume: parseFloat(item.tvol),
       }));
 
-      if (chunk.length === 0) {
-        continueFetching = false;
-        break;
-      }
+      if (chunk.length === 0) break;
       allData.push(...chunk);
 
       const lastDate = new Date(chunk[chunk.length - 1].date);
-      if (lastDate <= twoYearsAgo) {
+
+      if (lastDate <= twoYearsAgo || lastDate.getTime() <= stopTimestamp) {
         continueFetching = false;
       } else {
         lastDate.setDate(lastDate.getDate() - 1);
         currentBymd = lastDate.toISOString().slice(0, 10).replace(/-/g, "");
       }
+
+      if (continueFetching) {
+        await sleep(300);
+      }
     } catch (error) {
-      console.error(`Error fetching daily data for ${ticker}:`, error);
+      console.error(`[ERROR] Fetching daily data for ${ticker}:`, error);
       throw error;
     }
   }
@@ -132,18 +197,24 @@ async function getDailyOverseasStockData(
 
 export async function getDailyStockData(
   ticker: string,
+  stopTimestamp: number = 0,
 ): Promise<StockDataPoint[]> {
   const stockInfo = stockConfig.us_stocks.find(
     (t) => t.ticker.toUpperCase() === ticker.toUpperCase(),
   );
   if (!stockInfo) throw new Error(`Ticker ${ticker} not in stock.json`);
-  return getDailyOverseasStockData(stockInfo.ticker, stockInfo.exchange);
+  return getDailyOverseasStockData(
+    stockInfo.ticker,
+    stockInfo.exchange,
+    stopTimestamp,
+  );
 }
 
 export async function getMinuteStockData(
   ticker: string,
   gap: number = 15,
-  maxPages: number = 10, // Default to fetch up to 10 pages (~1200 records)
+  maxPages: number = 10,
+  stopTimestamp: number = 0,
 ): Promise<StockDataPoint[]> {
   const stockInfo = stockConfig.us_stocks.find(
     (t) => t.ticker.toUpperCase() === ticker.toUpperCase(),
@@ -158,15 +229,13 @@ export async function getMinuteStockData(
   let currentKeyb = "";
   let pageCount = 0;
 
-  console.log(`Starting pagination to fetch minute data for ${ticker}`);
-
   while (continueFetching && pageCount < maxPages) {
     const params = new URLSearchParams({
       AUTH: "",
-      EXCD: stockInfo.exchange.toUpperCase(), // Ensure exchange code is uppercase
+      EXCD: stockInfo.exchange.toUpperCase(),
       SYMB: ticker,
       NMIN: gap.toString(),
-      PINC: "1", // Set to "1" to include previous day's data
+      PINC: "1",
       NEXT: currentNext,
       NREC: "120",
       FILL: "",
@@ -174,29 +243,25 @@ export async function getMinuteStockData(
     }).toString();
 
     try {
-      const response = await axios.get(
+      const response = await fetchWithRetry(
         `${KIS_API_URL}/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice?${params}`,
         {
+          method: "GET",
           headers: {
             "Content-Type": "application/json; charset=utf-8",
             Authorization: `Bearer ${token}`,
             appkey: KIS_APP_KEY,
             appsecret: KIS_APP_SECRET,
-            tr_id: "HHDFS76950200", // Corrected TR_ID for overseas minute chart
-            custtype: "P", // Add customer type header (P = Personal)
+            tr_id: "HHDFS76950200",
+            custtype: "P",
           },
         },
       );
 
-      if (response.data.rt_cd !== "0") {
-        console.error(`[KIS API Error] ${ticker}: ${response.data.msg1}`);
-        throw new Error(response.data.msg1);
-      }
+      if (response.data.rt_cd !== "0") throw new Error(response.data.msg1);
 
       const output2 = response.data.output2 || [];
-      if (output2.length === 0) {
-        break;
-      }
+      if (output2.length === 0) break;
 
       const chunk: StockDataPoint[] = output2
         .map((item: KisMinuteStockItem) => ({
@@ -209,42 +274,32 @@ export async function getMinuteStockData(
         }))
         .filter((item: StockDataPoint) => !isNaN(item.close) && item.close > 0);
 
-      if (chunk.length === 0) {
-        continueFetching = false;
-        break;
-      }
-
+      if (chunk.length === 0) break;
       allData.push(...chunk);
 
-      // Check if there is more data to fetch based on KIS API rules
-      if (output2.length < 120) {
+      const lastItemDate = new Date(chunk[chunk.length - 1].date).getTime();
+      if (lastItemDate <= stopTimestamp || output2.length < 120) {
         continueFetching = false;
       } else {
-        currentNext = "1"; // Update NEXT to 1 for subsequent requests
+        currentNext = "1";
         const lastItem = output2[output2.length - 1];
-        currentKeyb = lastItem.xymd + lastItem.xhms; // Update KEYB with the last item's date and time
+        currentKeyb = lastItem.xymd + lastItem.xhms;
       }
 
       pageCount++;
 
-      // Delay to avoid hitting API rate limits
       if (continueFetching) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await sleep(200);
       }
     } catch (error) {
       console.error(
-        `Error fetching minute data for ${ticker} on page ${pageCount}:`,
+        `[ERROR] Fetching minute data for ${ticker} on page ${pageCount}:`,
         error,
       );
       throw error;
     }
   }
 
-  console.log(
-    `Completed fetching minute data for ${ticker}, total pages: ${pageCount}, total records: ${allData.length}`,
-  );
-
-  // Deduplicate and sort data
   return Array.from(
     new Map(allData.map((item) => [item.date, item])).values(),
   ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());

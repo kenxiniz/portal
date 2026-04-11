@@ -1,3 +1,5 @@
+/* /lib/telegramUtils.ts */
+
 export async function sendTelegramMessage(message: string) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -12,7 +14,7 @@ export async function sendTelegramMessage(message: string) {
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
   try {
-    console.log("[Telegram] Attempting to send message to Telegram bot.");
+    console.log(`[Telegram] Attempting to send message to chat ${chatId}.`);
 
     const response = await fetch(url, {
       method: "POST",
@@ -27,13 +29,22 @@ export async function sendTelegramMessage(message: string) {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `[Telegram] HTTP request failed with status: ${response.status}`,
-      );
+      // Extract raw text to expose exact Telegram API rejection reason
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status} - ${errorText}`);
     }
 
     console.log("[Telegram] Message sent successfully.");
-  } catch (error) {
-    console.error("[Telegram] Failed to send message.", error);
+  } catch (error: unknown) {
+    // Log separately to prevent object serialization issues
+    console.error(
+      `[Telegram] Failed to send message to chat ${chatId}. Reason:`,
+    );
+
+    if (error instanceof Error) {
+      console.error(error.message);
+    } else {
+      console.error(String(error));
+    }
   }
 }

@@ -21,7 +21,6 @@ import { TickerAdvice } from "../../../../lib/models/advice";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// --- Global In-Memory Cache Setup ---
 type CachePayload = {
   data: StockDataPoint[];
   signals: TradingSignal[];
@@ -43,7 +42,6 @@ if (process.env.NODE_ENV !== "production") {
   globalCache.kStockApiCache = apiCache;
 }
 
-// Helper to get today's date string in KST
 const getTodayKST = () => {
   const now = new Date();
   const kstOffset = 9 * 60 * 60 * 1000;
@@ -53,9 +51,8 @@ const getTodayKST = () => {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const ticker = url.pathname.split("/").pop();
-
-  // Get query parameters
   const timeframe = url.searchParams.get("timeframe") || "1d";
+  const isForceRefresh = url.searchParams.get("refresh") === "true";
 
   if (!ticker) {
     return NextResponse.json({ error: "Ticker is required" }, { status: 400 });
@@ -67,63 +64,93 @@ export async function GET(request: Request) {
   try {
     await connectDB();
 
-    // Fetch AI advice directly from DB before checking memory cache
     const adviceDoc = (await TickerAdvice.findOne({ ticker }).lean()) as {
       advice?: object;
     } | null;
     const latestAdvice = adviceDoc?.advice || null;
 
-    // --- Step 0: Check In-Memory Cache (Always prioritized) ---
-    if (apiCache.has(cacheKey)) {
+    // --- Step 1: Memory Cache ---
+    if (apiCache.has(cacheKey) && !isForceRefresh) {
       const cachedData = apiCache.get(cacheKey)!;
-
       const isToday = cachedData.fetchDate === todayStr;
-      const isIntradayFresh =
-        timeframe === "1d" ||
-        Date.now() - cachedData.timestamp < 1000 * 60 * 15;
+      const isFresh = Date.now() - cachedData.timestamp < 10 * 1000; // 10초 유지
 
-      if (isToday && isIntradayFresh) {
+      if (isToday && isFresh) {
         console.log(
           `[INFO] [${ticker}] KR Cache HIT (Memory) for ${timeframe}`,
         );
-
-        // Inject the latest advice into the cached payload before returning
         cachedData.payload.advice = latestAdvice as AdviceObject | null;
         return NextResponse.json(cachedData.payload);
       }
     }
 
-    console.log(`[INFO] [${ticker}] Requesting: ${timeframe}`);
-
-    // --- Step 1: Check Database (Prioritized over API call) ---
-    // forceRefresh param is set to false to strictly check DB first
-    let dbData = await getCandles("KR", ticker, timeframe, 500, false);
-    const fromDB = dbData && dbData.length > 0;
-
-    if (fromDB) {
+    if (isForceRefresh) {
       console.log(
-        `[INFO] [${ticker}] KR Cache HIT (Database) for ${timeframe}`,
+        `[INFO] [${ticker}] Manual refresh requested. Bypassing Memory Cache.`,
       );
     }
 
-    // --- Step 2: Fetch from REST API (Only if DB miss) ---
-    if (!fromDB) {
-      console.log(
-        `[INFO] [${ticker}] KR Syncing ${timeframe} data from KIS API...`,
-      );
+    // --- Step 2: Fetch DB & Deduplicate Early ---
+    const rawDbData = await getCandles("KR", ticker, timeframe, 1500, false);
+    const dbMap = new Map();
 
-      let apiData: StockDataPoint[] = [];
-
-      if (timeframe === "1d") {
-        apiData = await getDailyKoreanStockData(ticker);
-      } else {
-        const gap = timeframe === "1h" ? 60 : 15;
-        apiData = await getMinuteKoreanStockData(ticker, gap, 80);
+    if (rawDbData && rawDbData.length > 0) {
+      for (const c of rawDbData) {
+        dbMap.set(new Date(c.timestamp).getTime(), c);
       }
+    }
 
-      if (apiData && apiData.length > 0) {
-        // Use bulk insert instead of loop for massive performance boost
-        const formattedCandles = apiData.map((candle) => ({
+    const uniqueDbCandles = Array.from(dbMap.values()).sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+
+    let latestDbTimestamp = 0;
+    if (uniqueDbCandles.length > 0) {
+      latestDbTimestamp = new Date(
+        uniqueDbCandles[uniqueDbCandles.length - 1].timestamp,
+      ).getTime();
+    }
+
+    // --- Step 3: Self-Healing & Calculate API Fetch Boundary ---
+    let stopTimestamp = 0;
+    const now = Date.now();
+
+    if (uniqueDbCandles.length < 30) {
+      if (timeframe === "1d") {
+        stopTimestamp = now - 40 * 24 * 60 * 60 * 1000;
+      } else {
+        stopTimestamp = now - 5 * 24 * 60 * 60 * 1000;
+      }
+      console.log(
+        `[WARN] [${ticker}] DB is bloated or empty. Force fetching history down to: ${new Date(stopTimestamp).toISOString()}`,
+      );
+    } else {
+      stopTimestamp = latestDbTimestamp;
+    }
+
+    // --- Step 4: Fetch from API ---
+    let apiData: StockDataPoint[] = [];
+
+    if (timeframe === "1d") {
+      apiData = await getDailyKoreanStockData(ticker, stopTimestamp);
+    } else {
+      const gap = timeframe === "1h" ? 60 : 15;
+      apiData = await getMinuteKoreanStockData(ticker, gap, 60, stopTimestamp);
+    }
+
+    // --- Step 5: Strictly Filter & Save ---
+    if (apiData && apiData.length > 0) {
+      const newDataToSave = apiData.filter((candle) => {
+        return new Date(candle.date).getTime() >= latestDbTimestamp;
+      });
+
+      if (newDataToSave.length > 0) {
+        console.log(
+          `[INFO] [${ticker}] Upserting ${newDataToSave.length} exact matching records to DB...`,
+        );
+
+        const formattedCandles = newDataToSave.map((candle) => ({
           timestamp: candle.date,
           open: candle.open,
           high: candle.high,
@@ -133,16 +160,38 @@ export async function GET(request: Request) {
         }));
 
         await saveCandlesBulk("KR", ticker, timeframe, formattedCandles);
-        dbData = await getCandles("KR", ticker, timeframe, 500, true);
       }
     }
 
-    if (dbData && dbData.length > 0) {
-      // 4. Transform for Technical Analysis
-      const sortedData = [...dbData].sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
+    // --- Step 6: Memory Merge (Bulletproof Chart Rendering) ---
+    const finalMap = new Map();
+
+    for (const c of uniqueDbCandles) {
+      finalMap.set(new Date(c.timestamp).getTime(), c);
+    }
+
+    if (apiData && apiData.length > 0) {
+      for (const c of apiData) {
+        finalMap.set(new Date(c.date).getTime(), {
+          timestamp: c.date,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+        });
+      }
+    }
+
+    const finalData = Array.from(finalMap.values());
+
+    if (finalData.length > 0) {
+      const sortedData = finalData
+        .sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        )
+        .slice(-500);
 
       const mappedData = sortedData.map((c) => ({
         date:
@@ -159,21 +208,18 @@ export async function GET(request: Request) {
         volume: c.volume,
       }));
 
-      // 5. Calculate Indicators
       const processedData = calculateBollingerBands(calculateRSI(mappedData));
       const signals = analyzeAllTradingSignals(
         processedData,
         timeframe as "1d" | "1h" | "15m",
       );
 
-      // Define payload matching the proper interface
       const responsePayload: CachePayload = {
         data: processedData,
         signals,
         advice: latestAdvice as AdviceObject | null,
       };
 
-      // --- Save to In-Memory Cache ---
       apiCache.set(cacheKey, {
         fetchDate: todayStr,
         timestamp: Date.now(),
