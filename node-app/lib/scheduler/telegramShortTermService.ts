@@ -1,6 +1,7 @@
 /* lib/scheduler/telegramShortTermService.ts */
 
-import axios, { AxiosError } from "axios";
+import axios from "axios";
+import https from "https"; // 💡 https 모듈 추가
 import { schedulerConfig } from "./config";
 import { TradingSignal } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
@@ -30,14 +31,17 @@ interface StockConfigItem {
   isInverse?: boolean;
 }
 
+// 💡 전역적으로 IPv4 강제 에이전트 생성
+const ipv4Agent = new https.Agent({ family: 4 });
+
 export class TelegramShortTermService {
-  private botToken: string | undefined = process.env.TELEGRAM_BOT_TOKEN;
+  private botToken: string | undefined = process.env.TELEGRAM_BOT_TOKEN?.trim();
   private shortTermChatIds: string[] = [];
 
   private static sentSignalCache: Record<string, string> = {};
 
   constructor() {
-    const rawShortTermIds = process.env.TELEGRAM_CHAT_IDS;
+    const rawShortTermIds = process.env.TELEGRAM_CHAT_IDS?.trim();
 
     // 환경 변수 문자열을 쉼표(,) 기준으로 분리하여 배열로 저장 (중복 제거 포함)
     if (rawShortTermIds) {
@@ -211,19 +215,23 @@ export class TelegramShortTermService {
               disable_web_page_preview: true,
             };
 
-            await axios.post(url, payload);
+            // 💡 롱텀과 동일하게 IPv4 강제 옵션 주입
+            await axios.post(url, payload, { httpsAgent: ipv4Agent });
             console.log(
               `[Scheduler] Sent short-term realtime signal for ${ticker} to chat ${chatId}`,
             );
-          } catch (error) {
+          } catch (error: unknown) {
             TelegramShortTermService.sentSignalCache[cacheKey] =
               lastSentDate || "";
 
-            const axiosError = error as AxiosError;
+            // 💡 롱텀과 동일하게 에러 객체 통째로 출력되도록 개선
+            console.error(`======================================`);
             console.error(
-              `[Scheduler] Failed to send short-term signal to ${chatId}:`,
-              axiosError.response?.data || axiosError.message,
+              `[Scheduler Error] Failed to send short-term signal to ${chatId}`,
             );
+            console.error("RAW ERROR OBJECT:");
+            console.error(error);
+            console.error(`======================================`);
           }
         }
       });

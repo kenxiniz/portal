@@ -385,7 +385,7 @@ export default function KisStockPage() {
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
-              1시간 봉
+              1시간 봉 (단타)
             </button>
             <button
               onClick={() => setSelectedTimeframe("15m")}
@@ -395,7 +395,7 @@ export default function KisStockPage() {
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
-              15분 봉
+              15분 봉 (단타)
             </button>
           </div>
 

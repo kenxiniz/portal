@@ -1,6 +1,7 @@
 /* lib/scheduler/telegramLongTermService.ts */
 
-import axios, { AxiosError } from "axios";
+import axios from "axios";
+import https from "https"; // 💡 https 모듈 추가
 import { schedulerConfig } from "./config";
 import { StockSignalInfo } from "./types";
 import { LottoSet } from "@/types/lotto";
@@ -32,7 +33,6 @@ interface StockConfigItem {
   isInverse?: boolean;
 }
 
-// ESLint 에러 방지 및 주가 데이터 안전 추출용 확장 인터페이스
 interface ExtendedTradingSignal extends TradingSignal {
   price?: number;
   close?: number;
@@ -44,8 +44,11 @@ interface ExtendedStockSignalInfo extends StockSignalInfo {
   profitRate?: number;
 }
 
+// 💡 전역적으로 IPv4 강제 에이전트 생성
+const ipv4Agent = new https.Agent({ family: 4 });
+
 export class TelegramLongTermService {
-  private botToken: string | undefined = process.env.TELEGRAM_BOT_TOKEN;
+  private botToken: string | undefined = process.env.TELEGRAM_BOT_TOKEN?.trim();
   private longTermChatIds: string[] = [];
 
   private static sentSignalCache: Record<string, string> = {};
@@ -96,16 +99,17 @@ export class TelegramLongTermService {
           payload.reply_markup = replyMarkup;
         }
 
-        await axios.post(url, payload);
+        // 💡 httpsAgent 옵션을 주입하여 IPv6 접속 시도를 원천 차단
+        await axios.post(url, payload, { httpsAgent: ipv4Agent });
         console.log(`Successfully sent Telegram message to chat: ${chatId}`);
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        const axiosError = error as AxiosError;
+      } catch (error: unknown) {
+        console.error(`======================================`);
         console.error(
-          `Failed to send Telegram message to chat ${chatId}:`,
-          axiosError.response?.data || errorMessage,
+          `[Telegram Error] Failed to send message to chat ${chatId}`,
         );
+        console.error("RAW ERROR OBJECT:");
+        console.error(error);
+        console.error(`======================================`);
       }
     });
 
@@ -236,15 +240,19 @@ export class TelegramLongTermService {
               disable_web_page_preview: true,
             };
 
-            await axios.post(url, payload);
-          } catch (error) {
+            // 💡 여기도 동일하게 IPv4 강제 옵션 추가
+            await axios.post(url, payload, { httpsAgent: ipv4Agent });
+          } catch (error: unknown) {
             TelegramLongTermService.sentSignalCache[cacheKey] =
               lastSentDate || "";
-            const axiosError = error as AxiosError;
+
+            console.error(`======================================`);
             console.error(
-              `[Scheduler] Failed to send long-term signal to ${chatId}:`,
-              axiosError.response?.data || axiosError.message || String(error),
+              `[Scheduler Error] Failed to send long-term signal to ${chatId}`,
             );
+            console.error("RAW ERROR OBJECT:");
+            console.error(error);
+            console.error(`======================================`);
           }
         }
       });
@@ -261,7 +269,6 @@ export class TelegramLongTermService {
     let holdingSummary = `<b>💸 [내 계좌 요약 (보유 중)]</b>\n`;
     let holdingCount = 0;
 
-    // 상단 수익률 요약 로직
     signals.forEach((item) => {
       const { name, currentSignal, lastMeaningfulSignal } = item;
       const isHold = currentSignal.type === "hold";
@@ -342,7 +349,6 @@ export class TelegramLongTermService {
 
     message += holdingSummary + `\n━━━━━━━━━━━━━━━━━━\n\n`;
 
-    // 하단 상세 목록 로직
     signals.forEach((item: StockSignalInfo, index: number) => {
       const { name, currentSignal, lastMeaningfulSignal, advice } = item;
       const isHold = currentSignal.type === "hold";
@@ -396,7 +402,6 @@ export class TelegramLongTermService {
 
           if (profitRate !== null && !isNaN(profitRate)) {
             const sign = profitRate > 0 ? "+" : "";
-            // 어색한 '개이득 중 진행 중' 표현을 '개이득 진행 중'으로 나오게끔 '중' 글자를 제외했습니다.
             const color =
               profitRate > 0 ? "개이득" : profitRate < 0 ? "눈물" : "본전";
             profitRateText = `\n<b>💸 지금까지 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
