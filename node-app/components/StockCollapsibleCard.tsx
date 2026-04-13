@@ -109,10 +109,38 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   const chartRef = useRef<StockChartDisplayHandles>(null);
   const cardContainerRef = useRef<HTMLDivElement>(null);
 
-  // 환경 변수에서 수익률 계산 기간(년)을 가져옵니다. 기본값은 1년입니다.
   const historyYears = Number(process.env.NEXT_PUBLIC_HISTORY_YEARS) || 1;
 
+  // 💡 핵심 로직: 현재 들고 있는 데이터의 실제 시간 간격(Timeframe)을 분석하여 엇갈림 완벽 차단
+  const isDataMismatch = useMemo(() => {
+    if (!tickerState.data || tickerState.data.length < 2) return false;
+
+    // 최근 5개의 데이터 포인트 간격을 검사하여 가장 짧은 간격을 찾습니다. (주말/휴장일 건너뜀 방지)
+    let minDiffHours = Infinity;
+    const startIdx = Math.max(1, tickerState.data.length - 5);
+    for (let i = startIdx; i < tickerState.data.length; i++) {
+      const t1 = new Date(
+        tickerState.data[i - 1].date.replace(" ", "T"),
+      ).getTime();
+      const t2 = new Date(tickerState.data[i].date.replace(" ", "T")).getTime();
+      const diffHours = Math.abs(t2 - t1) / (1000 * 60 * 60);
+      if (diffHours < minDiffHours) minDiffHours = diffHours;
+    }
+
+    let actualTf = "1d";
+    if (minDiffHours <= 0.5)
+      actualTf = "15m"; // 15분은 0.25시간
+    else if (minDiffHours <= 4.0) actualTf = "1h"; // 1시간 봉
+
+    // 사용자가 선택한 timeframe과 실제 데이터의 timeframe이 다르면 true 반환
+    return actualTf !== timeframe;
+  }, [tickerState.data, timeframe]);
+
+  // 데이터 갱신 중이거나, 버튼을 눌렀지만 아직 새 데이터가 도착하지 않았을 때(Mismatch) true
+  const isUpdating = tickerState.loading || isDataMismatch;
+
   const targetSignal = useMemo(() => {
+    if (isUpdating) return null; // 💡 갱신 중일 땐 계산 원천 차단
     if (!Array.isArray(tickerState.signals) || tickerState.signals.length === 0)
       return null;
     for (let i = tickerState.signals.length - 1; i >= 0; i--) {
@@ -121,7 +149,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
       }
     }
     return null;
-  }, [tickerState.signals]);
+  }, [tickerState.signals, isUpdating]);
 
   const isInverseStock = useMemo(() => {
     const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
@@ -137,7 +165,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     return false;
   }, [tickerSymbol]);
 
-  // 수익률 집계의 기준이 되는 컷오프(Cutoff) 날짜를 계산합니다.
   const cutoffDate = useMemo(() => {
     const date = new Date();
     date.setFullYear(date.getFullYear() - historyYears);
@@ -175,7 +202,12 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   const currentPrice = tickerState.data?.at(-1)?.close;
 
   const currentProfitRate = useMemo(() => {
-    if (!targetSignal || !currentPrice || targetSignal.entryPrice === undefined)
+    if (
+      isUpdating || // 💡 갱신 중일 땐 쓰레기 값 계산 차단
+      !targetSignal ||
+      !currentPrice ||
+      targetSignal.entryPrice === undefined
+    )
       return null;
 
     if (targetSignal.type === "buy") {
@@ -190,12 +222,11 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
       );
     }
     return null;
-  }, [targetSignal, currentPrice]);
+  }, [targetSignal, currentPrice, isUpdating]);
 
-  // 💡 매도 시점 기준으로 전체 시그널을 순회하며 수익률과 표시할 내역을 동시에 계산합니다.
   const { historicalSignals, cumulativeProfitRate } = useMemo(() => {
-    if (!Array.isArray(tickerState.signals))
-      return { historicalSignals: [], cumulativeProfitRate: null };
+    if (isUpdating || !Array.isArray(tickerState.signals))
+      return { historicalSignals: [], cumulativeProfitRate: null }; // 💡 갱신 중엔 빈 배열 반환
 
     let oldestChartDate = new Date(0);
     if (tickerState.data && tickerState.data.length > 0) {
@@ -227,7 +258,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
         currentPositionType = signal.type;
         currentBuySignal = signal;
 
-        // 매수 시점이 윈도우(최근 1년 등) 이내라면 목록에 먼저 추가합니다.
         if (isWithinWindow) {
           validDisplaySignals.push(signal);
         }
@@ -237,7 +267,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
             (isInverseStock && currentPositionType === "buy") ||
             (!isInverseStock && currentPositionType === "inverse-buy");
 
-          // 매도 시점이 윈도우 이내일 때만 누적 수익률 계산에 포함합니다.
           if (isWithinWindow) {
             if (
               !isHighRisk &&
@@ -251,7 +280,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
               }
             }
 
-            // 매도 시점은 1년 이내인데 매수 시점이 1년 밖이어서 목록에 안 들어갔다면, 짝을 맞추기 위해 강제로 추가해 줍니다.
             if (
               currentBuySignal &&
               new Date(
@@ -284,9 +312,11 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     timeframe,
     cutoffDate,
     isInverseStock,
+    isUpdating,
   ]);
 
   const getCardTitleClassName = () => {
+    if (isUpdating) return "text-slate-400 dark:text-slate-500";
     if (!targetSignal) return "";
     const { type } = targetSignal;
 
@@ -345,38 +375,47 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
               >
                 <span className="font-bold">{displayName}</span>
 
-                {targetSignal &&
-                  targetSignal.type.includes("buy") &&
-                  currentProfitRate !== null && (
-                    <span className="font-normal text-base ml-1.5">
-                      {(() => {
-                        const isHighRisk =
-                          (isInverseStock && targetSignal.type === "buy") ||
-                          (!isInverseStock &&
-                            targetSignal.type === "inverse-buy");
-                        const sign = currentProfitRate > 0 ? "+" : "";
+                {/* 💡 전환/로딩 중일 때는 깜빡이는 대기 문구 출력 */}
+                {isUpdating ? (
+                  <span className="font-normal text-base ml-1.5 text-slate-400 dark:text-slate-500 animate-pulse">
+                    [수익률 갱신 중...]
+                  </span>
+                ) : (
+                  <>
+                    {targetSignal &&
+                      targetSignal.type.includes("buy") &&
+                      currentProfitRate !== null && (
+                        <span className="font-normal text-base ml-1.5">
+                          {(() => {
+                            const isHighRisk =
+                              (isInverseStock && targetSignal.type === "buy") ||
+                              (!isInverseStock &&
+                                targetSignal.type === "inverse-buy");
+                            const sign = currentProfitRate > 0 ? "+" : "";
 
-                        if (isHighRisk) {
-                          return `[인버스 보유 중: ${sign}${currentProfitRate.toFixed(2)}% (매매 참고용)]`;
-                        } else {
-                          return `[보유 중: ${sign}${currentProfitRate.toFixed(2)}%]`;
-                        }
-                      })()}
-                    </span>
-                  )}
+                            if (isHighRisk) {
+                              return `[인버스 보유 중: ${sign}${currentProfitRate.toFixed(2)}% (매매 참고용)]`;
+                            } else {
+                              return `[보유 중: ${sign}${currentProfitRate.toFixed(2)}%]`;
+                            }
+                          })()}
+                        </span>
+                      )}
 
-                {targetSignal &&
-                  targetSignal.type === "sell" &&
-                  cumulativeProfitRate !== null && (
-                    <span className="font-normal text-base ml-1.5">
-                      [
-                      {timeframe === "1d"
-                        ? `${historyYears}년 수익률`
-                        : "누적 수익률"}
-                      : {cumulativeProfitRate > 0 ? "+" : ""}
-                      {cumulativeProfitRate.toFixed(2)}%]
-                    </span>
-                  )}
+                    {targetSignal &&
+                      targetSignal.type === "sell" &&
+                      cumulativeProfitRate !== null && (
+                        <span className="font-normal text-base ml-1.5">
+                          [
+                          {timeframe === "1d"
+                            ? `${historyYears}년 수익률`
+                            : "누적 수익률"}
+                          : {cumulativeProfitRate > 0 ? "+" : ""}
+                          {cumulativeProfitRate.toFixed(2)}%]
+                        </span>
+                      )}
+                  </>
+                )}
               </CardTitle>
               <div className="flex items-center space-x-2 shrink-0">
                 {isMainDataLoading && (
@@ -402,7 +441,12 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
           </CollapsibleTrigger>
           <CollapsibleContent>
             <CardContent className="pt-4 pb-4 px-4">
-              {historicalSignals.length > 0 ? (
+              {/* 💡 테이블 역시 전환 중일 때는 엉뚱한 내역이 번쩍거리는 것을 막습니다. */}
+              {isUpdating ? (
+                <div className="my-8 text-center text-slate-400 dark:text-slate-500 text-sm animate-pulse">
+                  매매 내역을 불러오는 중입니다...
+                </div>
+              ) : historicalSignals.length > 0 ? (
                 <div className="my-4">
                   <h4 className="text-sm font-semibold mb-2 text-slate-600 dark:text-slate-400">
                     {timeframe === "1d"
