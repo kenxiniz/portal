@@ -1,4 +1,5 @@
 /* lib/marketTime.ts */
+
 export function isMarketOpen(market: "KR" | "US"): boolean {
   const now = new Date();
   const timeZone = market === "KR" ? "Asia/Seoul" : "America/New_York";
@@ -22,7 +23,10 @@ export function isMarketOpen(market: "KR" | "US"): boolean {
   if (day === "Sat" || day === "Sun") return false;
 
   const timeInt = hour * 100 + minute;
+
+  // KR: 한국 정규장 (09:00 ~ 15:30)
+  // US: 뉴욕 프리마켓 시작(04:00) ~ 애프터마켓 종료(20:00)
   return market === "KR"
     ? timeInt >= 900 && timeInt <= 1530
-    : timeInt >= 930 && timeInt <= 1600;
+    : timeInt >= 400 && timeInt <= 2000; // 💡 930->400, 1600->2000으로 수정됨
 }
