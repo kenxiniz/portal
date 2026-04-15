@@ -21,6 +21,7 @@ import {
   LogicalRange,
   IChartApi,
   ISeriesApi,
+  IPriceLine,
 } from "lightweight-charts";
 
 interface StockChartDisplayProps {
@@ -36,7 +37,7 @@ export interface StockChartDisplayHandles {
   moveToDate: (date: string) => void;
 }
 
-// 💡 MACD Reloaded 핵심: 카우프만 적응형 이동평균(KAMA) 헬퍼 함수
+// Calculate Kaufman's Adaptive Moving Average (KAMA) for MACD Reloaded
 const calculateKAMA = (
   data: number[],
   period: number,
@@ -59,9 +60,7 @@ const calculateKAMA = (
     for (let j = 0; j < period; j++) {
       volatility += Math.abs(data[i - j] - data[i - j - 1]);
     }
-    // Efficiency Ratio: 가격 변화량 대비 변동성 비율
     const er = volatility === 0 ? 0 : change / volatility;
-    // 평활화 상수 조절
     const sc = Math.pow(er * (fastest - slowest) + slowest, 2);
     kama[i] =
       (kama[i - 1] as number) + sc * (data[i] - (kama[i - 1] as number));
@@ -113,6 +112,8 @@ export const StockChartDisplay = forwardRef<
       macdDummy: null,
     });
 
+    // Reference to hold the probability zone price lines to clean them up on updates
+    const priceLinesRef = useRef<IPriceLine[]>([]);
     const isInitialZoomApplied = useRef(false);
 
     useEffect(() => {
@@ -247,12 +248,12 @@ export const StockChartDisplay = forwardRef<
       });
 
       const upperSeries = mainChart.addSeries(LineSeries, {
-        color: "#ccc",
+        color: "rgba(204, 204, 204, 0.5)",
         lineWidth: 1,
         lineStyle: 2,
       });
       const lowerSeries = mainChart.addSeries(LineSeries, {
-        color: "#ccc",
+        color: "rgba(204, 204, 204, 0.5)",
         lineWidth: 1,
         lineStyle: 2,
       });
@@ -357,6 +358,7 @@ export const StockChartDisplay = forwardRef<
           dummy: null,
           macdDummy: null,
         };
+        priceLinesRef.current = [];
       };
     }, [gridStrokeColor, timeframe]);
 
@@ -451,13 +453,89 @@ export const StockChartDisplay = forwardRef<
         )
         .map((d) => ({ time: d.chartTime, value: d.bollingerBands!.lower }));
 
+      const closePrices = uniqueValidData.map((d) => Number(d.close));
+
+      // 1. Calculate Reversal Probability Zones (Horizontal Box/Levels)
+      // Clean up previous probability lines
+      if (seriesRef.current.candle) {
+        priceLinesRef.current.forEach((pl) => {
+          seriesRef.current.candle?.removePriceLine(pl);
+        });
+        priceLinesRef.current = [];
+
+        // Calculate statistics using up to the last 1000 candles
+        const lookbackPeriod = Math.min(1000, closePrices.length);
+        if (lookbackPeriod > 10) {
+          const recentPrices = closePrices.slice(-lookbackPeriod);
+          const mean = recentPrices.reduce((a, b) => a + b, 0) / lookbackPeriod;
+          const variance =
+            recentPrices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) /
+            lookbackPeriod;
+          const sd = Math.sqrt(variance);
+
+          // Define Z-Scores for probability thresholds
+          const levels = [
+            {
+              price: mean + 1.645 * sd,
+              title: "90%",
+              color: "rgba(239, 83, 80, 0.8)",
+            },
+            {
+              price: mean + 1.15 * sd,
+              title: "75%",
+              color: "rgba(239, 83, 80, 0.6)",
+            },
+            {
+              price: mean + 0.67 * sd,
+              title: "50%",
+              color: "rgba(239, 83, 80, 0.4)",
+            },
+            {
+              price: mean + 0.32 * sd,
+              title: "25%",
+              color: "rgba(239, 83, 80, 0.2)",
+            },
+            {
+              price: mean - 0.32 * sd,
+              title: "25%",
+              color: "rgba(38, 166, 154, 0.2)",
+            },
+            {
+              price: mean - 0.67 * sd,
+              title: "50%",
+              color: "rgba(38, 166, 154, 0.4)",
+            },
+            {
+              price: mean - 1.15 * sd,
+              title: "75%",
+              color: "rgba(38, 166, 154, 0.6)",
+            },
+            {
+              price: mean - 1.645 * sd,
+              title: "90%",
+              color: "rgba(38, 166, 154, 0.8)",
+            },
+          ];
+
+          levels.forEach((lvl) => {
+            const pl = seriesRef.current.candle?.createPriceLine({
+              price: lvl.price,
+              color: lvl.color,
+              lineWidth: 1,
+              lineStyle: 2,
+              axisLabelVisible: true,
+              title: lvl.title,
+            });
+            if (pl) priceLinesRef.current.push(pl);
+          });
+        }
+      }
+
       const rsiData = uniqueValidData
         .filter((d) => typeof d.rsi === "number" && !isNaN(d.rsi))
         .map((d) => ({ time: d.chartTime, value: d.rsi! }));
 
-      const closePrices = uniqueValidData.map((d) => Number(d.close));
-
-      // 💡 MACD Reloaded 적용 (KAMA 활용)
+      // 2. Apply MACD Reloaded (KAMA)
       const fastKAMA = calculateKAMA(closePrices, 12);
       const slowKAMA = calculateKAMA(closePrices, 26);
 
@@ -471,7 +549,7 @@ export const StockChartDisplay = forwardRef<
       const signalLineRaw: (number | null)[] = new Array(
         closePrices.length,
       ).fill(null);
-      const macdStartIndex = 25; // slowKAMA가 완성되는 26번째 데이터(인덱스 25)
+      const macdStartIndex = 25;
 
       if (closePrices.length >= macdStartIndex + 9) {
         let sum = 0;
@@ -489,7 +567,6 @@ export const StockChartDisplay = forwardRef<
         }
       }
 
-      // 💡 명시적인 타입 지정으로 ESLint 에러 해결
       const macdLineData: { time: Time; value: number }[] = [];
       const signalLineData: { time: Time; value: number }[] = [];
       const histogramData: { time: Time; value: number; color: string }[] = [];
@@ -514,6 +591,7 @@ export const StockChartDisplay = forwardRef<
         seriesRef.current.candle.setData(candlestickChartData);
         seriesRef.current.upper?.setData(upperData);
         seriesRef.current.lower?.setData(lowerData);
+
         seriesRef.current.rsi?.setData(rsiData);
         seriesRef.current.dummy?.setData(candlestickChartData);
 
@@ -522,7 +600,7 @@ export const StockChartDisplay = forwardRef<
         seriesRef.current.macdHist?.setData(histogramData);
         seriesRef.current.macdDummy?.setData(candlestickChartData);
       } catch (err) {
-        console.error("[CHART ERROR] Failed to update series data:", err);
+        console.error("Failed to update series data", err);
       }
 
       if (!isInitialZoomApplied.current && uniqueValidData.length > 0) {
@@ -544,7 +622,7 @@ export const StockChartDisplay = forwardRef<
           });
           isInitialZoomApplied.current = true;
         } catch (err) {
-          console.error("[CHART ERROR] Failed to set logical range:", err);
+          console.error("Failed to set logical range", err);
         }
       }
     }, [data, signals, timeframe]);
