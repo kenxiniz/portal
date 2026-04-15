@@ -36,15 +36,37 @@ export interface StockChartDisplayHandles {
   moveToDate: (date: string) => void;
 }
 
-// EMA(지수이동평균) 계산 헬퍼 함수
-const calculateEMA = (data: number[], period: number) => {
-  if (data.length === 0) return [];
-  const k = 2 / (period + 1);
-  const ema = [data[0]];
-  for (let i = 1; i < data.length; i++) {
-    ema.push(data[i] * k + ema[i - 1] * (1 - k));
+// 💡 MACD Reloaded 핵심: 카우프만 적응형 이동평균(KAMA) 헬퍼 함수
+const calculateKAMA = (
+  data: number[],
+  period: number,
+  fastEnd = 2,
+  slowEnd = 30,
+): (number | null)[] => {
+  const kama: (number | null)[] = new Array(data.length).fill(null);
+  if (data.length < period) return kama;
+
+  const fastest = 2 / (fastEnd + 1);
+  const slowest = 2 / (slowEnd + 1);
+
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += data[i];
+  kama[period - 1] = sum / period;
+
+  for (let i = period; i < data.length; i++) {
+    const change = Math.abs(data[i] - data[i - period]);
+    let volatility = 0;
+    for (let j = 0; j < period; j++) {
+      volatility += Math.abs(data[i - j] - data[i - j - 1]);
+    }
+    // Efficiency Ratio: 가격 변화량 대비 변동성 비율
+    const er = volatility === 0 ? 0 : change / volatility;
+    // 평활화 상수 조절
+    const sc = Math.pow(er * (fastest - slowest) + slowest, 2);
+    kama[i] =
+      (kama[i - 1] as number) + sc * (data[i] - (kama[i - 1] as number));
   }
-  return ema;
+  return kama;
 };
 
 export const StockChartDisplay = forwardRef<
@@ -235,7 +257,6 @@ export const StockChartDisplay = forwardRef<
         lineStyle: 2,
       });
 
-      // 💡 RSI 라인: 진한 초록색으로 변경
       const rsiLineSeries = rsiChart.addSeries(LineSeries, {
         color: "#2e7d32",
         lineWidth: 2,
@@ -266,13 +287,11 @@ export const StockChartDisplay = forwardRef<
         color: "#26a69a",
       });
 
-      // 💡 MACD 라인: 진한 초록색으로 변경
       const macdLineSeries = macdChart.addSeries(LineSeries, {
         color: "#2e7d32",
         lineWidth: 2,
       });
 
-      // 💡 Signal 라인: 진한 회색으로 변경
       const macdSignalSeries = macdChart.addSeries(LineSeries, {
         color: "#555555",
         lineWidth: 2,
@@ -437,28 +456,58 @@ export const StockChartDisplay = forwardRef<
         .map((d) => ({ time: d.chartTime, value: d.rsi! }));
 
       const closePrices = uniqueValidData.map((d) => Number(d.close));
-      const ema12 = calculateEMA(closePrices, 12);
-      const ema26 = calculateEMA(closePrices, 26);
 
-      const macdLineRaw = closePrices.map((_, i) => ema12[i] - ema26[i]);
-      const signalLineRaw = calculateEMA(macdLineRaw, 9);
-      const histogramRaw = macdLineRaw.map(
-        (macd, i) => macd - signalLineRaw[i],
-      );
+      // 💡 MACD Reloaded 적용 (KAMA 활용)
+      const fastKAMA = calculateKAMA(closePrices, 12);
+      const slowKAMA = calculateKAMA(closePrices, 26);
 
-      const macdLineData = uniqueValidData.map((d, i) => ({
-        time: d.chartTime,
-        value: macdLineRaw[i],
-      }));
-      const signalLineData = uniqueValidData.map((d, i) => ({
-        time: d.chartTime,
-        value: signalLineRaw[i],
-      }));
-      const histogramData = uniqueValidData.map((d, i) => {
-        const val = histogramRaw[i];
-        const color =
-          val >= 0 ? "rgba(38, 166, 154, 0.5)" : "rgba(239, 83, 80, 0.5)";
-        return { time: d.chartTime, value: val, color };
+      const macdLineRaw: (number | null)[] = closePrices.map((_, i) => {
+        if (fastKAMA[i] !== null && slowKAMA[i] !== null) {
+          return (fastKAMA[i] as number) - (slowKAMA[i] as number);
+        }
+        return null;
+      });
+
+      const signalLineRaw: (number | null)[] = new Array(
+        closePrices.length,
+      ).fill(null);
+      const macdStartIndex = 25; // slowKAMA가 완성되는 26번째 데이터(인덱스 25)
+
+      if (closePrices.length >= macdStartIndex + 9) {
+        let sum = 0;
+        for (let i = macdStartIndex; i < macdStartIndex + 9; i++) {
+          sum += macdLineRaw[i] as number;
+        }
+        signalLineRaw[macdStartIndex + 9 - 1] = sum / 9;
+
+        const k = 2 / (9 + 1);
+        for (let i = macdStartIndex + 9; i < closePrices.length; i++) {
+          signalLineRaw[i] =
+            ((macdLineRaw[i] as number) - (signalLineRaw[i - 1] as number)) *
+              k +
+            (signalLineRaw[i - 1] as number);
+        }
+      }
+
+      // 💡 명시적인 타입 지정으로 ESLint 에러 해결
+      const macdLineData: { time: Time; value: number }[] = [];
+      const signalLineData: { time: Time; value: number }[] = [];
+      const histogramData: { time: Time; value: number; color: string }[] = [];
+
+      uniqueValidData.forEach((d, i) => {
+        const macd = macdLineRaw[i];
+        const signal = signalLineRaw[i];
+
+        if (macd !== null) {
+          macdLineData.push({ time: d.chartTime, value: macd });
+        }
+        if (macd !== null && signal !== null) {
+          signalLineData.push({ time: d.chartTime, value: signal });
+          const hist = macd - signal;
+          const color =
+            hist >= 0 ? "rgba(38, 166, 154, 0.5)" : "rgba(239, 83, 80, 0.5)";
+          histogramData.push({ time: d.chartTime, value: hist, color });
+        }
       });
 
       try {
@@ -478,13 +527,12 @@ export const StockChartDisplay = forwardRef<
 
       if (!isInitialZoomApplied.current && uniqueValidData.length > 0) {
         const screenWidth = window.innerWidth;
-        // 💡 모바일 화면에서 한 번에 보이는 캔들 수를 75개 -> 45개로 줄임 (봉이 더 굵고 큼직하게 보임)
         let visibleBarsCount = 55;
 
         if (screenWidth >= 1024) {
-          visibleBarsCount = 150; // PC는 넓으므로 150개 유지
+          visibleBarsCount = 150;
         } else if (screenWidth >= 768) {
-          visibleBarsCount = 80; // 태블릿은 100개 -> 80개로 약간 조정
+          visibleBarsCount = 80;
         }
 
         const lastIndex = uniqueValidData.length - 1;
@@ -492,7 +540,7 @@ export const StockChartDisplay = forwardRef<
         try {
           chartRef.current.main.timeScale().setVisibleLogicalRange({
             from: lastIndex - visibleBarsCount,
-            to: lastIndex + 2, // 오른쪽 여백을 위해 +2
+            to: lastIndex + 2,
           });
           isInitialZoomApplied.current = true;
         } catch (err) {
