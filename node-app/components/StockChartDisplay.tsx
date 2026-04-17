@@ -114,6 +114,7 @@ export const StockChartDisplay = forwardRef<
 
     // Reference to hold the probability zone price lines to clean them up on updates
     const priceLinesRef = useRef<IPriceLine[]>([]);
+    const macdPriceLineRef = useRef<IPriceLine | null>(null);
     const isInitialZoomApplied = useRef(false);
 
     useEffect(() => {
@@ -248,14 +249,14 @@ export const StockChartDisplay = forwardRef<
       });
 
       const upperSeries = mainChart.addSeries(LineSeries, {
-        color: "rgba(204, 204, 204, 0.5)",
+        color: "#000000",
         lineWidth: 1,
-        lineStyle: 2,
+        lineStyle: 1,
       });
       const lowerSeries = mainChart.addSeries(LineSeries, {
-        color: "rgba(204, 204, 204, 0.5)",
+        color: "#000000",
         lineWidth: 1,
-        lineStyle: 2,
+        lineStyle: 1,
       });
 
       const rsiLineSeries = rsiChart.addSeries(LineSeries, {
@@ -359,6 +360,7 @@ export const StockChartDisplay = forwardRef<
           macdDummy: null,
         };
         priceLinesRef.current = [];
+        macdPriceLineRef.current = null;
       };
     }, [gridStrokeColor, timeframe]);
 
@@ -459,7 +461,11 @@ export const StockChartDisplay = forwardRef<
       // Clean up previous probability lines
       if (seriesRef.current.candle) {
         priceLinesRef.current.forEach((pl) => {
-          seriesRef.current.candle?.removePriceLine(pl);
+          try {
+            seriesRef.current.candle?.removePriceLine(pl);
+          } catch {
+            // Ignored
+          }
         });
         priceLinesRef.current = [];
 
@@ -518,15 +524,19 @@ export const StockChartDisplay = forwardRef<
           ];
 
           levels.forEach((lvl) => {
-            const pl = seriesRef.current.candle?.createPriceLine({
-              price: lvl.price,
-              color: lvl.color,
-              lineWidth: 1,
-              lineStyle: 2,
-              axisLabelVisible: true,
-              title: lvl.title,
-            });
-            if (pl) priceLinesRef.current.push(pl);
+            try {
+              const pl = seriesRef.current.candle?.createPriceLine({
+                price: lvl.price,
+                color: lvl.color,
+                lineWidth: 1,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: lvl.title,
+              });
+              if (pl) priceLinesRef.current.push(pl);
+            } catch {
+              // Ignored
+            }
           });
         }
       }
@@ -586,6 +596,74 @@ export const StockChartDisplay = forwardRef<
           histogramData.push({ time: d.chartTime, value: hist, color });
         }
       });
+
+      let macdTitle = "MACD";
+      let macdColor = "#2e7d32";
+      let currMacdVal = 0;
+      const lastIdx = closePrices.length - 1;
+      const prevIdx = lastIdx - 1;
+
+      if (
+        lastIdx > 0 &&
+        macdLineRaw[lastIdx] !== null &&
+        signalLineRaw[lastIdx] !== null &&
+        macdLineRaw[prevIdx] !== null &&
+        signalLineRaw[prevIdx] !== null
+      ) {
+        const currMacd = macdLineRaw[lastIdx] as number;
+        currMacdVal = currMacd;
+        const currSig = signalLineRaw[lastIdx] as number;
+        const prevMacd = macdLineRaw[prevIdx] as number;
+        const prevSig = signalLineRaw[prevIdx] as number;
+
+        if (prevMacd <= prevSig && currMacd > currSig) {
+          macdTitle = "골드";
+          macdColor = "#2e7d32";
+        } else if (prevMacd >= prevSig && currMacd < currSig) {
+          macdTitle = "데드";
+          macdColor = "#ef5350";
+        } else if (currMacd > currSig) {
+          macdTitle = "상승";
+          macdColor = "#2e7d32";
+        } else if (currMacd < currSig) {
+          macdTitle = "하락";
+          macdColor = "#ef5350";
+        }
+      }
+
+      if (seriesRef.current.macdLine) {
+        seriesRef.current.macdLine.applyOptions({
+          title: macdTitle,
+          color: macdColor,
+        });
+
+        if (macdPriceLineRef.current) {
+          try {
+            seriesRef.current.macdLine.removePriceLine(
+              macdPriceLineRef.current,
+            );
+          } catch {
+            // Ignored
+          }
+          macdPriceLineRef.current = null;
+        }
+
+        if (currMacdVal !== 0) {
+          try {
+            macdPriceLineRef.current =
+              seriesRef.current.macdLine.createPriceLine({
+                price: currMacdVal,
+                color: macdColor,
+                lineWidth: 1,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: macdTitle,
+              });
+          } catch {
+            // Ignored
+          }
+        }
+      }
 
       try {
         seriesRef.current.candle.setData(candlestickChartData);
