@@ -1,0 +1,141 @@
+/* lib/charts/indicators.ts */
+
+// 1. KAMA (Kaufman's Adaptive Moving Average)
+export const calculateKAMA = (
+  data: number[],
+  period: number,
+  fastEnd = 2,
+  slowEnd = 30,
+): (number | null)[] => {
+  const kama: (number | null)[] = new Array(data.length).fill(null);
+  if (data.length < period) return kama;
+
+  const fastest = 2 / (fastEnd + 1);
+  const slowest = 2 / (slowEnd + 1);
+
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += data[i];
+  kama[period - 1] = sum / period;
+
+  for (let i = period; i < data.length; i++) {
+    const change = Math.abs(data[i] - data[i - period]);
+    let volatility = 0;
+    for (let j = 0; j < period; j++) {
+      volatility += Math.abs(data[i - j] - data[i - j - 1]);
+    }
+    const er = volatility === 0 ? 0 : change / volatility;
+    const sc = Math.pow(er * (fastest - slowest) + slowest, 2);
+    kama[i] =
+      (kama[i - 1] as number) + sc * (data[i] - (kama[i - 1] as number));
+  }
+  return kama;
+};
+
+// 2. MACD Reloaded
+export const calculateMacdKama = (closePrices: number[]) => {
+  const fastKAMA = calculateKAMA(closePrices, 12);
+  const slowKAMA = calculateKAMA(closePrices, 26);
+
+  const macdLineRaw: (number | null)[] = closePrices.map((_, i) => {
+    if (fastKAMA[i] !== null && slowKAMA[i] !== null) {
+      return (fastKAMA[i] as number) - (slowKAMA[i] as number);
+    }
+    return null;
+  });
+
+  const signalLineRaw: (number | null)[] = new Array(closePrices.length).fill(
+    null,
+  );
+  const macdStartIndex = 25;
+
+  if (closePrices.length >= macdStartIndex + 9) {
+    let sum = 0;
+    for (let i = macdStartIndex; i < macdStartIndex + 9; i++) {
+      sum += macdLineRaw[i] as number;
+    }
+    signalLineRaw[macdStartIndex + 9 - 1] = sum / 9;
+
+    const k = 2 / (9 + 1);
+    for (let i = macdStartIndex + 9; i < closePrices.length; i++) {
+      signalLineRaw[i] =
+        ((macdLineRaw[i] as number) - (signalLineRaw[i - 1] as number)) * k +
+        (signalLineRaw[i - 1] as number);
+    }
+  }
+
+  const histogramRaw: (number | null)[] = macdLineRaw.map((macd, i) => {
+    const sig = signalLineRaw[i];
+    return macd !== null && sig !== null ? macd - sig : null;
+  });
+
+  return { macdLineRaw, signalLineRaw, histogramRaw };
+};
+
+// 3. MACD Real-time Status Tag
+export const getMacdStatus = (
+  macdLineRaw: (number | null)[],
+  signalLineRaw: (number | null)[],
+) => {
+  let title = "MACD";
+  let color = "#2e7d32";
+  let value = 0;
+
+  const lastIdx = macdLineRaw.length - 1;
+  const prevIdx = lastIdx - 1;
+
+  if (
+    lastIdx > 0 &&
+    macdLineRaw[lastIdx] !== null &&
+    signalLineRaw[lastIdx] !== null &&
+    macdLineRaw[prevIdx] !== null &&
+    signalLineRaw[prevIdx] !== null
+  ) {
+    const currMacd = macdLineRaw[lastIdx] as number;
+    value = currMacd;
+    const currSig = signalLineRaw[lastIdx] as number;
+    const prevMacd = macdLineRaw[prevIdx] as number;
+    const prevSig = signalLineRaw[prevIdx] as number;
+
+    if (prevMacd <= prevSig && currMacd > currSig) {
+      title = "골드";
+      color = "#2e7d32";
+    } else if (prevMacd >= prevSig && currMacd < currSig) {
+      title = "데드";
+      color = "#ef5350";
+    } else if (currMacd > currSig) {
+      title = "상승";
+      color = "#2e7d32";
+    } else if (currMacd < currSig) {
+      title = "하락";
+      color = "#ef5350";
+    }
+  }
+  return { title, color, value };
+};
+
+// 4. Probability Zone Levels (1,000 Candles)
+export const calculateProbabilityLevels = (closePrices: number[]) => {
+  const lookbackPeriod = Math.min(1000, closePrices.length);
+  if (lookbackPeriod <= 10) return [];
+
+  const recentPrices = closePrices.slice(-lookbackPeriod);
+  const mean = recentPrices.reduce((a, b) => a + b, 0) / lookbackPeriod;
+  const variance =
+    recentPrices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) /
+    lookbackPeriod;
+  const sd = Math.sqrt(variance);
+
+  return [
+    { price: mean + 1.645 * sd, title: "90%", color: "rgba(239, 83, 80, 0.8)" },
+    { price: mean + 1.15 * sd, title: "75%", color: "rgba(239, 83, 80, 0.8)" },
+    { price: mean + 0.67 * sd, title: "50%", color: "rgba(239, 83, 80, 0.8)" },
+    { price: mean, title: "Mean", color: "rgba(204, 204, 204, 0.5)" },
+    { price: mean - 0.67 * sd, title: "50%", color: "rgba(38, 166, 154, 0.8)" },
+    { price: mean - 1.15 * sd, title: "75%", color: "rgba(38, 166, 154, 0.8)" },
+    {
+      price: mean - 1.645 * sd,
+      title: "90%",
+      color: "rgba(38, 166, 154, 0.8)",
+    },
+  ];
+};
