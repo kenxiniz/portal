@@ -1,7 +1,6 @@
-/* components/charts/MainChart.tsx */
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   createChart,
   ColorType,
@@ -13,7 +12,6 @@ import {
   IPriceLine,
   Time,
   CandlestickData,
-  LineData,
 } from "lightweight-charts";
 import { ProcessedChartData } from "../StockChartDisplay";
 
@@ -24,6 +22,7 @@ interface MainChartProps {
   gridStrokeColor: string;
   height: number;
   onReady: (chart: IChartApi) => void;
+  initialVisibleBars?: number;
 }
 
 export const MainChart: React.FC<MainChartProps> = ({
@@ -35,7 +34,7 @@ export const MainChart: React.FC<MainChartProps> = ({
   onReady,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [chart, setChart] = useState<IChartApi | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<{
     candle: ISeriesApi<"Candlestick"> | null;
     upper: ISeriesApi<"Line"> | null;
@@ -44,11 +43,10 @@ export const MainChart: React.FC<MainChartProps> = ({
 
   const priceLinesRef = useRef<IPriceLine[]>([]);
 
-  // --- 차트 초기화 및 리사이징 ---
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const newChart = createChart(containerRef.current, {
+    const chart = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: gridStrokeColor,
@@ -57,7 +55,7 @@ export const MainChart: React.FC<MainChartProps> = ({
         vertLines: { color: "rgba(70, 130, 180, 0.1)" },
         horzLines: { color: "rgba(70, 130, 180, 0.1)" },
       },
-      width: containerRef.current.clientWidth || 600,
+      width: containerRef.current.clientWidth,
       height,
       timeScale: {
         timeVisible: timeframe !== "1d",
@@ -87,7 +85,7 @@ export const MainChart: React.FC<MainChartProps> = ({
       },
     });
 
-    const candleSeries = newChart.addSeries(CandlestickSeries, {
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#E53935",
       downColor: "#1E88E5",
       borderUpColor: "black",
@@ -96,98 +94,89 @@ export const MainChart: React.FC<MainChartProps> = ({
       wickDownColor: "#1E88E5",
     });
 
-    // 모든 시간대에서 볼린저 밴드 라인 생성
-    const upperSeries = newChart.addSeries(LineSeries, {
+    // 💡 타임프레임 상관없이 항상 볼린저 밴드 라인 생성
+    const upperSeries = chart.addSeries(LineSeries, {
       color: "#000000",
       lineWidth: 1,
       lineStyle: 1,
     });
-    const lowerSeries = newChart.addSeries(LineSeries, {
+    const lowerSeries = chart.addSeries(LineSeries, {
       color: "#000000",
       lineWidth: 1,
       lineStyle: 1,
     });
 
+    chartRef.current = chart;
     seriesRef.current = {
       candle: candleSeries,
       upper: upperSeries,
       lower: lowerSeries,
     };
-    setChart(newChart);
-    onReady(newChart);
+    onReady(chart);
 
-    const resizeObserver = new ResizeObserver((entries) => {
-      if (entries.length === 0 || entries[0].target !== containerRef.current)
-        return;
-      newChart.applyOptions({ width: entries[0].contentRect.width });
-    });
-    resizeObserver.observe(containerRef.current);
+    const handleResize = () =>
+      chart.applyOptions({ width: containerRef.current?.clientWidth || 0 });
+    window.addEventListener("resize", handleResize);
 
     return () => {
-      resizeObserver.disconnect();
-      newChart.remove();
-      seriesRef.current = { candle: null, upper: null, lower: null };
-      priceLinesRef.current = [];
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
     };
-  }, [gridStrokeColor, timeframe, height, onReady]);
+    // Removed 'height' from dependencies to prevent chart recreation on height state update
+  }, [gridStrokeColor, timeframe, onReady]);
 
-  // --- 데이터 업데이트 ---
+  // Apply height changes seamlessly without destroying the chart
   useEffect(() => {
-    if (!chart || !data.length || !seriesRef.current.candle) return;
-
-    const candleData: CandlestickData[] = data.map((d) => {
-      const pt: CandlestickData = {
-        time: d.time,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-      };
-      if (d.color) pt.color = d.color;
-      return pt;
-    });
-
-    try {
-      seriesRef.current.candle.setData(candleData);
-
-      // 모든 시간대에서 볼린저 밴드 데이터 세팅
-      const upData: LineData[] = data
-        .filter((d) => d.upper !== undefined)
-        .map((d) => ({ time: d.time, value: d.upper! }));
-      const dnData: LineData[] = data
-        .filter((d) => d.lower !== undefined)
-        .map((d) => ({ time: d.time, value: d.lower! }));
-      seriesRef.current.upper?.setData(upData);
-      seriesRef.current.lower?.setData(dnData);
-
-      // 프로빌러티 Y축 태그 초기화 및 생성
-      priceLinesRef.current.forEach((pl) => {
-        try {
-          seriesRef.current.candle?.removePriceLine(pl);
-        } catch {}
-      });
-      priceLinesRef.current = [];
-
-      probLevels.forEach((lvl) => {
-        try {
-          const pl = seriesRef.current.candle?.createPriceLine({
-            price: lvl.price,
-            color: lvl.color,
-            lineWidth: 1,
-            lineStyle: 2,
-            axisLabelVisible: true,
-            title: lvl.title,
-            lineVisible: false, // 선 숨기고 우측 Y축 태그만 표시
-          });
-          if (pl) priceLinesRef.current.push(pl);
-        } catch {}
-      });
-    } catch {
-      // Ignored disposed errors
+    if (chartRef.current) {
+      chartRef.current.applyOptions({ height });
     }
-  }, [chart, data, probLevels, timeframe]);
+  }, [height]);
 
-  return (
-    <div ref={containerRef} style={{ width: "100%", height: `${height}px` }} />
-  );
+  useEffect(() => {
+    if (!data.length || !seriesRef.current.candle) return;
+
+    const candleData: CandlestickData[] = data.map((d) => ({
+      time: d.time,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      color: d.color,
+    }));
+
+    seriesRef.current.candle.setData(candleData);
+
+    // 💡 타임프레임 상관없이 볼린저밴드와 프로빌러티 모두 그리도록 로직 복구
+    const upData = data
+      .filter((d) => d.upper !== undefined)
+      .map((d) => ({ time: d.time, value: d.upper! }));
+    const dnData = data
+      .filter((d) => d.lower !== undefined)
+      .map((d) => ({ time: d.time, value: d.lower! }));
+    seriesRef.current.upper?.setData(upData);
+    seriesRef.current.lower?.setData(dnData);
+
+    priceLinesRef.current.forEach((pl) => {
+      try {
+        seriesRef.current.candle?.removePriceLine(pl);
+      } catch {}
+    });
+    priceLinesRef.current = [];
+
+    probLevels.forEach((lvl) => {
+      try {
+        const pl = seriesRef.current.candle?.createPriceLine({
+          price: lvl.price,
+          color: lvl.color,
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: lvl.title,
+        });
+        if (pl) priceLinesRef.current.push(pl);
+      } catch {}
+    });
+  }, [data, probLevels, timeframe]);
+
+  return <div ref={containerRef} style={{ width: "100%" }} />;
 };

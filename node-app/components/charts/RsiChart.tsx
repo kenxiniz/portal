@@ -1,7 +1,6 @@
-/* components/charts/RsiChart.tsx */
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   createChart,
   ColorType,
@@ -10,8 +9,6 @@ import {
   CrosshairMode,
   IChartApi,
   ISeriesApi,
-  LineData,
-  CandlestickData,
 } from "lightweight-charts";
 import { ProcessedChartData } from "../StockChartDisplay";
 
@@ -29,7 +26,8 @@ export const RsiChart: React.FC<RsiChartProps> = ({
   onReady,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [chart, setChart] = useState<IChartApi | null>(null);
+  // Add chartRef to safely handle dynamic resize without re-rendering chart
+  const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<{
     rsi: ISeriesApi<"Line"> | null;
     dummy: ISeriesApi<"Candlestick"> | null;
@@ -38,7 +36,7 @@ export const RsiChart: React.FC<RsiChartProps> = ({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const newChart = createChart(containerRef.current, {
+    const chart = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: gridStrokeColor,
@@ -47,7 +45,7 @@ export const RsiChart: React.FC<RsiChartProps> = ({
         vertLines: { color: "rgba(70, 130, 180, 0.1)" },
         horzLines: { color: "rgba(70, 130, 180, 0.1)" },
       },
-      width: containerRef.current.clientWidth || 600,
+      width: containerRef.current.clientWidth,
       height,
       timeScale: { visible: false },
       crosshair: { mode: CrosshairMode.Normal },
@@ -55,7 +53,9 @@ export const RsiChart: React.FC<RsiChartProps> = ({
       handleScale: false,
     });
 
-    const rsiLineSeries = newChart.addSeries(LineSeries, {
+    chartRef.current = chart;
+
+    const rsiLineSeries = chart.addSeries(LineSeries, {
       color: "#2e7d32",
       lineWidth: 2,
     });
@@ -76,49 +76,77 @@ export const RsiChart: React.FC<RsiChartProps> = ({
       title: "과매도",
     });
 
-    const dummySeries = newChart.addSeries(CandlestickSeries, {
-      visible: false,
-    });
+    const dummySeries = chart.addSeries(CandlestickSeries, { visible: false });
 
     seriesRef.current = { rsi: rsiLineSeries, dummy: dummySeries };
-    setChart(newChart);
-    onReady(newChart);
+    onReady(chart);
 
-    const resizeObserver = new ResizeObserver((entries) => {
-      if (entries.length === 0 || entries[0].target !== containerRef.current)
-        return;
-      newChart.applyOptions({ width: entries[0].contentRect.width });
-    });
-    resizeObserver.observe(containerRef.current);
+    const handleResize = () =>
+      chart.applyOptions({ width: containerRef.current?.clientWidth || 0 });
+    window.addEventListener("resize", handleResize);
 
     return () => {
-      resizeObserver.disconnect();
-      newChart.remove();
-      seriesRef.current = { rsi: null, dummy: null };
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
     };
-  }, [gridStrokeColor, height, onReady]);
+    // Removed 'height' to avoid component re-mounting issue
+  }, [gridStrokeColor, onReady]);
+
+  // Handle dynamic height changes
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.applyOptions({ height });
+    }
+  }, [height]);
 
   useEffect(() => {
-    if (!chart || !data.length || !seriesRef.current.rsi) return;
+    if (!data.length || !seriesRef.current.rsi) return;
 
-    const rsiData: LineData[] = data
+    const rsiData = data
       .filter((d) => d.rsi !== undefined)
       .map((d) => ({ time: d.time, value: d.rsi! }));
-    const dummyData: CandlestickData[] = data.map((d) => ({
+    const dummyData = data.map((d) => ({
       time: d.time,
       open: d.open,
       high: d.high,
       low: d.low,
       close: d.close,
+      color: d.color,
     }));
 
     try {
       seriesRef.current.rsi.setData(rsiData);
       seriesRef.current.dummy?.setData(dummyData);
     } catch {}
-  }, [chart, data]);
+  }, [data]);
 
+  // 💡 오늘(최근) 기준 RSI 데이터를 추출하여 과매수/과매도 판별 (UI 태그용)
+  let rsiStatus = null;
+  if (data.length > 0) {
+    const lastRsi = data[data.length - 1].rsi;
+    if (lastRsi !== undefined) {
+      if (lastRsi >= 70) {
+        rsiStatus = { title: "과매수", color: "#ef5350" }; // Red
+      } else if (lastRsi <= 30) {
+        rsiStatus = { title: "과매도", color: "#2e7d32" }; // Green
+      }
+    }
+  }
+
+  // 💡 기존 로직은 100% 유지하고 화면 좌상단에 RSI UI 태그만 추가했습니다.
   return (
-    <div ref={containerRef} style={{ width: "100%", height: `${height}px` }} />
+    <div className="relative w-full">
+      {rsiStatus && (
+        <div className="absolute top-2 left-2 z-10 flex gap-1 pointer-events-none">
+          <div
+            className="px-2 py-0.5 text-xs font-semibold rounded text-white shadow-sm"
+            style={{ backgroundColor: rsiStatus.color }}
+          >
+            {rsiStatus.title}
+          </div>
+        </div>
+      )}
+      <div ref={containerRef} style={{ width: "100%" }} />
+    </div>
   );
 };

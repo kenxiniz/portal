@@ -93,6 +93,7 @@ export const StockChartDisplay = forwardRef<
         .map((d) => ({ ...d, chartTime: formatTime(d.date) }))
         .filter((d) => d.chartTime !== 0);
 
+      // 💡 TypeError 해결: chartTime이 객체(BusinessDay)가 아님을 확정 지어줌 (as string)
       cleanData.sort((a, b) =>
         typeof a.chartTime === "number" && typeof b.chartTime === "number"
           ? a.chartTime - b.chartTime
@@ -131,10 +132,10 @@ export const StockChartDisplay = forwardRef<
       return { processedData: processed, closePrices: closes };
     }, [data, signals, timeframe]);
 
-    const probLevels: { price: number; title: string; color: string }[] =
-      useMemo(() => {
-        return calculateProbabilityLevels(closePrices);
-      }, [closePrices]);
+    const probLevels = useMemo(
+      () => calculateProbabilityLevels(closePrices),
+      [closePrices],
+    );
 
     const macdResult = useMemo(() => {
       if (!closePrices.length)
@@ -189,15 +190,21 @@ export const StockChartDisplay = forwardRef<
         processedData.length > 0 &&
         !isInitialZoomApplied.current
       ) {
-        // 💡 PC 환경에서 보이는 캔들 개수를 150개에서 100개로 축소
-        const visibleBars = window.innerWidth >= 1024 ? 100 : 80;
-        mainChart
-          .timeScale()
-          .setVisibleLogicalRange({
-            from: processedData.length - 1 - visibleBars,
-            to: processedData.length + 1,
-          });
+        // Apply slight delay to prevent layout calculation race condition
+        const timer = setTimeout(() => {
+          try {
+            const visibleBars = window.innerWidth >= 1024 ? 150 : 80;
+            mainChart.timeScale().setVisibleLogicalRange({
+              from: processedData.length - 1 - visibleBars,
+              to: processedData.length + 1,
+            });
+          } catch (err) {
+            console.warn("Failed to apply initial zoom", err);
+          }
+        }, 50);
+
         isInitialZoomApplied.current = true;
+        return () => clearTimeout(timer);
       }
     }, [mainChart, processedData]);
 

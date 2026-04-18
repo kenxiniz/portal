@@ -1,7 +1,6 @@
-/* components/charts/MacdChart.tsx */
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   createChart,
   ColorType,
@@ -11,7 +10,6 @@ import {
   CrosshairMode,
   IChartApi,
   ISeriesApi,
-  IPriceLine,
   LineData,
   HistogramData,
   CandlestickData,
@@ -36,8 +34,9 @@ export const MacdChart: React.FC<MacdChartProps> = ({
   onReady,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [chart, setChart] = useState<IChartApi | null>(null);
-  const priceLineRef = useRef<IPriceLine | null>(null);
+  // Add chartRef to safely handle dynamic resize without re-rendering chart
+  const chartRef = useRef<IChartApi | null>(null);
+
   const seriesRef = useRef<{
     line: ISeriesApi<"Line"> | null;
     signal: ISeriesApi<"Line"> | null;
@@ -53,7 +52,7 @@ export const MacdChart: React.FC<MacdChartProps> = ({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const newChart = createChart(containerRef.current, {
+    const chart = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: gridStrokeColor,
@@ -62,7 +61,7 @@ export const MacdChart: React.FC<MacdChartProps> = ({
         vertLines: { color: "rgba(70, 130, 180, 0.1)" },
         horzLines: { color: "rgba(70, 130, 180, 0.1)" },
       },
-      width: containerRef.current.clientWidth || 600,
+      width: containerRef.current.clientWidth,
       height,
       timeScale: { visible: false },
       crosshair: { mode: CrosshairMode.Normal },
@@ -70,46 +69,50 @@ export const MacdChart: React.FC<MacdChartProps> = ({
       handleScale: false,
     });
 
-    const hist = newChart.addSeries(HistogramSeries, {
+    chartRef.current = chart;
+
+    const hist = chart.addSeries(HistogramSeries, {
       color: "#26a69a",
       lastValueVisible: false,
       priceLineVisible: false,
     });
-    const line = newChart.addSeries(LineSeries, {
+    const line = chart.addSeries(LineSeries, {
       color: "#2e7d32",
       lineWidth: 2,
-      lastValueVisible: false,
+      lastValueVisible: true,
       priceLineVisible: false,
     });
-    const signal = newChart.addSeries(LineSeries, {
+    const signal = chart.addSeries(LineSeries, {
       color: "#555555",
       lineWidth: 2,
       lastValueVisible: false,
       priceLineVisible: false,
     });
-    const dummy = newChart.addSeries(CandlestickSeries, { visible: false });
+    const dummy = chart.addSeries(CandlestickSeries, { visible: false });
 
     seriesRef.current = { line, signal, hist, dummy };
-    setChart(newChart);
-    onReady(newChart);
+    onReady(chart);
 
-    const resizeObserver = new ResizeObserver((entries) => {
-      if (entries.length === 0 || entries[0].target !== containerRef.current)
-        return;
-      newChart.applyOptions({ width: entries[0].contentRect.width });
-    });
-    resizeObserver.observe(containerRef.current);
+    const handleResize = () =>
+      chart.applyOptions({ width: containerRef.current?.clientWidth || 0 });
+    window.addEventListener("resize", handleResize);
 
     return () => {
-      resizeObserver.disconnect();
-      newChart.remove();
-      priceLineRef.current = null;
-      seriesRef.current = { line: null, signal: null, hist: null, dummy: null };
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
     };
-  }, [gridStrokeColor, height, onReady]);
+    // Removed 'height' dependency
+  }, [gridStrokeColor, onReady]);
+
+  // Handle dynamic height changes smoothly
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.applyOptions({ height });
+    }
+  }, [height]);
 
   useEffect(() => {
-    if (!chart || !data.length || !seriesRef.current.line) return;
+    if (!data.length || !seriesRef.current.line) return;
 
     const dummyData: CandlestickData[] = data.map((d) => ({
       time: d.time,
@@ -117,6 +120,7 @@ export const MacdChart: React.FC<MacdChartProps> = ({
       high: d.high,
       low: d.low,
       close: d.close,
+      color: d.color,
     }));
 
     try {
@@ -125,36 +129,30 @@ export const MacdChart: React.FC<MacdChartProps> = ({
       seriesRef.current.hist?.setData(macdData.hist);
       seriesRef.current.dummy?.setData(dummyData);
 
+      // 💡 텍스트를 제거하고 우측 이동 태그에 수치만 소수점 둘째 자리까지 표시하도록 변경했습니다.
       seriesRef.current.line.applyOptions({
-        title: macdStatus.title,
         color: macdStatus.color,
+        priceFormat: {
+          type: "custom",
+          formatter: (price: number) => price.toFixed(2),
+        },
       });
-
-      if (priceLineRef.current) {
-        try {
-          seriesRef.current.line.removePriceLine(priceLineRef.current);
-        } catch {}
-        priceLineRef.current = null;
-      }
-
-      if (macdStatus.value !== 0) {
-        try {
-          priceLineRef.current = seriesRef.current.line.createPriceLine({
-            price: macdStatus.value,
-            color: macdStatus.color,
-            lineWidth: 1,
-            lineStyle: 2,
-            axisLabelVisible: true,
-            title: macdStatus.title,
-          });
-        } catch {}
-      }
     } catch (err) {
       console.error("Failed to update MACD series", err);
     }
-  }, [chart, data, macdData, macdStatus]);
+  }, [data, macdData, macdStatus]);
 
   return (
-    <div ref={containerRef} style={{ width: "100%", height: `${height}px` }} />
+    <div className="relative w-full">
+      {macdStatus && (
+        <div
+          className="absolute top-2 left-2 z-10 px-2 py-0.5 text-xs font-semibold rounded text-white shadow-sm pointer-events-none"
+          style={{ backgroundColor: macdStatus.color }}
+        >
+          적응형 모멘텀 {macdStatus.title}
+        </div>
+      )}
+      <div ref={containerRef} style={{ width: "100%" }} />
+    </div>
   );
 };

@@ -490,7 +490,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                       className="text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800 whitespace-nowrap"
                                       title="인버스 투자는 리스크가 매우 큽니다."
                                     >
-                                      고위험 (매매 참고용)
+                                      고위험 (시장 과열 참고용, 매수 금지)
                                     </span>
                                   )}
                                   {showGazuaBadge && (
