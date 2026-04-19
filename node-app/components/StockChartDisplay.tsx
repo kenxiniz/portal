@@ -72,8 +72,15 @@ export const StockChartDisplay = forwardRef<
     }, [timeframe]);
 
     useEffect(() => {
-      const isPc = window.innerWidth >= 1024;
-      setChartHeights({ main: isPc ? 400 : 250, sub: isPc ? 120 : 100 });
+      // Set chart heights based on device screen width (PC, Tablet, Mobile)
+      const width = window.innerWidth;
+      if (width >= 1024) {
+        setChartHeights({ main: 400, sub: 120 }); // PC
+      } else if (width >= 768) {
+        setChartHeights({ main: 300, sub: 110 }); // Tablet
+      } else {
+        setChartHeights({ main: 250, sub: 100 }); // Mobile
+      }
     }, []);
 
     const { processedData, closePrices } = useMemo(() => {
@@ -193,7 +200,18 @@ export const StockChartDisplay = forwardRef<
         // Apply slight delay to prevent layout calculation race condition
         const timer = setTimeout(() => {
           try {
-            const visibleBars = window.innerWidth >= 1024 ? 150 : 80;
+            // Determine visible bars based on device screen width (PC, Tablet, Mobile)
+            const width = window.innerWidth;
+            let visibleBars = 60;
+
+            if (width >= 1024) {
+              visibleBars = 150; // PC
+            } else if (width >= 768) {
+              visibleBars = 100; // Tablet
+            } else {
+              visibleBars = 60; // Mobile
+            }
+
             mainChart.timeScale().setVisibleLogicalRange({
               from: processedData.length - 1 - visibleBars,
               to: processedData.length + 1,
