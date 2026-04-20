@@ -1,3 +1,4 @@
+/* components/charts/MainChart.tsx */
 "use client";
 
 import React, { useEffect, useRef } from "react";
@@ -14,6 +15,8 @@ import {
   CandlestickData,
 } from "lightweight-charts";
 import { ProcessedChartData } from "../StockChartDisplay";
+import { calculateGaussianTrendBoxes } from "@/lib/charts/indicators";
+import { GaussianBoxPrimitive } from "./plugins/GaussianBoxPrimitive";
 
 interface MainChartProps {
   data: ProcessedChartData[];
@@ -42,6 +45,9 @@ export const MainChart: React.FC<MainChartProps> = ({
   }>({ candle: null, upper: null, lower: null });
 
   const priceLinesRef = useRef<IPriceLine[]>([]);
+
+  // Ref to hold primitive instance
+  const boxPrimitiveRef = useRef<GaussianBoxPrimitive | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -94,7 +100,12 @@ export const MainChart: React.FC<MainChartProps> = ({
       wickDownColor: "#1E88E5",
     });
 
-    // 💡 타임프레임 상관없이 항상 볼린저 밴드 라인 생성
+    // Initialize and attach Gaussian primitive
+    const boxPrimitive = new GaussianBoxPrimitive([]);
+    candleSeries.attachPrimitive(boxPrimitive);
+    boxPrimitiveRef.current = boxPrimitive;
+
+    // 타임프레임 상관없이 항상 볼린저 밴드 라인 생성
     const upperSeries = chart.addSeries(LineSeries, {
       color: "#000000",
       lineWidth: 1,
@@ -122,7 +133,8 @@ export const MainChart: React.FC<MainChartProps> = ({
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-    // Removed 'height' from dependencies to prevent chart recreation on height state update
+    // Intentionally omitting 'height' to prevent chart destruction on resize
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridStrokeColor, timeframe, onReady]);
 
   // Apply height changes seamlessly without destroying the chart
@@ -146,7 +158,13 @@ export const MainChart: React.FC<MainChartProps> = ({
 
     seriesRef.current.candle.setData(candleData);
 
-    // 💡 타임프레임 상관없이 볼린저밴드와 프로빌러티 모두 그리도록 로직 복구
+    // Calculate and update Gaussian boxes for primitive rendering
+    const boxes = calculateGaussianTrendBoxes(data, 20, 3);
+    if (boxPrimitiveRef.current) {
+      boxPrimitiveRef.current.setData(boxes);
+    }
+
+    // 타임프레임 상관없이 볼린저밴드와 프로빌러티 모두 그리도록 로직 복구
     const upData = data
       .filter((d) => d.upper !== undefined)
       .map((d) => ({ time: d.time, value: d.upper! }));

@@ -101,7 +101,8 @@ export const MacdChart: React.FC<MacdChartProps> = ({
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-    // Removed 'height' dependency
+    // Intentionally omitting 'height' to prevent chart destruction on resize
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridStrokeColor, onReady]);
 
   // Handle dynamic height changes smoothly

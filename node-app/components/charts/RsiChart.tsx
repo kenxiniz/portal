@@ -89,7 +89,8 @@ export const RsiChart: React.FC<RsiChartProps> = ({
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-    // Removed 'height' to avoid component re-mounting issue
+    // Intentionally omitting 'height' to prevent chart destruction on resize
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridStrokeColor, onReady]);
 
   // Handle dynamic height changes

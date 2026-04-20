@@ -1,4 +1,5 @@
 /* lib/charts/indicators.ts */
+import { Time } from "lightweight-charts";
 
 // 1. KAMA (Kaufman's Adaptive Moving Average)
 export const calculateKAMA = (
@@ -138,4 +139,93 @@ export const calculateProbabilityLevels = (closePrices: number[]) => {
       color: "rgba(38, 166, 154, 0.8)",
     },
   ];
+};
+
+// 5. Gaussian Filter and Trend Box Extraction
+export interface TrendBox {
+  startTime: Time;
+  endTime: Time;
+  topPrice: number;
+  bottomPrice: number;
+  isUptrend: boolean;
+}
+
+// Helper to calculate Gaussian weights
+function getGaussianWeights(period: number, sigma: number): number[] {
+  const weights: number[] = [];
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    const weight = Math.exp(-(i * i) / (2 * sigma * sigma));
+    weights.push(weight);
+    sum += weight;
+  }
+  return weights.map((w) => w / sum);
+}
+
+export const calculateGaussianTrendBoxes = (
+  data: { time: Time; close: number; high: number; low: number }[],
+  period: number = 20,
+  sigma: number = 3,
+): TrendBox[] => {
+  if (!data || data.length < period) return [];
+
+  const weights = getGaussianWeights(period, sigma);
+  const gaussianLine: (number | null)[] = new Array(data.length).fill(null);
+
+  // Apply smoothing to close prices
+  for (let i = period - 1; i < data.length; i++) {
+    let sum = 0;
+    for (let j = 0; j < period; j++) {
+      sum += data[i - j].close * weights[j];
+    }
+    gaussianLine[i] = sum;
+  }
+
+  const boxes: TrendBox[] = [];
+  let currentBox: Partial<TrendBox> = {};
+
+  for (let i = period; i < data.length; i++) {
+    const prevGauss = gaussianLine[i - 1];
+    const currGauss = gaussianLine[i];
+
+    if (prevGauss === null || currGauss === null) continue;
+
+    const isUptrend = currGauss > prevGauss;
+
+    if (currentBox.startTime === undefined) {
+      currentBox = {
+        startTime: data[i - 1].time,
+        topPrice: Math.max(data[i - 1].high, data[i].high),
+        bottomPrice: Math.min(data[i - 1].low, data[i].low),
+        isUptrend,
+      };
+    } else {
+      currentBox.topPrice = Math.max(
+        currentBox.topPrice as number,
+        data[i].high,
+      );
+      currentBox.bottomPrice = Math.min(
+        currentBox.bottomPrice as number,
+        data[i].low,
+      );
+      currentBox.endTime = data[i].time;
+
+      if (currentBox.isUptrend !== isUptrend) {
+        boxes.push(currentBox as TrendBox);
+        currentBox = {
+          startTime: data[i].time,
+          topPrice: data[i].high,
+          bottomPrice: data[i].low,
+          isUptrend,
+        };
+      }
+    }
+  }
+
+  if (currentBox.startTime !== undefined) {
+    currentBox.endTime = data[data.length - 1].time;
+    boxes.push(currentBox as TrendBox);
+  }
+
+  return boxes;
 };
