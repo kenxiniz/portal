@@ -148,6 +148,7 @@ export interface TrendBox {
   topPrice: number;
   bottomPrice: number;
   isUptrend: boolean;
+  prices: number[]; // Added to store close prices for statistical calculation
 }
 
 // Helper to calculate Gaussian weights
@@ -182,7 +183,7 @@ export const calculateGaussianTrendBoxes = (
   }
 
   const boxes: TrendBox[] = [];
-  let currentBox: Partial<TrendBox> = {};
+  let currentBox: Partial<TrendBox> = { prices: [] };
 
   for (let i = period; i < data.length; i++) {
     const prevGauss = gaussianLine[i - 1];
@@ -198,6 +199,7 @@ export const calculateGaussianTrendBoxes = (
         topPrice: Math.max(data[i - 1].high, data[i].high),
         bottomPrice: Math.min(data[i - 1].low, data[i].low),
         isUptrend,
+        prices: [data[i - 1].close, data[i].close], // Initialize with starting prices
       };
     } else {
       currentBox.topPrice = Math.max(
@@ -209,6 +211,7 @@ export const calculateGaussianTrendBoxes = (
         data[i].low,
       );
       currentBox.endTime = data[i].time;
+      currentBox.prices!.push(data[i].close); // Accumulate prices
 
       if (currentBox.isUptrend !== isUptrend) {
         boxes.push(currentBox as TrendBox);
@@ -217,6 +220,7 @@ export const calculateGaussianTrendBoxes = (
           topPrice: data[i].high,
           bottomPrice: data[i].low,
           isUptrend,
+          prices: [data[i].close], // Start new price array
         };
       }
     }

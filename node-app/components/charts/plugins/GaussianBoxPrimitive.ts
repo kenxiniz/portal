@@ -8,9 +8,17 @@ import {
   SeriesAttachedParameter,
   Time,
 } from "lightweight-charts";
-import { TrendBox } from "@/lib/charts/indicators";
 
-// Canvas renderer for drawing rectangles behind the candlesticks
+// Extend TrendBox to include the raw prices during that period for statistical calculation
+export interface TrendBox {
+  startTime: Time;
+  endTime: Time;
+  topPrice: number;
+  bottomPrice: number;
+  isUptrend: boolean;
+  prices: number[]; // Store close prices of the segment
+}
+
 class GaussianBoxRenderer implements IPrimitivePaneRenderer {
   private _boxes: TrendBox[];
   private _series: ISeriesApi<"Candlestick">;
@@ -26,19 +34,15 @@ class GaussianBoxRenderer implements IPrimitivePaneRenderer {
     this._chart = chart;
   }
 
-  // Use TypeScript utility type to automatically match the lightweight-charts v4 signature
   draw(target: Parameters<IPrimitivePaneRenderer["draw"]>[0]) {
-    // In v4, we must explicitly request the coordinate space (Media = CSS pixels)
-    // to correctly align with timeToCoordinate and priceToCoordinate.
     target.useMediaCoordinateSpace((scope) => {
       const ctx = scope.context;
       ctx.save();
 
-      // Access timeScale directly from the injected chart instance
       const timeScale = this._chart.timeScale();
 
       for (const box of this._boxes) {
-        if (!box.endTime) continue;
+        if (!box.endTime || box.prices.length < 2) continue;
 
         const startX = timeScale.timeToCoordinate(box.startTime);
         const endX = timeScale.timeToCoordinate(box.endTime);
@@ -54,20 +58,74 @@ class GaussianBoxRenderer implements IPrimitivePaneRenderer {
           continue;
 
         const width = Math.max(endX - startX, 1);
-        const height = bottomY - topY;
+        const height = bottomY - topY; // bottomY is greater than topY in canvas coordinates
 
-        // Draw box fill
+        // 1. Draw Background and Box Border
         ctx.fillStyle = box.isUptrend
-          ? "rgba(38, 166, 154, 0.15)"
-          : "rgba(239, 83, 80, 0.15)";
+          ? "rgba(38, 166, 154, 0.1)"
+          : "rgba(239, 83, 80, 0.1)";
         ctx.fillRect(startX, topY, width, height);
 
-        // Draw box stroke
         ctx.strokeStyle = box.isUptrend
-          ? "rgba(38, 166, 154, 0.4)"
-          : "rgba(239, 83, 80, 0.4)";
+          ? "rgba(38, 166, 154, 0.5)"
+          : "rgba(239, 83, 80, 0.5)";
         ctx.lineWidth = 1;
         ctx.strokeRect(startX, topY, width, height);
+
+        // 2. Statistical Calculation (Mean and Standard Deviation)
+        const n = box.prices.length;
+        const mean = box.prices.reduce((a, b) => a + b, 0) / n;
+        const variance =
+          box.prices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+        const sd = Math.sqrt(variance);
+
+        // Define Z-scores for probability intervals
+        // Z=1 (approx 68% data within), Z=1.645 (approx 90% data within)
+        const levels = [
+          { z: 1.645, label: "90%", title: "+90% (Extreme Resist)" },
+          { z: 1.0, label: "68%", title: "+68% (Resist)" },
+          { z: 0, label: "Mean", title: "Mean (POC)" },
+          { z: -1.0, label: "68%", title: "-68% (Support)" },
+          { z: -1.645, label: "90%", title: "-90% (Extreme Support)" },
+        ];
+
+        // Draw statistical lines only if box width is enough to be readable
+        if (width > 60) {
+          ctx.font = "10px sans-serif";
+          ctx.textAlign = "right";
+          ctx.textBaseline = "middle";
+
+          const textColor = box.isUptrend
+            ? "rgba(0, 105, 92, 0.9)"
+            : "rgba(183, 28, 28, 0.9)";
+          const lineColor = box.isUptrend
+            ? "rgba(38, 166, 154, 0.6)"
+            : "rgba(239, 83, 80, 0.6)";
+
+          levels.forEach((level) => {
+            const priceLevel = mean + level.z * sd;
+
+            // Only draw lines that fall inside the box boundaries to keep it clean
+            if (priceLevel <= box.topPrice && priceLevel >= box.bottomPrice) {
+              const y = this._series.priceToCoordinate(priceLevel);
+              if (y !== null) {
+                // Draw dashed line
+                ctx.beginPath();
+                ctx.setLineDash([2, 4]);
+                ctx.strokeStyle = level.z === 0 ? textColor : lineColor; // Mean line is darker
+                ctx.moveTo(startX, y);
+                ctx.lineTo(endX, y);
+                ctx.stroke();
+
+                // Draw probability text tag
+                ctx.fillStyle = textColor;
+                const tagText = `${level.label} (${priceLevel.toFixed(2)})`;
+                ctx.fillText(tagText, endX - 4, y - 6);
+              }
+            }
+          });
+          ctx.setLineDash([]); // Reset dash
+        }
       }
 
       ctx.restore();
@@ -75,7 +133,6 @@ class GaussianBoxRenderer implements IPrimitivePaneRenderer {
   }
 }
 
-// Pane view linking the renderer to the primitive lifecycle
 class GaussianBoxView implements IPrimitivePaneView {
   private _renderer: GaussianBoxRenderer;
   private _series: ISeriesApi<"Candlestick">;
@@ -92,7 +149,7 @@ class GaussianBoxView implements IPrimitivePaneView {
   }
 
   zOrder(): "bottom" | "normal" | "top" {
-    return "bottom";
+    return "normal"; // Raised to normal to overlay lines clearly on candles
   }
 
   renderer(): IPrimitivePaneRenderer {
@@ -115,10 +172,9 @@ export class GaussianBoxPrimitive implements ISeriesPrimitive<Time> {
     this._boxes = boxes;
   }
 
-  // Bind to chart instance lifecycle using the strictly typed parameter
   attached(param: SeriesAttachedParameter<Time>) {
     this._requestUpdate = param.requestUpdate;
-    this._chart = param.chart as unknown as IChartApi; // Cast to bypass strict base type checking
+    this._chart = param.chart as unknown as IChartApi;
     this._series = param.series as ISeriesApi<"Candlestick">;
 
     this._view = new GaussianBoxView(this._boxes, this._series, this._chart);
@@ -138,7 +194,6 @@ export class GaussianBoxPrimitive implements ISeriesPrimitive<Time> {
 
   updateAllViews() {}
 
-  // Allow dynamic updates to box data
   setData(boxes: TrendBox[]) {
     this._boxes = boxes;
     if (this._view && this._requestUpdate && this._chart && this._series) {
