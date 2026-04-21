@@ -73,7 +73,7 @@ export async function GET(request: Request) {
     if (apiCache.has(cacheKey) && !isForceRefresh) {
       const cachedData = apiCache.get(cacheKey)!;
       const isToday = cachedData.fetchDate === todayStr;
-      const isFresh = Date.now() - cachedData.timestamp < 10 * 1000; // 10초 유지
+      const isFresh = Date.now() - cachedData.timestamp < 10 * 1000; // 10 seconds retention
 
       if (isToday && isFresh) {
         console.log(
@@ -116,14 +116,20 @@ export async function GET(request: Request) {
     let stopTimestamp = 0;
     const now = Date.now();
 
-    if (uniqueDbCandles.length < 30) {
+    // Check if we need a deep fetch (Seeding Mode) to fulfill the 500 candles requirement
+    const isSeedingMode = uniqueDbCandles.length < 500;
+
+    if (isSeedingMode) {
       if (timeframe === "1d") {
-        stopTimestamp = now - 40 * 24 * 60 * 60 * 1000;
+        // Fetch approx 3 years of history to guarantee at least 500 trading days
+        stopTimestamp = now - 1095 * 24 * 60 * 60 * 1000;
+      } else if (timeframe === "1h") {
+        stopTimestamp = now - 60 * 24 * 60 * 60 * 1000;
       } else {
-        stopTimestamp = now - 5 * 24 * 60 * 60 * 1000;
+        stopTimestamp = now - 15 * 24 * 60 * 60 * 1000;
       }
       console.log(
-        `[WARN] [${ticker}] DB is bloated or empty. Force fetching history down to: ${new Date(stopTimestamp).toISOString()}`,
+        `[WARN] [${ticker}] DB needs seeding (Count: ${uniqueDbCandles.length}). Force fetching history down to: ${new Date(stopTimestamp).toISOString()}`,
       );
     } else {
       stopTimestamp = latestDbTimestamp;
@@ -142,12 +148,15 @@ export async function GET(request: Request) {
     // --- Step 5: Strictly Filter & Save ---
     if (apiData && apiData.length > 0) {
       const newDataToSave = apiData.filter((candle) => {
+        // If in seeding mode, bypass the timestamp filter to save all historical data
+        if (isSeedingMode) return true;
+
         return new Date(candle.date).getTime() >= latestDbTimestamp;
       });
 
       if (newDataToSave.length > 0) {
         console.log(
-          `[INFO] [${ticker}] Upserting ${newDataToSave.length} exact matching records to DB...`,
+          `[INFO] [${ticker}] Upserting ${newDataToSave.length} records to DB...`,
         );
 
         const formattedCandles = newDataToSave.map((candle) => ({

@@ -101,6 +101,10 @@
       "name": "TIGER 일본엔선물"
     },
     {
+      "ticker": "144600",
+      "name": "KODEX 은선물"
+    },
+    {
       "ticker": "411060",
       "name": "ACE KRX금현물"
     },
