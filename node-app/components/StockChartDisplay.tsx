@@ -21,6 +21,8 @@ import {
   calculateMacdKama,
   getMacdStatus,
   calculateProbabilityLevels,
+  calculateEMA,
+  calculateVWAP,
 } from "@/lib/charts/indicators";
 import { MainChart } from "./charts/MainChart";
 import { RsiChart } from "./charts/RsiChart";
@@ -37,6 +39,9 @@ export interface ProcessedChartData {
   upper?: number;
   lower?: number;
   date: string;
+  vwap?: number;
+  ema9?: number;
+  ema20?: number;
 }
 
 interface StockChartDisplayProps {
@@ -51,6 +56,12 @@ interface StockChartDisplayProps {
 export interface StockChartDisplayHandles {
   moveToDate: (date: string) => void;
 }
+
+type ExtendedDataPoint = StockDataPoint & {
+  vwap?: number | null;
+  ema9?: number | null;
+  ema20?: number | null;
+};
 
 export const StockChartDisplay = forwardRef<
   StockChartDisplayHandles,
@@ -72,14 +83,13 @@ export const StockChartDisplay = forwardRef<
     }, [timeframe]);
 
     useEffect(() => {
-      // Set chart heights based on device screen width (PC, Tablet, Mobile)
       const width = window.innerWidth;
       if (width >= 1024) {
-        setChartHeights({ main: 400, sub: 120 }); // PC
+        setChartHeights({ main: 400, sub: 120 });
       } else if (width >= 768) {
-        setChartHeights({ main: 300, sub: 110 }); // Tablet
+        setChartHeights({ main: 300, sub: 110 });
       } else {
-        setChartHeights({ main: 250, sub: 100 }); // Mobile
+        setChartHeights({ main: 250, sub: 100 });
       }
     }, []);
 
@@ -100,7 +110,6 @@ export const StockChartDisplay = forwardRef<
         .map((d) => ({ ...d, chartTime: formatTime(d.date) }))
         .filter((d) => d.chartTime !== 0);
 
-      // 💡 TypeError 해결: chartTime이 객체(BusinessDay)가 아님을 확정 지어줌 (as string)
       cleanData.sort((a, b) =>
         typeof a.chartTime === "number" && typeof b.chartTime === "number"
           ? a.chartTime - b.chartTime
@@ -113,7 +122,12 @@ export const StockChartDisplay = forwardRef<
       );
       const closes = uniqueData.map((d) => Number(d.close));
 
-      const processed = uniqueData.map((d) => {
+      // Calculate indicators locally using pure data
+      const vwapResults = calculateVWAP(uniqueData, timeframe);
+      const ema9Results = calculateEMA(closes, 9);
+      const ema20Results = calculateEMA(closes, 20);
+
+      const processed = uniqueData.map((d, i) => {
         const hasSignal = signals.find(
           (s) =>
             (s.startDate &&
@@ -122,6 +136,9 @@ export const StockChartDisplay = forwardRef<
               s.type.includes("buy")) ||
             (s.date === d.date && s.type === "sell"),
         );
+
+        const extD = d as ExtendedDataPoint;
+
         return {
           time: d.chartTime,
           open: Number(d.open),
@@ -132,6 +149,27 @@ export const StockChartDisplay = forwardRef<
           rsi: typeof d.rsi === "number" && !isNaN(d.rsi) ? d.rsi : undefined,
           upper: d.bollingerBands?.upper,
           lower: d.bollingerBands?.lower,
+
+          // Use backend calculated values if available, otherwise use local calculated values
+          vwap:
+            typeof extD.vwap === "number" && !isNaN(extD.vwap)
+              ? extD.vwap
+              : vwapResults[i] !== null
+                ? vwapResults[i]
+                : undefined,
+          ema9:
+            typeof extD.ema9 === "number" && !isNaN(extD.ema9)
+              ? extD.ema9
+              : ema9Results[i] !== null
+                ? ema9Results[i]
+                : undefined,
+          ema20:
+            typeof extD.ema20 === "number" && !isNaN(extD.ema20)
+              ? extD.ema20
+              : ema20Results[i] !== null
+                ? ema20Results[i]
+                : undefined,
+
           date: d.date,
         } as ProcessedChartData;
       });
@@ -197,19 +235,17 @@ export const StockChartDisplay = forwardRef<
         processedData.length > 0 &&
         !isInitialZoomApplied.current
       ) {
-        // Apply slight delay to prevent layout calculation race condition
         const timer = setTimeout(() => {
           try {
-            // Determine visible bars based on device screen width (PC, Tablet, Mobile)
             const width = window.innerWidth;
             let visibleBars = 60;
 
             if (width >= 1024) {
-              visibleBars = 150; // PC
+              visibleBars = 150;
             } else if (width >= 768) {
-              visibleBars = 100; // Tablet
+              visibleBars = 100;
             } else {
-              visibleBars = 60; // Mobile
+              visibleBars = 50;
             }
 
             mainChart.timeScale().setVisibleLogicalRange({
@@ -252,14 +288,14 @@ export const StockChartDisplay = forwardRef<
         {loading && !hasData && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-white dark:bg-slate-900 rounded">
             <p className="text-slate-700 dark:text-slate-300 font-medium">
-              데이터 로딩 중...
+              Loading Data...
             </p>
           </div>
         )}
         {loading && hasData && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/30 dark:bg-slate-900/30 rounded backdrop-blur-[0.5px]">
             <span className="text-xs font-medium text-slate-800 dark:text-slate-200 bg-white/80 dark:bg-slate-800/80 px-3 py-1 rounded shadow-sm">
-              데이터 갱신 중...
+              Refreshing Data...
             </span>
           </div>
         )}
@@ -273,7 +309,7 @@ export const StockChartDisplay = forwardRef<
         )}
         {error && hasData && (
           <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-20 bg-red-100 border border-red-400 text-red-700 px-4 py-1 rounded shadow text-xs">
-            갱신 실패: {error}
+            Update Failed: {error}
           </div>
         )}
 

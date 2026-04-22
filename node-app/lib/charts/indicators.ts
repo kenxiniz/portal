@@ -98,16 +98,16 @@ export const getMacdStatus = (
     const prevSig = signalLineRaw[prevIdx] as number;
 
     if (prevMacd <= prevSig && currMacd > currSig) {
-      title = "골드";
+      title = "Gold";
       color = "#2e7d32";
     } else if (prevMacd >= prevSig && currMacd < currSig) {
-      title = "데드";
+      title = "Dead";
       color = "#ef5350";
     } else if (currMacd > currSig) {
-      title = "상승";
+      title = "Up";
       color = "#2e7d32";
     } else if (currMacd < currSig) {
-      title = "하락";
+      title = "Down";
       color = "#ef5350";
     }
   }
@@ -148,10 +148,9 @@ export interface TrendBox {
   topPrice: number;
   bottomPrice: number;
   isUptrend: boolean;
-  prices: number[]; // Added to store close prices for statistical calculation
+  prices: number[]; // Store close prices for statistical calculation
 }
 
-// Helper to calculate Gaussian weights
 function getGaussianWeights(period: number, sigma: number): number[] {
   const weights: number[] = [];
   let sum = 0;
@@ -173,7 +172,6 @@ export const calculateGaussianTrendBoxes = (
   const weights = getGaussianWeights(period, sigma);
   const gaussianLine: (number | null)[] = new Array(data.length).fill(null);
 
-  // Apply smoothing to close prices
   for (let i = period - 1; i < data.length; i++) {
     let sum = 0;
     for (let j = 0; j < period; j++) {
@@ -199,7 +197,7 @@ export const calculateGaussianTrendBoxes = (
         topPrice: Math.max(data[i - 1].high, data[i].high),
         bottomPrice: Math.min(data[i - 1].low, data[i].low),
         isUptrend,
-        prices: [data[i - 1].close, data[i].close], // Initialize with starting prices
+        prices: [data[i - 1].close, data[i].close],
       };
     } else {
       currentBox.topPrice = Math.max(
@@ -211,7 +209,7 @@ export const calculateGaussianTrendBoxes = (
         data[i].low,
       );
       currentBox.endTime = data[i].time;
-      currentBox.prices!.push(data[i].close); // Accumulate prices
+      currentBox.prices!.push(data[i].close);
 
       if (currentBox.isUptrend !== isUptrend) {
         boxes.push(currentBox as TrendBox);
@@ -220,7 +218,7 @@ export const calculateGaussianTrendBoxes = (
           topPrice: data[i].high,
           bottomPrice: data[i].low,
           isUptrend,
-          prices: [data[i].close], // Start new price array
+          prices: [data[i].close],
         };
       }
     }
@@ -232,4 +230,93 @@ export const calculateGaussianTrendBoxes = (
   }
 
   return boxes;
+};
+
+// 6. Exponential Moving Average (EMA)
+export const calculateEMA = (
+  data: number[],
+  period: number,
+): (number | null)[] => {
+  const ema: (number | null)[] = new Array(data.length).fill(null);
+  if (data.length < period) return ema;
+
+  const k = 2 / (period + 1);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += data[i];
+  let previousEma = sum / period;
+  ema[period - 1] = previousEma;
+
+  for (let i = period; i < data.length; i++) {
+    previousEma = (data[i] - previousEma) * k + previousEma;
+    ema[i] = previousEma;
+  }
+  return ema;
+};
+
+// 7. Volume Weighted Average Price (VWAP)
+export const calculateVWAP = (
+  data: {
+    date?: string;
+    chartTime?: Time;
+    high: number;
+    low: number;
+    close: number;
+    volume?: number | string;
+  }[],
+  timeframe: string,
+): (number | null)[] => {
+  const vwap: (number | null)[] = new Array(data.length).fill(null);
+  const isIntraday = timeframe === "1h" || timeframe === "15m";
+
+  let cumulativeTypicalVolume = 0;
+  let cumulativeVolume = 0;
+  let currentAnchorKey = "";
+
+  for (let i = 0; i < data.length; i++) {
+    const candle = data[i];
+
+    let dateStr = "";
+    if (candle.date) {
+      dateStr = candle.date;
+    } else if (candle.chartTime) {
+      dateStr =
+        typeof candle.chartTime === "number"
+          ? new Date(candle.chartTime * 1000).toISOString()
+          : String(candle.chartTime);
+    } else {
+      continue;
+    }
+
+    const datePart = dateStr.includes("T")
+      ? dateStr.split("T")[0]
+      : dateStr.split(" ")[0];
+    const yearStr = datePart.substring(0, 4);
+
+    let shouldReset = false;
+    if (isIntraday) {
+      shouldReset = datePart !== currentAnchorKey;
+      if (shouldReset) currentAnchorKey = datePart;
+    } else {
+      shouldReset = yearStr !== currentAnchorKey;
+      if (shouldReset) currentAnchorKey = yearStr;
+    }
+
+    if (shouldReset) {
+      cumulativeTypicalVolume = 0;
+      cumulativeVolume = 0;
+    }
+
+    const typicalPrice = (candle.high + candle.low + candle.close) / 3;
+    const vol = Number(candle.volume) || 1;
+
+    cumulativeTypicalVolume += typicalPrice * vol;
+    cumulativeVolume += vol;
+
+    vwap[i] =
+      cumulativeVolume === 0
+        ? candle.close
+        : cumulativeTypicalVolume / cumulativeVolume;
+  }
+
+  return vwap;
 };

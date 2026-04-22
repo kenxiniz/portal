@@ -28,6 +28,12 @@ interface MainChartProps {
   initialVisibleBars?: number;
 }
 
+type ExtendedChartData = ProcessedChartData & {
+  vwap?: number;
+  ema9?: number;
+  ema20?: number;
+};
+
 export const MainChart: React.FC<MainChartProps> = ({
   data,
   probLevels,
@@ -38,15 +44,24 @@ export const MainChart: React.FC<MainChartProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+
   const seriesRef = useRef<{
     candle: ISeriesApi<"Candlestick"> | null;
     upper: ISeriesApi<"Line"> | null;
     lower: ISeriesApi<"Line"> | null;
-  }>({ candle: null, upper: null, lower: null });
+    vwap: ISeriesApi<"Line"> | null;
+    ema9: ISeriesApi<"Line"> | null;
+    ema20: ISeriesApi<"Line"> | null;
+  }>({
+    candle: null,
+    upper: null,
+    lower: null,
+    vwap: null,
+    ema9: null,
+    ema20: null,
+  });
 
   const priceLinesRef = useRef<IPriceLine[]>([]);
-
-  // Ref to hold primitive instance
   const boxPrimitiveRef = useRef<GaussianBoxPrimitive | null>(null);
 
   useEffect(() => {
@@ -100,12 +115,10 @@ export const MainChart: React.FC<MainChartProps> = ({
       wickDownColor: "#1E88E5",
     });
 
-    // Initialize and attach Gaussian primitive
     const boxPrimitive = new GaussianBoxPrimitive([]);
     candleSeries.attachPrimitive(boxPrimitive);
     boxPrimitiveRef.current = boxPrimitive;
 
-    // 타임프레임 상관없이 항상 볼린저 밴드 라인 생성
     const upperSeries = chart.addSeries(LineSeries, {
       color: "#000000",
       lineWidth: 1,
@@ -117,11 +130,36 @@ export const MainChart: React.FC<MainChartProps> = ({
       lineStyle: 1,
     });
 
+    // 1. VWAP Series (Yellow)
+    const vwapSeries = chart.addSeries(LineSeries, {
+      color: "rgba(255, 235, 59, 1)",
+      lineWidth: 2,
+      crosshairMarkerVisible: false,
+    });
+
+    // 2. 9 EMA Series (White, Dashed)
+    const ema9Series = chart.addSeries(LineSeries, {
+      color: "rgba(255, 255, 255, 0.8)",
+      lineWidth: 1,
+      lineStyle: 2,
+      crosshairMarkerVisible: false,
+    });
+
+    // 3. 20 EMA Series (Blue)
+    const ema20Series = chart.addSeries(LineSeries, {
+      color: "rgba(33, 150, 243, 0.8)",
+      lineWidth: 1,
+      crosshairMarkerVisible: false,
+    });
+
     chartRef.current = chart;
     seriesRef.current = {
       candle: candleSeries,
       upper: upperSeries,
       lower: lowerSeries,
+      vwap: vwapSeries,
+      ema9: ema9Series,
+      ema20: ema20Series,
     };
     onReady(chart);
 
@@ -133,11 +171,9 @@ export const MainChart: React.FC<MainChartProps> = ({
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-    // Intentionally omitting 'height' to prevent chart destruction on resize
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridStrokeColor, timeframe, onReady]);
 
-  // Apply height changes seamlessly without destroying the chart
   useEffect(() => {
     if (chartRef.current) {
       chartRef.current.applyOptions({ height });
@@ -158,13 +194,11 @@ export const MainChart: React.FC<MainChartProps> = ({
 
     seriesRef.current.candle.setData(candleData);
 
-    // Calculate and update Gaussian boxes for primitive rendering
     const boxes = calculateGaussianTrendBoxes(data, 20, 3);
     if (boxPrimitiveRef.current) {
       boxPrimitiveRef.current.setData(boxes);
     }
 
-    // 타임프레임 상관없이 볼린저밴드와 프로빌러티 모두 그리도록 로직 복구
     const upData = data
       .filter((d) => d.upper !== undefined)
       .map((d) => ({ time: d.time, value: d.upper! }));
@@ -173,6 +207,27 @@ export const MainChart: React.FC<MainChartProps> = ({
       .map((d) => ({ time: d.time, value: d.lower! }));
     seriesRef.current.upper?.setData(upData);
     seriesRef.current.lower?.setData(dnData);
+
+    const extData = data as ExtendedChartData[];
+
+    // Ensure robust filtering against null, undefined, and NaN values
+    const vwapData = extData
+      .filter((d) => d.vwap !== undefined && d.vwap !== null && !isNaN(d.vwap))
+      .map((d) => ({ time: d.time, value: d.vwap! }));
+
+    const ema9Data = extData
+      .filter((d) => d.ema9 !== undefined && d.ema9 !== null && !isNaN(d.ema9))
+      .map((d) => ({ time: d.time, value: d.ema9! }));
+
+    const ema20Data = extData
+      .filter(
+        (d) => d.ema20 !== undefined && d.ema20 !== null && !isNaN(d.ema20),
+      )
+      .map((d) => ({ time: d.time, value: d.ema20! }));
+
+    seriesRef.current.vwap?.setData(vwapData);
+    seriesRef.current.ema9?.setData(ema9Data);
+    seriesRef.current.ema20?.setData(ema20Data);
 
     priceLinesRef.current.forEach((pl) => {
       try {
