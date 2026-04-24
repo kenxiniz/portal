@@ -1,7 +1,22 @@
 /* lib/stockUtils.ts */
 
+import {
+  calculateKAMA,
+  calculateVWAP,
+  calculateGaussianLine,
+  calculateKamaTrend,
+  calculateGaussianTrend,
+  calculateVwapRetest,
+} from "@/lib/charts/indicators";
+
+// Re-export indicators to prevent import errors in backend API routes
+export {
+  calculateRSI,
+  calculateBollingerBands,
+  calculateGaussianLine,
+} from "@/lib/charts/indicators";
+
 // --- Configuration ---
-// Utility to get environment variables as numbers with fallback
 const getEnvNumber = (key: string, defaultValue: number): number => {
   const val = process.env[key] || process.env[`NEXT_PUBLIC_${key}`];
   if (val !== undefined && val !== "") {
@@ -11,7 +26,6 @@ const getEnvNumber = (key: string, defaultValue: number): number => {
   return defaultValue;
 };
 
-// Define trading parameters utilizing environment variables
 const TRADING_CONFIG = {
   get stopLossPercent() {
     return getEnvNumber("STOP_LOSS_PERCENT", -5.0);
@@ -37,7 +51,6 @@ const TRADING_CONFIG = {
 };
 
 // --- Interfaces ---
-
 export interface StockDataPoint {
   date: string;
   open: number;
@@ -51,6 +64,9 @@ export interface StockDataPoint {
     upper: number;
     lower: number;
   };
+  vwap?: number;
+  ema9?: number;
+  ema20?: number;
 }
 
 export interface TradingSignal {
@@ -62,14 +78,13 @@ export interface TradingSignal {
   entryPrice?: number;
   profitRate?: number;
   realizedPrice?: number;
-  // [FIX] Telegram Scheduler에서 현재가를 가져올 수 있도록 추가
   currentPrice?: number;
 }
 
 export interface AdviceObject {
   error: boolean;
   message: string;
-  action?: string; // Telegram service uses this
+  action?: string;
 }
 
 export interface TickerState {
@@ -87,85 +102,7 @@ export interface CachedStockData {
   advice?: AdviceObject | null;
 }
 
-// --- Technical Indicators ---
-
-export const calculateRSI = (
-  data: StockDataPoint[],
-  period: number = 14,
-): StockDataPoint[] => {
-  if (data.length === 0) return [];
-
-  const rsiData = data.map((item) => ({
-    ...item,
-    rsi: undefined as number | undefined,
-  }));
-
-  if (data.length <= period) return rsiData;
-
-  let avgGain = 0;
-  let avgLoss = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const diff = rsiData[i].close - rsiData[i - 1].close;
-    if (diff > 0) avgGain += diff;
-    else avgLoss += Math.abs(diff);
-  }
-
-  avgGain /= period;
-  avgLoss /= period;
-
-  if (rsiData[period]) {
-    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    rsiData[period].rsi = 100 - 100 / (1 + rs);
-  }
-
-  for (let i = period + 1; i < rsiData.length; i++) {
-    const diff = rsiData[i].close - rsiData[i - 1].close;
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? Math.abs(diff) : 0;
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-
-    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    rsiData[i].rsi = 100 - 100 / (1 + rs);
-  }
-
-  return rsiData;
-};
-
-export const calculateBollingerBands = (
-  data: StockDataPoint[],
-  period: number = 20,
-  stdDev: number = 2,
-): StockDataPoint[] => {
-  const bbData = data.map((item) => ({
-    ...item,
-    bollingerBands: undefined as StockDataPoint["bollingerBands"],
-  }));
-
-  if (data.length < period) return bbData;
-
-  for (let i = period - 1; i < bbData.length; i++) {
-    const slice = bbData.slice(i - period + 1, i + 1);
-    const sum = slice.reduce((acc, val) => acc + val.close, 0);
-    const middle = sum / period;
-
-    const variance =
-      slice.reduce((acc, val) => acc + Math.pow(val.close - middle, 2), 0) /
-      period;
-    const standardDeviation = Math.sqrt(variance);
-
-    bbData[i].bollingerBands = {
-      middle: middle,
-      upper: middle + standardDeviation * stdDev,
-      lower: middle - standardDeviation * stdDev,
-    };
-  }
-  return bbData;
-};
-
-// --- Signal Analysis ---
+// --- Signal Analysis (Strategy Runner) ---
 
 export const analyzeAllTradingSignals = (
   data: StockDataPoint[],
@@ -185,10 +122,41 @@ export const analyzeAllTradingSignals = (
   let firstPeakIndex: number | null = null;
   let potentialSecondPeak: StockDataPoint | null = null;
 
+  // Intraday Setup States
+  let isBullishSetupActive = false;
+  let bullishSetupStartDate = "";
+  let isBearishSetupActive = false;
+  let bearishSetupStartDate = "";
+
   const expirationMs =
     timeframe === "1d"
       ? TRADING_CONFIG.timeLimit1dDays * 24 * 60 * 60 * 1000
       : TRADING_CONFIG.timeLimitOtherDays * 24 * 60 * 60 * 1000;
+
+  const minDivergenceBars =
+    timeframe === "1d"
+      ? TRADING_CONFIG.divergenceMinDays
+      : TRADING_CONFIG.divergenceMinDays;
+
+  // Pre-calculate indicators using separated logic
+  const closePrices = data.map((d) => d.close);
+  const highPrices = data.map((d) => d.high);
+  const lowPrices = data.map((d) => d.low);
+  const localVwapData = calculateVWAP(data, timeframe);
+
+  const kamaData = calculateKAMA(closePrices, 10);
+  const kamaTrends = calculateKamaTrend(kamaData, closePrices);
+
+  const gaussianData = calculateGaussianLine(closePrices, 20, 3);
+  const gaussianTrends = calculateGaussianTrend(gaussianData);
+
+  // [수정] VWAP 리테스트 판별기를 독립적인 지표로 계산 완료
+  const vwapRetests = calculateVwapRetest(
+    closePrices,
+    highPrices,
+    lowPrices,
+    localVwapData,
+  );
 
   for (let i = 1; i < data.length; i++) {
     const currentPoint = data[i];
@@ -208,6 +176,7 @@ export const analyzeAllTradingSignals = (
         : currentPoint.date,
     ).getTime();
 
+    // --- Stop Loss & Expiration Logic ---
     if (lastBuySignal && lastBuySignal.entryPrice !== undefined) {
       const buyTimestamp = new Date(
         lastBuySignal.date.includes(" ")
@@ -227,7 +196,7 @@ export const analyzeAllTradingSignals = (
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
-          details: `손절가 도달: ${profitRate.toFixed(2)}%`,
+          details: `Stop-loss triggered: ${profitRate.toFixed(2)}%`,
         });
         lastBuySignal = null;
       } else if (currentTimestamp - buyTimestamp >= expirationMs) {
@@ -241,7 +210,7 @@ export const analyzeAllTradingSignals = (
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
-          details: `보유 한도 초과: ${profitRate.toFixed(2)}%`,
+          details: `Time limit exceeded: ${profitRate.toFixed(2)}%`,
         });
         lastBuySignal = null;
       }
@@ -267,7 +236,7 @@ export const analyzeAllTradingSignals = (
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
-          details: `손절가 도달: ${profitRate.toFixed(2)}%`,
+          details: `Stop-loss triggered: ${profitRate.toFixed(2)}%`,
         });
         lastInverseBuySignal = null;
       } else if (currentTimestamp - invBuyTimestamp >= expirationMs) {
@@ -281,31 +250,119 @@ export const analyzeAllTradingSignals = (
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
-          details: `보유 한도 초과: ${profitRate.toFixed(2)}%`,
+          details: `Time limit exceeded: ${profitRate.toFixed(2)}%`,
         });
         lastInverseBuySignal = null;
       }
     }
 
-    /* --- Buy Signal Logic --- */
+    // --- Intraday Trigger Evaluation ---
+    let isIntradayBullishTrigger = false;
+    let isIntradayBearishTrigger = false;
+
+    if (timeframe !== "1d") {
+      // Consume pre-calculated trend statuses
+      const kamaStatus = kamaTrends[i];
+      const probStatus = gaussianTrends[i];
+      const retestStatus = vwapRetests[i];
+
+      // Bullish Trigger: 5봉 이상 안착된 VWAP을 깨지않고 리테스트 성공 & 상승 지표
+      if (
+        retestStatus.isBullishRetest &&
+        (kamaStatus.isUp || kamaStatus.isGold) &&
+        probStatus.isUp
+      ) {
+        isIntradayBullishTrigger = true;
+      }
+
+      // Bearish Trigger: 5봉 이상 이탈된 VWAP을 깨지않고 리테스트 성공 & 하락 지표
+      if (
+        retestStatus.isBearishRetest &&
+        (kamaStatus.isDown || kamaStatus.isDead) &&
+        probStatus.isDown
+      ) {
+        isIntradayBearishTrigger = true;
+      }
+
+      // Bullish Wait Loop
+      if (isBullishSetupActive && !lastBuySignal) {
+        if (
+          currentPoint.bollingerBands &&
+          currentPoint.high >= currentPoint.bollingerBands.upper
+        ) {
+          isBullishSetupActive = false;
+        } else if (isIntradayBullishTrigger) {
+          const buySignal: TradingSignal = {
+            date: currentPoint.date,
+            startDate: bullishSetupStartDate,
+            type: "buy",
+            reason: "매수 (쌍바닥+VWAP리테스트+KAMA+Prob상승)",
+            entryPrice: currentPoint.close,
+            currentPrice: currentPoint.close,
+            details:
+              "RSI 쌍바닥 이후 VWAP 5봉 이상 방어 리테스트 성공 및 KAMA/Gaussian 상승 전환",
+          };
+          signals.push(buySignal);
+          lastBuySignal = buySignal;
+          isBullishSetupActive = false;
+        }
+      }
+
+      // Bearish Wait Loop
+      if (isBearishSetupActive && !lastInverseBuySignal) {
+        if (
+          currentPoint.bollingerBands &&
+          currentPoint.low <= currentPoint.bollingerBands.lower
+        ) {
+          isBearishSetupActive = false;
+        } else if (isIntradayBearishTrigger) {
+          const inverseBuySignal: TradingSignal = {
+            date: currentPoint.date,
+            startDate: bearishSetupStartDate,
+            type: "inverse-buy",
+            reason: "인버스 매수 (쌍봉+VWAP리테스트+KAMA+Prob하락)",
+            entryPrice: currentPoint.close,
+            currentPrice: currentPoint.close,
+            details:
+              "RSI 쌍봉 이후 VWAP 5봉 이상 하회 리테스트 성공 및 KAMA/Gaussian 하락 전환",
+          };
+          signals.push(inverseBuySignal);
+          lastInverseBuySignal = inverseBuySignal;
+          isBearishSetupActive = false;
+        }
+      }
+    }
+
+    /* --- Setup Logic: RSI Double Bottom --- */
     if (potentialSecondTrough && firstTrough) {
       if (currentPoint.close > potentialSecondTrough.close) {
-        const buySignal: TradingSignal = {
-          date: currentPoint.date,
-          startDate: firstTrough.date,
-          type: "buy",
-          reason: "매수 (RSI 쌍바닥)",
-          entryPrice: currentPoint.close,
-          currentPrice: currentPoint.close, // [FIX] Added currentPrice
-          details: `RSI 상승 다이버전스`,
-        };
-        signals.push(buySignal);
-        lastBuySignal = buySignal;
+        if (timeframe === "1d") {
+          const buySignal: TradingSignal = {
+            date: currentPoint.date,
+            startDate: firstTrough.date,
+            type: "buy",
+            reason: "매수 (RSI 쌍바닥)",
+            entryPrice: currentPoint.close,
+            currentPrice: currentPoint.close,
+            details: `RSI Bullish Divergence`,
+          };
+          signals.push(buySignal);
+          lastBuySignal = buySignal;
+        } else {
+          isBullishSetupActive = true;
+          bullishSetupStartDate = firstTrough.date;
+        }
         firstTrough = null;
         firstTroughIndex = null;
         potentialSecondTrough = null;
       } else {
-        potentialSecondTrough = null;
+        if (currentPoint.rsi < firstTrough.rsi!) {
+          potentialSecondTrough = null;
+          firstTrough = null;
+          firstTroughIndex = null;
+        } else {
+          potentialSecondTrough = currentPoint;
+        }
       }
     }
 
@@ -331,7 +388,7 @@ export const analyzeAllTradingSignals = (
         } else if (daysSinceFirstTrough > TRADING_CONFIG.divergenceMaxDays) {
           firstTrough = null;
           firstTroughIndex = null;
-        } else if (daysSinceFirstTrough > TRADING_CONFIG.divergenceMinDays) {
+        } else if (daysSinceFirstTrough > minDivergenceBars) {
           if (
             currentPoint.close < firstTrough.close &&
             currentPoint.rsi > firstTrough.rsi!
@@ -342,25 +399,36 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* --- Inverse Buy Signal Logic --- */
+    /* --- Setup Logic: RSI Double Peak --- */
     if (potentialSecondPeak && firstPeak) {
       if (currentPoint.close < potentialSecondPeak.close) {
-        const inverseBuySignal: TradingSignal = {
-          date: currentPoint.date,
-          startDate: firstPeak.date,
-          type: "inverse-buy",
-          reason: "인버스 매수 (RSI 쌍봉)",
-          entryPrice: currentPoint.close,
-          currentPrice: currentPoint.close, // [FIX] Added currentPrice
-          details: `RSI 하락 다이버전스`,
-        };
-        signals.push(inverseBuySignal);
-        lastInverseBuySignal = inverseBuySignal;
+        if (timeframe === "1d") {
+          const inverseBuySignal: TradingSignal = {
+            date: currentPoint.date,
+            startDate: firstPeak.date,
+            type: "inverse-buy",
+            reason: "인버스 매수 (RSI 쌍봉)",
+            entryPrice: currentPoint.close,
+            currentPrice: currentPoint.close,
+            details: `RSI Bearish Divergence`,
+          };
+          signals.push(inverseBuySignal);
+          lastInverseBuySignal = inverseBuySignal;
+        } else {
+          isBearishSetupActive = true;
+          bearishSetupStartDate = firstPeak.date;
+        }
         firstPeak = null;
         firstPeakIndex = null;
         potentialSecondPeak = null;
       } else {
-        potentialSecondPeak = null;
+        if (currentPoint.rsi > firstPeak.rsi!) {
+          potentialSecondPeak = null;
+          firstPeak = null;
+          firstPeakIndex = null;
+        } else {
+          potentialSecondPeak = currentPoint;
+        }
       }
     }
 
@@ -386,7 +454,7 @@ export const analyzeAllTradingSignals = (
         } else if (daysSinceFirstPeak > TRADING_CONFIG.divergenceMaxDays) {
           firstPeak = null;
           firstPeakIndex = null;
-        } else if (daysSinceFirstPeak > TRADING_CONFIG.divergenceMinDays) {
+        } else if (daysSinceFirstPeak > minDivergenceBars) {
           if (
             currentPoint.close > firstPeak.close &&
             currentPoint.rsi < firstPeak.rsi!
@@ -397,49 +465,76 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* --- Sell Signal Logic --- */
+    /* --- Sell Signal Logic (Bollinger Bands) --- */
     if (currentPoint.bollingerBands) {
+      // 1. Long Position Exit
+      if (lastBuySignal && lastBuySignal.entryPrice !== undefined) {
+        const isDailyExit =
+          timeframe === "1d" &&
+          currentPoint.close >= currentPoint.bollingerBands.upper;
+        const isIntradayExit =
+          timeframe !== "1d" &&
+          currentPoint.high >= currentPoint.bollingerBands.upper;
+
+        if (isDailyExit || isIntradayExit) {
+          const exitPrice =
+            timeframe === "1d"
+              ? currentPoint.close
+              : currentPoint.bollingerBands.upper;
+          const profitRate =
+            ((exitPrice - lastBuySignal.entryPrice) /
+              lastBuySignal.entryPrice) *
+            100;
+
+          signals.push({
+            date: currentPoint.date,
+            type: "sell",
+            reason: profitRate >= 0 ? "수익 실현 (BB 상단)" : "손실 (BB 상단)",
+            realizedPrice: exitPrice,
+            currentPrice: exitPrice,
+            profitRate: profitRate,
+            details: `BB Upper: ${currentPoint.bollingerBands.upper.toFixed(2)}`,
+          });
+          lastBuySignal = null;
+        }
+      }
+
+      // 2. Short (Inverse) Position Exit
       if (
-        lastBuySignal &&
-        lastBuySignal.entryPrice !== undefined &&
-        currentPoint.close >= currentPoint.bollingerBands.upper
-      ) {
-        const profitRate =
-          ((currentPoint.close - lastBuySignal.entryPrice) /
-            lastBuySignal.entryPrice) *
-          100;
-        signals.push({
-          date: currentPoint.date,
-          type: "sell",
-          reason: profitRate >= 0 ? "수익 실현 (BB 상단)" : "손실 (BB 상단)",
-          realizedPrice: currentPoint.close,
-          currentPrice: currentPoint.close, // [FIX] Added currentPrice
-          profitRate: profitRate,
-          details: `BB상단: ${currentPoint.bollingerBands.upper.toFixed(2)}`,
-        });
-        lastBuySignal = null;
-      } else if (
         lastInverseBuySignal &&
-        lastInverseBuySignal.entryPrice !== undefined &&
-        currentPoint.close <= currentPoint.bollingerBands.lower
+        lastInverseBuySignal.entryPrice !== undefined
       ) {
-        const profitRate =
-          ((lastInverseBuySignal.entryPrice - currentPoint.close) /
-            lastInverseBuySignal.entryPrice) *
-          100;
-        signals.push({
-          date: currentPoint.date,
-          type: "sell",
-          reason: profitRate >= 0 ? "수익 실현 (BB 하단)" : "손실 (BB 하단)",
-          realizedPrice: currentPoint.close,
-          currentPrice: currentPoint.close, // [FIX] Added currentPrice
-          profitRate: profitRate,
-          details: `BB하단: ${currentPoint.bollingerBands.lower.toFixed(2)}`,
-        });
-        lastInverseBuySignal = null;
+        const isDailyExit =
+          timeframe === "1d" &&
+          currentPoint.close <= currentPoint.bollingerBands.lower;
+        const isIntradayExit =
+          timeframe !== "1d" &&
+          currentPoint.low <= currentPoint.bollingerBands.lower;
+
+        if (isDailyExit || isIntradayExit) {
+          const exitPrice =
+            timeframe === "1d"
+              ? currentPoint.close
+              : currentPoint.bollingerBands.lower;
+          const profitRate =
+            ((lastInverseBuySignal.entryPrice - exitPrice) /
+              lastInverseBuySignal.entryPrice) *
+            100;
+
+          signals.push({
+            date: currentPoint.date,
+            type: "sell",
+            reason: profitRate >= 0 ? "수익 실현 (BB 하단)" : "손실 (BB 하단)",
+            realizedPrice: exitPrice,
+            currentPrice: exitPrice,
+            profitRate: profitRate,
+            details: `BB Lower: ${currentPoint.bollingerBands.lower.toFixed(2)}`,
+          });
+          lastInverseBuySignal = null;
+        }
       }
     }
-  }
+  } // End of For Loop
 
   const uniqueSignalsMap = new Map<string, TradingSignal>();
   signals.forEach((s) => {
@@ -454,14 +549,13 @@ export const analyzeAllTradingSignals = (
       (s) => s.date === lastDataPoint.date,
     );
 
-    // [FIX] 'hold' 시그널 생성 시 텔레그램에서 수익률 계산이 가능하도록 현재가를 강제 주입
     if (!hasSignalOnLastDate) {
       uniqueSignals.push({
         date: lastDataPoint.date,
         type: "hold",
         reason: "관망 (중립 구간)",
-        realizedPrice: lastDataPoint.close, // fallback for legacy code
-        currentPrice: lastDataPoint.close, // new explicit field
+        realizedPrice: lastDataPoint.close,
+        currentPrice: lastDataPoint.close,
       });
     }
   }

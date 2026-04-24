@@ -1,38 +1,203 @@
 /* lib/charts/indicators.ts */
-import { Time } from "lightweight-charts";
+import { Time, BusinessDay } from "lightweight-charts";
 
-// 1. KAMA (Kaufman's Adaptive Moving Average)
+// --- Generic Indicator Math Functions ---
+
+export const calculateRSI = <T extends { close: number; rsi?: number }>(
+  data: T[],
+  period: number = 14,
+): T[] => {
+  if (data.length === 0) return [];
+  const rsiData = data.map((item) => ({
+    ...item,
+    rsi: undefined as number | undefined,
+  }));
+  if (data.length <= period) return rsiData;
+
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = rsiData[i].close - rsiData[i - 1].close;
+    if (diff > 0) avgGain += diff;
+    else avgLoss += Math.abs(diff);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  if (rsiData[period]) {
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsiData[period].rsi = 100 - 100 / (1 + rs);
+  }
+
+  for (let i = period + 1; i < rsiData.length; i++) {
+    const diff = rsiData[i].close - rsiData[i - 1].close;
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? Math.abs(diff) : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsiData[i].rsi = 100 - 100 / (1 + rs);
+  }
+  return rsiData;
+};
+
+export const calculateBollingerBands = <
+  T extends {
+    close: number;
+    bollingerBands?: { middle: number; upper: number; lower: number };
+  },
+>(
+  data: T[],
+  period: number = 20,
+  stdDev: number = 2,
+): T[] => {
+  const bbData = data.map((item) => ({
+    ...item,
+    bollingerBands: undefined as T["bollingerBands"],
+  }));
+
+  if (data.length < period) return bbData;
+
+  for (let i = period - 1; i < bbData.length; i++) {
+    const slice = bbData.slice(i - period + 1, i + 1);
+    const sum = slice.reduce((acc, val) => acc + val.close, 0);
+    const middle = sum / period;
+    const variance =
+      slice.reduce((acc, val) => acc + Math.pow(val.close - middle, 2), 0) /
+      period;
+    const sd = Math.sqrt(variance);
+
+    bbData[i].bollingerBands = {
+      middle,
+      upper: middle + sd * stdDev,
+      lower: middle - sd * stdDev,
+    };
+  }
+  return bbData;
+};
+
 export const calculateKAMA = (
-  data: number[],
-  period: number,
-  fastEnd = 2,
-  slowEnd = 30,
+  closePrices: number[],
+  period: number = 10,
+  fastEnd: number = 2,
+  slowEnd: number = 30,
 ): (number | null)[] => {
-  const kama: (number | null)[] = new Array(data.length).fill(null);
-  if (data.length < period) return kama;
+  const kama: (number | null)[] = new Array(closePrices.length).fill(null);
+  if (closePrices.length < period) return kama;
 
   const fastest = 2 / (fastEnd + 1);
   const slowest = 2 / (slowEnd + 1);
 
   let sum = 0;
-  for (let i = 0; i < period; i++) sum += data[i];
+  for (let i = 0; i < period; i++) sum += closePrices[i];
   kama[period - 1] = sum / period;
 
-  for (let i = period; i < data.length; i++) {
-    const change = Math.abs(data[i] - data[i - period]);
+  for (let i = period; i < closePrices.length; i++) {
+    const change = Math.abs(closePrices[i] - closePrices[i - period]);
     let volatility = 0;
     for (let j = 0; j < period; j++) {
-      volatility += Math.abs(data[i - j] - data[i - j - 1]);
+      volatility += Math.abs(closePrices[i - j] - closePrices[i - j - 1]);
     }
     const er = volatility === 0 ? 0 : change / volatility;
     const sc = Math.pow(er * (fastest - slowest) + slowest, 2);
     kama[i] =
-      (kama[i - 1] as number) + sc * (data[i] - (kama[i - 1] as number));
+      (kama[i - 1] as number) + sc * (closePrices[i] - (kama[i - 1] as number));
   }
   return kama;
 };
 
-// 2. MACD Reloaded
+export const calculateVWAP = <
+  T extends {
+    date?: string;
+    chartTime?: Time;
+    high: number;
+    low: number;
+    close: number;
+    volume?: number | string;
+  },
+>(
+  data: T[],
+  timeframe: string,
+): (number | null)[] => {
+  const vwap: (number | null)[] = new Array(data.length).fill(null);
+  const isIntraday = timeframe === "1h" || timeframe === "15m";
+
+  let cumulativeTypicalVolume = 0;
+  let cumulativeVolume = 0;
+  let currentAnchorKey = "";
+
+  for (let i = 0; i < data.length; i++) {
+    const candle = data[i];
+    let dateStr = "";
+
+    if (candle.date) {
+      dateStr = candle.date;
+    } else if (candle.chartTime !== undefined) {
+      if (typeof candle.chartTime === "number") {
+        dateStr = new Date(candle.chartTime * 1000).toISOString();
+      } else if (typeof candle.chartTime === "string") {
+        dateStr = candle.chartTime;
+      } else {
+        const bd = candle.chartTime as BusinessDay;
+        dateStr = `${bd.year}-${String(bd.month).padStart(2, "0")}-${String(bd.day).padStart(2, "0")}`;
+      }
+    } else {
+      continue;
+    }
+
+    const datePart = dateStr.includes("T")
+      ? dateStr.split("T")[0]
+      : dateStr.split(" ")[0];
+    const yearStr = datePart.substring(0, 4);
+
+    let shouldReset = false;
+    if (isIntraday) {
+      shouldReset = datePart !== currentAnchorKey;
+      if (shouldReset) currentAnchorKey = datePart;
+    } else {
+      shouldReset = yearStr !== currentAnchorKey;
+      if (shouldReset) currentAnchorKey = yearStr;
+    }
+
+    if (shouldReset) {
+      cumulativeTypicalVolume = 0;
+      cumulativeVolume = 0;
+    }
+
+    const typicalPrice = (candle.high + candle.low + candle.close) / 3;
+    const vol = Number(candle.volume) || 1;
+
+    cumulativeTypicalVolume += typicalPrice * vol;
+    cumulativeVolume += vol;
+
+    vwap[i] =
+      cumulativeVolume === 0
+        ? candle.close
+        : cumulativeTypicalVolume / cumulativeVolume;
+  }
+  return vwap;
+};
+
+export const calculateEMA = (
+  data: number[],
+  period: number,
+): (number | null)[] => {
+  const ema: (number | null)[] = new Array(data.length).fill(null);
+  if (data.length < period) return ema;
+
+  const k = 2 / (period + 1);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += data[i];
+  let previousEma = sum / period;
+  ema[period - 1] = previousEma;
+
+  for (let i = period; i < data.length; i++) {
+    previousEma = (data[i] - previousEma) * k + previousEma;
+    ema[i] = previousEma;
+  }
+  return ema;
+};
+
 export const calculateMacdKama = (closePrices: number[]) => {
   const fastKAMA = calculateKAMA(closePrices, 12);
   const slowKAMA = calculateKAMA(closePrices, 26);
@@ -72,7 +237,6 @@ export const calculateMacdKama = (closePrices: number[]) => {
   return { macdLineRaw, signalLineRaw, histogramRaw };
 };
 
-// 3. MACD Real-time Status Tag
 export const getMacdStatus = (
   macdLineRaw: (number | null)[],
   signalLineRaw: (number | null)[],
@@ -114,7 +278,6 @@ export const getMacdStatus = (
   return { title, color, value };
 };
 
-// 4. Probability Zone Levels (1,000 Candles)
 export const calculateProbabilityLevels = (closePrices: number[]) => {
   const lookbackPeriod = Math.min(1000, closePrices.length);
   if (lookbackPeriod <= 10) return [];
@@ -141,17 +304,16 @@ export const calculateProbabilityLevels = (closePrices: number[]) => {
   ];
 };
 
-// 5. Gaussian Filter and Trend Box Extraction
 export interface TrendBox {
   startTime: Time;
   endTime: Time;
   topPrice: number;
   bottomPrice: number;
   isUptrend: boolean;
-  prices: number[]; // Store close prices for statistical calculation
+  prices: number[];
 }
 
-function getGaussianWeights(period: number, sigma: number): number[] {
+export function getGaussianWeights(period: number, sigma: number): number[] {
   const weights: number[] = [];
   let sum = 0;
   for (let i = 0; i < period; i++) {
@@ -162,12 +324,12 @@ function getGaussianWeights(period: number, sigma: number): number[] {
   return weights.map((w) => w / sum);
 }
 
-export const calculateGaussianTrendBoxes = (
-  data: { time: Time; close: number; high: number; low: number }[],
+export const calculateGaussianLine = (
+  data: number[],
   period: number = 20,
   sigma: number = 3,
-): TrendBox[] => {
-  if (!data || data.length < period) return [];
+): (number | null)[] => {
+  if (!data || data.length < period) return new Array(data.length).fill(null);
 
   const weights = getGaussianWeights(period, sigma);
   const gaussianLine: (number | null)[] = new Array(data.length).fill(null);
@@ -175,10 +337,22 @@ export const calculateGaussianTrendBoxes = (
   for (let i = period - 1; i < data.length; i++) {
     let sum = 0;
     for (let j = 0; j < period; j++) {
-      sum += data[i - j].close * weights[j];
+      sum += data[i - j] * weights[j];
     }
     gaussianLine[i] = sum;
   }
+  return gaussianLine;
+};
+
+export const calculateGaussianTrendBoxes = (
+  data: { time: Time; close: number; high: number; low: number }[],
+  period: number = 20,
+  sigma: number = 3,
+): TrendBox[] => {
+  if (!data || data.length < period) return [];
+
+  const closePrices = data.map((d) => d.close);
+  const gaussianLine = calculateGaussianLine(closePrices, period, sigma);
 
   const boxes: TrendBox[] = [];
   let currentBox: Partial<TrendBox> = { prices: [] };
@@ -232,91 +406,106 @@ export const calculateGaussianTrendBoxes = (
   return boxes;
 };
 
-// 6. Exponential Moving Average (EMA)
-export const calculateEMA = (
-  data: number[],
-  period: number,
-): (number | null)[] => {
-  const ema: (number | null)[] = new Array(data.length).fill(null);
-  if (data.length < period) return ema;
+// --- Extracted Indicator Status Functions for Strategy Isolation ---
 
-  const k = 2 / (period + 1);
-  let sum = 0;
-  for (let i = 0; i < period; i++) sum += data[i];
-  let previousEma = sum / period;
-  ema[period - 1] = previousEma;
+export interface TrendStatus {
+  isUp: boolean;
+  isDown: boolean;
+  isGold?: boolean;
+  isDead?: boolean;
+}
 
-  for (let i = period; i < data.length; i++) {
-    previousEma = (data[i] - previousEma) * k + previousEma;
-    ema[i] = previousEma;
-  }
-  return ema;
+export const calculateKamaTrend = (
+  kamaData: (number | null)[],
+  closePrices: number[],
+): TrendStatus[] => {
+  return kamaData.map((k, i) => {
+    if (i === 0 || k === null || kamaData[i - 1] === null) {
+      return { isUp: false, isDown: false, isGold: false, isDead: false };
+    }
+    const pk = kamaData[i - 1] as number;
+    const currentClose = closePrices[i];
+    const prevClose = closePrices[i - 1];
+
+    return {
+      isUp: k > pk,
+      isDown: k < pk,
+      isGold: prevClose <= pk && currentClose > k,
+      isDead: prevClose >= pk && currentClose < k,
+    };
+  });
 };
 
-// 7. Volume Weighted Average Price (VWAP)
-export const calculateVWAP = (
-  data: {
-    date?: string;
-    chartTime?: Time;
-    high: number;
-    low: number;
-    close: number;
-    volume?: number | string;
-  }[],
-  timeframe: string,
-): (number | null)[] => {
-  const vwap: (number | null)[] = new Array(data.length).fill(null);
-  const isIntraday = timeframe === "1h" || timeframe === "15m";
+export const calculateGaussianTrend = (
+  gaussianData: (number | null)[],
+): TrendStatus[] => {
+  return gaussianData.map((g, i) => {
+    if (i === 0 || g === null || gaussianData[i - 1] === null) {
+      return { isUp: false, isDown: false };
+    }
+    const pg = gaussianData[i - 1] as number;
+    return {
+      isUp: g > pg,
+      isDown: g < pg,
+    };
+  });
+};
 
-  let cumulativeTypicalVolume = 0;
-  let cumulativeVolume = 0;
-  let currentAnchorKey = "";
+// --- [추가] VWAP Retest Algorithm ---
+export interface VwapRetestStatus {
+  isBullishRetest: boolean;
+  isBearishRetest: boolean;
+}
 
-  for (let i = 0; i < data.length; i++) {
-    const candle = data[i];
+export const calculateVwapRetest = (
+  closePrices: number[],
+  highPrices: number[],
+  lowPrices: number[],
+  vwap: (number | null)[],
+): VwapRetestStatus[] => {
+  const status: VwapRetestStatus[] = new Array(closePrices.length).fill({
+    isBullishRetest: false,
+    isBearishRetest: false,
+  });
+  let consecutiveAbove = 0;
+  let consecutiveBelow = 0;
 
-    let dateStr = "";
-    if (candle.date) {
-      dateStr = candle.date;
-    } else if (candle.chartTime) {
-      dateStr =
-        typeof candle.chartTime === "number"
-          ? new Date(candle.chartTime * 1000).toISOString()
-          : String(candle.chartTime);
-    } else {
-      continue;
+  for (let i = 0; i < closePrices.length; i++) {
+    const c = closePrices[i];
+    const h = highPrices[i];
+    const l = lowPrices[i];
+    const v = vwap[i];
+
+    let isBullishRetest = false;
+    let isBearishRetest = false;
+
+    if (v !== null) {
+      // 1. 카운팅 규칙: 종가가 VWAP 위에 있으면 유지, 아래로 깨지면 즉시 리셋
+      if (c > v) {
+        consecutiveAbove++;
+        consecutiveBelow = 0;
+      } else if (c < v) {
+        consecutiveBelow++;
+        consecutiveAbove = 0;
+      } else {
+        // VWAP과 종가가 완전히 동일한 경우 (안전을 위해 리셋)
+        consecutiveAbove = 0;
+        consecutiveBelow = 0;
+      }
+
+      // 2. 리테스트 조건 확정
+      // 5봉 이상 안착 성공 상태 + 꼬리로 VWAP 터치(low <= v) + 종가는 VWAP 방어 성공(c > v)
+      if (consecutiveAbove >= 5 && l <= v && c > v) {
+        isBullishRetest = true;
+      }
+
+      // 5봉 이상 하락 안착 상태 + 꼬리로 VWAP 터치(high >= v) + 종가는 저항 방어 성공(c < v)
+      if (consecutiveBelow >= 5 && h >= v && c < v) {
+        isBearishRetest = true;
+      }
     }
 
-    const datePart = dateStr.includes("T")
-      ? dateStr.split("T")[0]
-      : dateStr.split(" ")[0];
-    const yearStr = datePart.substring(0, 4);
-
-    let shouldReset = false;
-    if (isIntraday) {
-      shouldReset = datePart !== currentAnchorKey;
-      if (shouldReset) currentAnchorKey = datePart;
-    } else {
-      shouldReset = yearStr !== currentAnchorKey;
-      if (shouldReset) currentAnchorKey = yearStr;
-    }
-
-    if (shouldReset) {
-      cumulativeTypicalVolume = 0;
-      cumulativeVolume = 0;
-    }
-
-    const typicalPrice = (candle.high + candle.low + candle.close) / 3;
-    const vol = Number(candle.volume) || 1;
-
-    cumulativeTypicalVolume += typicalPrice * vol;
-    cumulativeVolume += vol;
-
-    vwap[i] =
-      cumulativeVolume === 0
-        ? candle.close
-        : cumulativeTypicalVolume / cumulativeVolume;
+    status[i] = { isBullishRetest, isBearishRetest };
   }
-
-  return vwap;
+  return status;
 };

@@ -127,15 +127,42 @@ export const StockChartDisplay = forwardRef<
       const ema9Results = calculateEMA(closes, 9);
       const ema20Results = calculateEMA(closes, 20);
 
+      // Track active holding period state
+      let isHolding = false;
+
       const processed = uniqueData.map((d, i) => {
-        const hasSignal = signals.find(
+        const signalsOnDate = signals.filter((s) => s.date === d.date);
+
+        let turnOn = false;
+        let turnOff = false;
+
+        signalsOnDate.forEach((s) => {
+          if (s.type === "buy" || s.type === "inverse-buy") turnOn = true;
+          if (s.type === "sell") turnOff = true;
+        });
+
+        // Start holding if buy signal occurs
+        if (turnOn) isHolding = true;
+
+        // Legacy check: Keep highlighting pattern formation periods (e.g. RSI Double Bottom formation)
+        const isPatternFormation = signals.some(
           (s) =>
-            (s.startDate &&
-              d.date >= s.startDate &&
-              d.date <= s.date &&
-              s.type.includes("buy")) ||
-            (s.date === d.date && s.type === "sell"),
+            s.startDate &&
+            d.date >= s.startDate &&
+            d.date <= s.date &&
+            s.type.includes("buy"),
         );
+
+        // [수정] 보유 기간은 초록색, 매수 대기(패턴 형성) 기간은 노란색으로 구분
+        let highlightColor: string | undefined = undefined;
+        if (isHolding || turnOff) {
+          highlightColor = "#4CAF50"; // Green for holding period and sell day
+        } else if (isPatternFormation) {
+          highlightColor = "#FFEB3B"; // Yellow for setup/waiting period
+        }
+
+        // End holding after processing the sell candle
+        if (turnOff) isHolding = false;
 
         const extD = d as ExtendedDataPoint;
 
@@ -145,7 +172,7 @@ export const StockChartDisplay = forwardRef<
           high: Number(d.high),
           low: Number(d.low),
           close: Number(d.close),
-          color: hasSignal ? "#FFEB3B" : undefined,
+          color: highlightColor,
           rsi: typeof d.rsi === "number" && !isNaN(d.rsi) ? d.rsi : undefined,
           upper: d.bollingerBands?.upper,
           lower: d.bollingerBands?.lower,
@@ -170,7 +197,8 @@ export const StockChartDisplay = forwardRef<
                 ? ema20Results[i]
                 : undefined,
 
-          date: d.date,
+          // Apply line break between date and time for UI formatting
+          date: d.date.replace(/[ T]/, "\n"),
         } as ProcessedChartData;
       });
 
@@ -265,7 +293,11 @@ export const StockChartDisplay = forwardRef<
     useImperativeHandle(ref, () => ({
       moveToDate(date: string) {
         if (mainChart && processedData.length > 0) {
-          const idx = processedData.findIndex((d) => d.date === date);
+          // Format the incoming date string to match the applied line break for searching
+          const formattedDate = date.replace(/[ T]/, "\n");
+          const idx = processedData.findIndex(
+            (d) => d.date === formattedDate || d.date === date,
+          );
           if (idx !== -1) {
             const range = mainChart.timeScale().getVisibleLogicalRange();
             if (range)
