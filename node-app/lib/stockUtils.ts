@@ -7,6 +7,7 @@ import {
   calculateKamaTrend,
   calculateGaussianTrend,
   calculateVwapRetest,
+  calculateMacdKama, // [추가] MACD 계산 함수 임포트
 } from "@/lib/charts/indicators";
 
 // Re-export indicators to prevent import errors in backend API routes
@@ -67,6 +68,20 @@ export interface StockDataPoint {
   vwap?: number;
   ema9?: number;
   ema20?: number;
+  // [추가] Gemini AI 조언 생성 시 컨텍스트로 제공할 추가 지표 상태
+  kama?: number;
+  kamaTrend?: {
+    isUp: boolean;
+    isDown: boolean;
+    isGold?: boolean;
+    isDead?: boolean;
+  };
+  gaussian?: number;
+  gaussianTrend?: { isUp: boolean; isDown: boolean };
+  vwapRetest?: { isBullishRetest: boolean; isBearishRetest: boolean };
+  macd?: number;
+  macdSignal?: number;
+  macdHist?: number;
 }
 
 export interface TradingSignal {
@@ -142,6 +157,7 @@ export const analyzeAllTradingSignals = (
   const closePrices = data.map((d) => d.close);
   const highPrices = data.map((d) => d.high);
   const lowPrices = data.map((d) => d.low);
+
   const localVwapData = calculateVWAP(data, timeframe);
 
   const kamaData = calculateKAMA(closePrices, 10);
@@ -150,13 +166,34 @@ export const analyzeAllTradingSignals = (
   const gaussianData = calculateGaussianLine(closePrices, 20, 3);
   const gaussianTrends = calculateGaussianTrend(gaussianData);
 
-  // [수정] VWAP 리테스트 판별기를 독립적인 지표로 계산 완료
   const vwapRetests = calculateVwapRetest(
     closePrices,
     highPrices,
     lowPrices,
     localVwapData,
   );
+
+  // [추가] MACD 데이터 계산
+  const { macdLineRaw, signalLineRaw, histogramRaw } =
+    calculateMacdKama(closePrices);
+
+  // [수정] 외부(Gemini AI 등)에서 사용할 수 있도록 원본 data 배열의 모든 객체에 계산된 지표 일괄 주입
+  for (let i = 0; i < data.length; i++) {
+    data[i].vwap =
+      localVwapData[i] !== null ? (localVwapData[i] as number) : undefined;
+    data[i].kama = kamaData[i] !== null ? (kamaData[i] as number) : undefined;
+    data[i].kamaTrend = kamaTrends[i];
+    data[i].gaussian =
+      gaussianData[i] !== null ? (gaussianData[i] as number) : undefined;
+    data[i].gaussianTrend = gaussianTrends[i];
+    data[i].vwapRetest = vwapRetests[i];
+    data[i].macd =
+      macdLineRaw[i] !== null ? (macdLineRaw[i] as number) : undefined;
+    data[i].macdSignal =
+      signalLineRaw[i] !== null ? (signalLineRaw[i] as number) : undefined;
+    data[i].macdHist =
+      histogramRaw[i] !== null ? (histogramRaw[i] as number) : undefined;
+  }
 
   for (let i = 1; i < data.length; i++) {
     const currentPoint = data[i];
@@ -261,7 +298,6 @@ export const analyzeAllTradingSignals = (
     let isIntradayBearishTrigger = false;
 
     if (timeframe !== "1d") {
-      // Consume pre-calculated trend statuses
       const kamaStatus = kamaTrends[i];
       const probStatus = gaussianTrends[i];
       const retestStatus = vwapRetests[i];

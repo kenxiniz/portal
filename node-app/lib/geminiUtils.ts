@@ -115,6 +115,10 @@ async function performBatchGeminiCall(
               } else if (s.type.includes("buy") && s.entryPrice) {
                 signalDesc += ` (Entry: ${s.entryPrice})`;
               }
+              // Append details if available to give Gemini more context on indicators
+              if (s.details) {
+                signalDesc += ` - Details: ${s.details}`;
+              }
               return signalDesc;
             })
             .join("\n")
@@ -124,6 +128,11 @@ async function performBatchGeminiCall(
       date: d.date,
       close: d.close,
       rsi: d.rsi ? parseFloat(d.rsi.toFixed(2)) : null,
+      vwap: d.vwap ? parseFloat(d.vwap.toFixed(2)) : null,
+      kamaTrend: d.kamaTrend, // <-- 추가! (이하 동일하게)
+      gaussianTrend: d.gaussianTrend,
+      vwapRetest: d.vwapRetest,
+      macd: d.macd ? parseFloat(d.macd.toFixed(2)) : null,
     }));
 
     dataPayload += `\n### Ticker Key: ${item.ticker}\n`;
@@ -132,10 +141,19 @@ async function performBatchGeminiCall(
     dataPayload += `Recent 1 Year Signals:\n${signalsString}\n`;
   });
 
+  // Updated prompt to incorporate advanced technical indicators context
   const prompt = `
-You are an expert ${marketContext} analyst.
-Analyze the provided data for multiple stocks and generate investment advice for each.
+You are an expert ${marketContext} quantitative and technical analyst.
+Analyze the provided data and trading signals for multiple stocks and generate investment advice for each.
 Date: ${todayString}
+
+CONTEXT ON TRADING STRATEGY:
+The trading signals are generated based on a sophisticated algorithm incorporating:
+1. RSI Divergence (Double Bottom/Peak).
+2. VWAP (Volume Weighted Average Price) Retest: Checking if price successfully defends or breaks VWAP support/resistance levels.
+3. KAMA (Kaufman's Adaptive Moving Average): Used for evaluating adaptive momentum direction (Up/Down/Gold/Dead).
+4. Probability Trend (Gaussian Filter): Used to identify the smoothed underlying trend direction.
+5. Bollinger Bands: Used for target exits (touching upper/lower bands).
 
 REQUIREMENTS:
 1. You MUST return a valid JSON object.
@@ -144,14 +162,14 @@ REQUIREMENTS:
 4. Each advice string format MUST exactly follow this structure:
 [${todayString} 기준]
 **One-line summary in bold**
-- Detailed analysis bullet 1
-- Detailed analysis bullet 2
+- Detailed analysis bullet 1 (Analyze recent price action, RSI, and VWAP context if applicable)
+- Detailed analysis bullet 2 (Analyze KAMA momentum, probability trends, and recent signal meanings)
 5. Do not include any markdown code blocks (like \`\`\`json) or any other text outside the JSON object.
 
 EXAMPLE OUTPUT FORMAT:
 {
-  "AAPL": "[${todayString} 기준]\\n**단기 상승 추세, 매수 유지**\\n- 최근 7일간 RSI가 50에서 65로 꾸준히 상승하며 매수세가 유입되고 있습니다.\\n- 150달러 부근의 지지선을 확인한 후 반등하는 모습을 보이고 있어 긍정적입니다.",
-  "TSLA": "[${todayString} 기준]\\n**변동성 확대 예상, 관망 추천**\\n- 거래량이 급증하며 주가 등락폭이 커지고 있어 단기적인 주의가 필요합니다.\\n- 과거 매수 신호 발생 이후 추가 상승 동력이 다소 부족한 상태입니다."
+  "AAPL": "[${todayString} 기준]\\n**VWAP 지지 및 모멘텀 상승, 단기 매수 유효**\\n- 최근 RSI 상승 다이버전스 이후 VWAP을 성공적으로 리테스트하며 든든한 지지선을 확보했습니다.\\n- 적응형 모멘텀(KAMA)과 가우시안 프로빌러티 추세가 모두 상승 전환하여 추가적인 반등 여력이 돋보입니다.",
+  "TSLA": "[${todayString} 기준]\\n**저항선 돌파 실패 및 모멘텀 약화, 관망 필요**\\n- 최근 VWAP 저항선을 돌파하지 못하고 하락 리테스트에 실패하며 매도세가 우위를 점하고 있습니다.\\n- 단기 모멘텀 지표가 하락세로 꺾여 변동성 확대가 예상되니 주의가 필요합니다."
 }
 
 STOCK DATA TO ANALYZE:
