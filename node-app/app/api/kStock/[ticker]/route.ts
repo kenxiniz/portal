@@ -115,24 +115,38 @@ export async function GET(request: Request) {
     // --- Step 3: Self-Healing & Calculate API Fetch Boundary ---
     let stopTimestamp = 0;
     const now = Date.now();
+    const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
 
-    // Check if we need a deep fetch (Seeding Mode) to fulfill the 500 candles requirement
-    const isSeedingMode = uniqueDbCandles.length < 500;
+    // [핵심 수정] 각 timeframe별로 달성 가능한 '현실적 최대 캔들 수'를 목표치로 설정합니다.
+    let targetCandles = 500;
+    if (timeframe === "1h") {
+      targetCandles = 120; // 한국 주식 1시간봉은 최대 약 130개까지만 생성 가능
+    } else if (timeframe === "15m") {
+      targetCandles = 400; // 한국 주식 15분봉은 최대 약 480개까지만 생성 가능
+    }
 
-    if (isSeedingMode) {
+    // 1. DB에 캔들이 목표치보다 부족하거나 (과거 데이터 누락)
+    // 2. 가장 마지막 업데이트가 1주일이 넘었을 때 (데이터 방치) 풀스캔을 돌립니다.
+    const isMissingMoreThanOneWeek =
+      uniqueDbCandles.length < targetCandles ||
+      now - latestDbTimestamp > oneWeekMs;
+
+    if (isMissingMoreThanOneWeek) {
       if (timeframe === "1d") {
-        // Fetch approx 3 years of history to guarantee at least 500 trading days
-        stopTimestamp = now - 1095 * 24 * 60 * 60 * 1000;
+        stopTimestamp = now - 730 * 24 * 60 * 60 * 1000; // 2년 치
       } else if (timeframe === "1h") {
-        stopTimestamp = now - 60 * 24 * 60 * 60 * 1000;
+        stopTimestamp = now - 60 * 24 * 60 * 60 * 1000; // 60일 치
       } else {
-        stopTimestamp = now - 15 * 24 * 60 * 60 * 1000;
+        stopTimestamp = now - 15 * 24 * 60 * 60 * 1000; // 15일 치
       }
       console.log(
-        `[WARN] [${ticker}] DB needs seeding (Count: ${uniqueDbCandles.length}). Force fetching history down to: ${new Date(stopTimestamp).toISOString()}`,
+        `[WARN] [${ticker}] DB needs healing (Count: ${uniqueDbCandles.length} < Target: ${targetCandles} or Stale). Force fetching full history down to: ${new Date(stopTimestamp).toISOString()}`,
       );
     } else {
       stopTimestamp = latestDbTimestamp;
+      console.log(
+        `[INFO] [${ticker}] Fetching missing data since ${new Date(stopTimestamp).toISOString()}`,
+      );
     }
 
     // --- Step 4: Fetch from API ---
@@ -148,9 +162,10 @@ export async function GET(request: Request) {
     // --- Step 5: Strictly Filter & Save ---
     if (apiData && apiData.length > 0) {
       const newDataToSave = apiData.filter((candle) => {
-        // If in seeding mode, bypass the timestamp filter to save all historical data
-        if (isSeedingMode) return true;
+        // If we did a deep fetch due to missing data, save everything we fetched
+        if (isMissingMoreThanOneWeek) return true;
 
+        // Otherwise, only save data newer than our latest DB record
         return new Date(candle.date).getTime() >= latestDbTimestamp;
       });
 

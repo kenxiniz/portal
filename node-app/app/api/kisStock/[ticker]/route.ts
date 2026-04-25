@@ -107,21 +107,30 @@ export async function GET(request: Request) {
     // --- Step 3: Self-Healing & Calculate API Fetch Boundary ---
     let stopTimestamp = 0;
     const now = Date.now();
+    const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
 
-    // 만약 DB에 중복이 너무 많아서 진짜 유효한 캔들이 30개도 안 된다면?
-    // 과거 데이터가 밀려난 상황이므로, DB를 무시하고 40일치(분봉은 5일치)를 강제로 다시 긁어옵니다 (자가 치유).
-    if (uniqueDbCandles.length < 30) {
+    // 1. DB에 500개 미만으로 저장되어 있거나 (처음 조회하는 종목)
+    // 2. 가장 마지막 데이터가 현재보다 1주일 이상 과거일 경우 (오래 방치되어 이빨이 많이 빠진 종목)
+    const isMissingMoreThanOneWeek =
+      uniqueDbCandles.length < 500 || now - latestDbTimestamp > oneWeekMs;
+
+    if (isMissingMoreThanOneWeek) {
       if (timeframe === "1d") {
-        stopTimestamp = now - 40 * 24 * 60 * 60 * 1000;
+        stopTimestamp = now - 730 * 24 * 60 * 60 * 1000; // 500개 이상 확보를 위해 2년 치
+      } else if (timeframe === "1h") {
+        stopTimestamp = now - 60 * 24 * 60 * 60 * 1000; // 60일 치
       } else {
-        stopTimestamp = now - 5 * 24 * 60 * 60 * 1000;
+        stopTimestamp = now - 15 * 24 * 60 * 60 * 1000; // 15일 치
       }
       console.log(
-        `[WARN] [${ticker}] DB is bloated or empty. Force fetching history down to: ${new Date(stopTimestamp).toISOString()}`,
+        `[WARN] [${ticker}] Missing > 1 week data or not enough candles. Force fetching full history down to: ${new Date(stopTimestamp).toISOString()}`,
       );
     } else {
-      // 정상적일 경우 가장 최신 날짜까지만 가져와서 낭비 최소화
+      // 누락된 기간이 1주일 미만이면 빈 구간(최신 데이터)만 가져와서 낭비 최소화
       stopTimestamp = latestDbTimestamp;
+      console.log(
+        `[INFO] [${ticker}] Fetching missing data since ${new Date(stopTimestamp).toISOString()}`,
+      );
     }
 
     // --- Step 4: Fetch from API ---

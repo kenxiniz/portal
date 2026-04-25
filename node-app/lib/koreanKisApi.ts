@@ -14,6 +14,14 @@ const globalKisToken = global as typeof globalThis & {
   kisTokenPromise?: Promise<string> | null;
 };
 
+// [트래픽 제어] KIS API 429 에러 방지를 위한 글로벌 신호등
+const globalKisState = global as typeof globalThis & {
+  kisLastRequestTime?: number;
+  kisRequestQueuePromise?: Promise<void>;
+};
+
+const RATE_LIMIT_DELAY_MS = 70; // 초당 14회 제한 (KIS 초당 20회 제한 방어)
+
 interface KisKrStockItem {
   stck_bsop_date: string;
   stck_oprc: string;
@@ -35,15 +43,40 @@ interface KisKrMinuteStockItem {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function rateLimitedFetch(url: string, options: AxiosRequestConfig) {
+  const prevPromise =
+    globalKisState.kisRequestQueuePromise || Promise.resolve();
+
+  let resolveNext: () => void;
+  globalKisState.kisRequestQueuePromise = new Promise((resolve) => {
+    resolveNext = resolve;
+  });
+
+  await prevPromise;
+
+  const now = Date.now();
+  const last = globalKisState.kisLastRequestTime || 0;
+  const timeToWait = Math.max(0, RATE_LIMIT_DELAY_MS - (now - last));
+
+  if (timeToWait > 0) {
+    await sleep(timeToWait);
+  }
+
+  globalKisState.kisLastRequestTime = Date.now();
+  resolveNext!();
+
+  return axios(url, options);
+}
+
 async function fetchWithRetry(
   url: string,
   options: AxiosRequestConfig,
   retries: number = 3,
-  delayMs: number = 1000,
+  delayMs: number = 500,
 ) {
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await axios(url, options);
+      const response = await rateLimitedFetch(url, options);
       return response;
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
@@ -51,8 +84,10 @@ async function fetchWithRetry(
         if (i === retries - 1) throw error;
 
         if (status === 500 || status === 429 || !status) {
-          const waitTime = delayMs * (i + 1);
-          console.log(`[INFO] Waiting ${waitTime}ms before retrying...`);
+          const waitTime = delayMs * (i + 1) + Math.floor(Math.random() * 200);
+          console.log(
+            `[WARN] Server Error/Rate Limit. Waiting ${waitTime}ms before retrying...`,
+          );
           await sleep(waitTime);
         } else {
           throw error;
@@ -77,7 +112,6 @@ async function getAccessToken(): Promise<string> {
   }
 
   if (globalKisToken.kisTokenPromise) {
-    console.log("[INFO] Waiting for shared KIS token promise (KR)...");
     return globalKisToken.kisTokenPromise;
   }
 
@@ -123,55 +157,122 @@ async function getDailyKrStockDataInternal(
   const allData: StockDataPoint[] = [];
   const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
-  let startDateStr = "20240101";
+  let startDateStr = "20200101";
   if (stopTimestamp > 0) {
     const sd = new Date(stopTimestamp);
     startDateStr = `${sd.getFullYear()}${String(sd.getMonth() + 1).padStart(2, "0")}${String(sd.getDate()).padStart(2, "0")}`;
   }
 
-  try {
-    const response = await fetchWithRetry(
-      `${KIS_API_URL}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          Authorization: `Bearer ${token}`,
-          appkey: KIS_APP_KEY,
-          appsecret: KIS_APP_SECRET,
-          tr_id: "FHKST01010400",
-          custtype: "P",
-        },
-        params: {
-          FID_COND_MRKT_DIV_CODE: "J",
-          FID_INPUT_ISCD: ticker,
-          FID_INPUT_DATE_1: startDateStr,
-          FID_INPUT_DATE_2: todayStr,
-          FID_PERIOD_DIV_CODE: "D",
-          FID_ORG_ADJ_PRC: "0",
-        },
-      },
-    );
+  let currentEndDateStr = todayStr;
+  let continueFetching = true;
+  let pageCount = 0;
+  const maxPages = 30;
 
-    if (response.data.rt_cd !== "0") {
-      throw new Error(response.data.msg1);
+  console.log(`\n[DEBUG] [${ticker}] === DAILY FETCH STARTED ===`);
+  console.log(
+    `[DEBUG] [${ticker}] Target Stop Date: ${new Date(stopTimestamp).toISOString()}`,
+  );
+
+  while (continueFetching && pageCount < maxPages) {
+    try {
+      console.log(
+        `[DEBUG] [${ticker}] (Daily) Page ${pageCount + 1} | Requesting Date_2 (End): ${currentEndDateStr}`,
+      );
+
+      const response = await fetchWithRetry(
+        `${KIS_API_URL}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            Authorization: `Bearer ${token}`,
+            appkey: KIS_APP_KEY,
+            appsecret: KIS_APP_SECRET,
+            // [핵심 버그 수정] FHKST01010400(최근30일) -> FHKST03010100(과거 기간별조회)로 변경!
+            tr_id: "FHKST03010100",
+            custtype: "P",
+          },
+          params: {
+            FID_COND_MRKT_DIV_CODE: "J",
+            FID_INPUT_ISCD: ticker,
+            FID_INPUT_DATE_1: startDateStr,
+            FID_INPUT_DATE_2: currentEndDateStr,
+            FID_PERIOD_DIV_CODE: "D",
+            FID_ORG_ADJ_PRC: "0",
+          },
+        },
+      );
+
+      if (response.data.rt_cd !== "0") {
+        throw new Error(response.data.msg1);
+      }
+
+      // [핵심 버그 수정] 기간별조회(FHKST03010100)는 데이터를 output2 배열에 반환합니다.
+      const output = response.data.output2 || [];
+      console.log(
+        `[DEBUG] [${ticker}] (Daily) Page ${pageCount + 1} | API Returned: ${output.length} items`,
+      );
+
+      if (output.length === 0) {
+        console.log(
+          `[DEBUG] [${ticker}] (Daily) Stopping: API returned 0 items.`,
+        );
+        break;
+      }
+
+      const chunk = output
+        .filter((item: KisKrStockItem) => item.stck_bsop_date)
+        .map((item: KisKrStockItem) => ({
+          date: `${item.stck_bsop_date.substring(0, 4)}-${item.stck_bsop_date.substring(4, 6)}-${item.stck_bsop_date.substring(6, 8)}`,
+          open: parseFloat(item.stck_oprc),
+          high: parseFloat(item.stck_hgpr),
+          low: parseFloat(item.stck_lwpr),
+          close: parseFloat(item.stck_clpr),
+          volume: parseFloat(item.acml_vol),
+        }));
+
+      allData.push(...chunk);
+      console.log(
+        `[DEBUG] [${ticker}] (Daily) Total accumulated so far: ${allData.length}`,
+      );
+
+      // 기간별조회 API는 한 번에 100개씩 던져줍니다. 50개 미만이면 상장일 도달 등 더 이상 과거가 없는 것입니다.
+      if (output.length < 50) {
+        console.log(
+          `[DEBUG] [${ticker}] (Daily) Stopping: API returned less than 50 items. Reached end of available history.`,
+        );
+        break;
+      }
+
+      const lastItem = output[output.length - 1];
+      const oldestDateStr = lastItem.stck_bsop_date;
+      const oldestDateMs = new Date(
+        `${oldestDateStr.substring(0, 4)}-${oldestDateStr.substring(4, 6)}-${oldestDateStr.substring(6, 8)}`,
+      ).getTime();
+
+      if (oldestDateMs <= stopTimestamp) {
+        console.log(
+          `[DEBUG] [${ticker}] (Daily) Stopping: Reached target stopTimestamp (${new Date(stopTimestamp).toISOString()}).`,
+        );
+        continueFetching = false;
+      } else {
+        const nextEndDate = new Date(oldestDateMs - 24 * 60 * 60 * 1000);
+        currentEndDateStr = `${nextEndDate.getFullYear()}${String(nextEndDate.getMonth() + 1).padStart(2, "0")}${String(nextEndDate.getDate()).padStart(2, "0")}`;
+      }
+
+      pageCount++;
+    } catch (error) {
+      console.error(
+        `[ERROR] Fetching KR daily data pagination failed for ${ticker}:`,
+        error,
+      );
+      continueFetching = false;
     }
-
-    const output = response.data.output || [];
-    const chunk = output.map((item: KisKrStockItem) => ({
-      date: `${item.stck_bsop_date.substring(0, 4)}-${item.stck_bsop_date.substring(4, 6)}-${item.stck_bsop_date.substring(6, 8)}`,
-      open: parseFloat(item.stck_oprc),
-      high: parseFloat(item.stck_hgpr),
-      low: parseFloat(item.stck_lwpr),
-      close: parseFloat(item.stck_clpr),
-      volume: parseFloat(item.acml_vol),
-    }));
-
-    allData.push(...chunk);
-  } catch (error) {
-    console.error(`[ERROR] Fetching KR daily data for ${ticker}:`, error);
-    throw error;
   }
+
+  console.log(
+    `[DEBUG] [${ticker}] === DAILY FETCH FINISHED | Total Final: ${allData.length} ===\n`,
+  );
 
   return Array.from(
     new Map(allData.map((item) => [item.date, item])).values(),
@@ -259,8 +360,17 @@ export async function getMinuteKrStockData(
   let currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   let currentHour = "153000";
 
+  console.log(`\n[DEBUG] [${ticker}] === MINUTE FETCH STARTED ===`);
+  console.log(
+    `[DEBUG] [${ticker}] Target Stop Date: ${new Date(stopTimestamp).toISOString()}`,
+  );
+
   while (continueFetching && pageCount < maxPages) {
     try {
+      console.log(
+        `[DEBUG] [${ticker}] (Minute) Page ${pageCount + 1} | Requesting Date: ${currentDate}, Hour: ${currentHour}`,
+      );
+
       const response = await fetchWithRetry(
         `${KIS_API_URL}/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice`,
         {
@@ -289,7 +399,16 @@ export async function getMinuteKrStockData(
       }
 
       const output2 = response.data.output2 || [];
-      if (output2.length === 0) break;
+      console.log(
+        `[DEBUG] [${ticker}] (Minute) Page ${pageCount + 1} | API Returned: ${output2.length} items`,
+      );
+
+      if (output2.length === 0) {
+        console.log(
+          `[DEBUG] [${ticker}] (Minute) Stopping: API returned 0 items.`,
+        );
+        break;
+      }
 
       const chunk = output2
         .map((item: KisKrMinuteStockItem) => ({
@@ -303,13 +422,26 @@ export async function getMinuteKrStockData(
         .filter((item: StockDataPoint) => !isNaN(item.close) && item.close > 0);
 
       allData.push(...chunk);
+      console.log(
+        `[DEBUG] [${ticker}] (Minute) Total accumulated so far: ${allData.length}`,
+      );
+
+      if (output2.length < 30) {
+        console.log(
+          `[DEBUG] [${ticker}] (Minute) Stopping: API returned less than 30 items. Reached market open or end of available intraday history.`,
+        );
+        break;
+      }
 
       const lastItem = output2[output2.length - 1];
       const lastItemMs = new Date(
         `${lastItem.stck_bsop_date.substring(0, 4)}-${lastItem.stck_bsop_date.substring(4, 6)}-${lastItem.stck_bsop_date.substring(6, 8)}T${lastItem.stck_cntg_hour.substring(0, 2)}:${lastItem.stck_cntg_hour.substring(2, 4)}:${lastItem.stck_cntg_hour.substring(4, 6)}`,
       ).getTime();
 
-      if (lastItemMs <= stopTimestamp || output2.length < 50) {
+      if (lastItemMs <= stopTimestamp) {
+        console.log(
+          `[DEBUG] [${ticker}] (Minute) Stopping: Reached target stopTimestamp (${new Date(stopTimestamp).toISOString()}).`,
+        );
         continueFetching = false;
       } else {
         currentDate = lastItem.stck_bsop_date;
@@ -317,10 +449,6 @@ export async function getMinuteKrStockData(
       }
 
       pageCount++;
-
-      if (continueFetching) {
-        await sleep(200);
-      }
     } catch (error) {
       console.error(
         `[ERROR] Pagination failed for ${ticker} at page ${pageCount}:`,
@@ -329,6 +457,10 @@ export async function getMinuteKrStockData(
       continueFetching = false;
     }
   }
+
+  console.log(
+    `[DEBUG] [${ticker}] === MINUTE FETCH FINISHED | Total Final: ${allData.length} ===\n`,
+  );
 
   const sortedRawData = Array.from(
     new Map(allData.map((item) => [item.date, item])).values(),
