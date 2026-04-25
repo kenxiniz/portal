@@ -1,5 +1,3 @@
-/* @/app/my-properties/page.tsx */
-
 import {
   calculateComprehensiveRealEstateTax,
   calculatePropertyTax,
@@ -24,6 +22,9 @@ import sellStrategiesJson from "@/lib/sell_strategies.json";
 import { TrendingUp } from "lucide-react";
 import StrategyCard from "@/components/StrategyCard";
 
+// Import the new tax simulator component
+import TaxSimulator from "@/components/TaxSimulator";
+
 export default function MyPropertiesPage() {
   const allData: OwnerProperties = allDataJson;
   const strategies = sellStrategiesJson as Record<
@@ -45,6 +46,7 @@ export default function MyPropertiesPage() {
       <Accordion
         type="single"
         collapsible
+        defaultValue="아빠" // Ensure dad's card is open by default
         className="w-full max-w-7xl space-y-4"
       >
         {owners.map((owner) => {
@@ -81,6 +83,13 @@ export default function MyPropertiesPage() {
               <AccordionContent className="p-6 pt-2">
                 <div className="border-t border-slate-200 dark:border-slate-800 pt-6">
                   <section className="w-full flex flex-col items-center space-y-6">
+                    {/* Render TaxSimulator specifically for the designated owner */}
+                    {owner === "아빠" && (
+                      <div className="w-full max-w-7xl pb-4">
+                        <TaxSimulator />
+                      </div>
+                    )}
+
                     <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6">
                       {strategyInfo && <StrategyCard strategy={strategyInfo} />}
                       <Collapsible className="w-full p-4 rounded-lg bg-slate-50 dark:bg-slate-800 space-y-2">
