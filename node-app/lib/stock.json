@@ -1,6 +1,10 @@
 {
   "us_stocks": [
     {
+      "ticker": "ARM",
+      "exchange": "NAS"
+    },
+    {
       "ticker": "PLTR",
       "exchange": "NAS"
     },
