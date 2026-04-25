@@ -232,7 +232,7 @@ export const analyzeAllTradingSignals = (
         signals.push({
           date: currentPoint.date,
           type: "sell",
-          reason: `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달)`,
+          reason: `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달, 실제 매수 안 함)`,
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
@@ -245,8 +245,8 @@ export const analyzeAllTradingSignals = (
           type: "sell",
           reason:
             profitRate >= 0
-              ? "시간 제한 익절 (인버스 만료)"
-              : "시간 제한 손절 (인버스 만료)",
+              ? "시간 제한 익절 (인버스 만료, 실제 매수 안 함)"
+              : "시간 제한 손절 (인버스 만료, 실제 매수 안 함)",
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
@@ -524,7 +524,10 @@ export const analyzeAllTradingSignals = (
           signals.push({
             date: currentPoint.date,
             type: "sell",
-            reason: profitRate >= 0 ? "수익 실현 (BB 하단)" : "손실 (BB 하단)",
+            reason:
+              profitRate >= 0
+                ? "수익 실현 (BB 하단, 실제 매수 안 함)"
+                : "손실 (BB 하단, 실제 매수 안 함)",
             realizedPrice: exitPrice,
             currentPrice: exitPrice,
             profitRate: profitRate,

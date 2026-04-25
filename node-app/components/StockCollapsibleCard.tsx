@@ -377,8 +377,10 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                     <span className="font-normal text-base ml-1.5">
                       [
                       {timeframe === "1d"
-                        ? `${historyYears}년 수익률`
-                        : "누적 수익률"}
+                        ? `${historyYears}년 수익`
+                        : timeframe === "1h"
+                          ? "1달 수익"
+                          : "1주 수익"}
                       : {cumulativeProfitRate > 0 ? "+" : ""}
                       {cumulativeProfitRate.toFixed(2)}%]
                     </span>
@@ -439,17 +441,14 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             index === historicalSignals.length - 1 &&
                             isBuySignal;
 
+                          // Removed the timeframe === "1d" restriction to allow all timeframes to show warnings
                           const showHighRiskWarning =
-                            timeframe === "1d" &&
-                            ((isInverseStock && signal.type === "buy") ||
-                              (!isInverseStock &&
-                                signal.type === "inverse-buy"));
+                            (isInverseStock && signal.type === "buy") ||
+                            (!isInverseStock && signal.type === "inverse-buy");
 
                           const showGazuaBadge =
-                            timeframe === "1d" &&
-                            ((!isInverseStock && signal.type === "buy") ||
-                              (isInverseStock &&
-                                signal.type === "inverse-buy"));
+                            (!isInverseStock && signal.type === "buy") ||
+                            (isInverseStock && signal.type === "inverse-buy");
 
                           let rowCurrentProfitRate = null;
                           if (
@@ -490,7 +489,7 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                       className="text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800 whitespace-nowrap"
                                       title="인버스 투자는 리스크가 매우 큽니다."
                                     >
-                                      고위험 (시장 과열 참고용, 매수 금지)
+                                      고위험 (시장 과열 참고, 매수 금지)
                                     </span>
                                   )}
                                   {showGazuaBadge && (
