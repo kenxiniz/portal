@@ -10,7 +10,8 @@ export const schedulerConfig = {
     sendDailyStockSignals: "0 9 * * *",
     generateAdvice: "0 8 * * 1-5",
     resetAdvice: "0 7 * * 1-5",
-    collectMarketData: "*/5 * * * *", // Every 5 minutes
+    collectMarketData: "*/5 * * * *",
+    awsSecurity: "0 7,19 * * *",
   },
   notificationChunkSize: 3,
 };

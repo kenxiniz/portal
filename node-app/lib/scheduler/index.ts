@@ -7,6 +7,7 @@ import { generateDailyAdvice, resetAdviceCache } from "./jobs/advice";
 import { updateLottoWinningNumbers, sendDailyLottoNumbers } from "./jobs/lotto";
 import { sendDailyStockSignals } from "./jobs/stock";
 import { collectMarketData } from "./jobs/collect";
+import { checkAllRegionsEC2Instances } from "./jobs/aws";
 
 export { generateDailyAdvice, resetAdviceCache, collectMarketData };
 
@@ -50,6 +51,11 @@ class JobScheduler {
       "Collect Market Data Every 5 Minutes",
       schedulerConfig.cronSchedules.collectMarketData || "*/5 * * * *",
       collectMarketData,
+    );
+    this._scheduleJob(
+      "Check AWS EC2 Instances",
+      schedulerConfig.cronSchedules.awsSecurity || "0 7,19 * * *",
+      checkAllRegionsEC2Instances,
     );
   }
 
