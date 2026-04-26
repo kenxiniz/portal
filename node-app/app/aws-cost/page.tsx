@@ -1,11 +1,35 @@
 /* app/aws-cost/page.tsx */
 
-import {
-  CostExplorerClient,
-  GetCostAndUsageCommand,
-} from "@aws-sdk/client-cost-explorer";
+import { exec } from "child_process";
+import util from "util";
 import { AlertTriangle } from "lucide-react";
 import { AwsCostClientUI } from "@/components/AwsCostClientUI";
+
+const execAsync = util.promisify(exec);
+
+// --- [추가됨] AWS CLI 응답을 위한 정확한 타입 정의 ---
+interface AWSCostGroup {
+  Keys?: string[];
+  Metrics?: {
+    UnblendedCost?: {
+      Amount?: string;
+      Unit?: string;
+    };
+  };
+}
+
+interface AWSCostResultByTime {
+  TimePeriod?: {
+    Start?: string;
+    End?: string;
+  };
+  Groups?: AWSCostGroup[];
+}
+
+interface AWSCostResponse {
+  ResultsByTime?: AWSCostResultByTime[];
+}
+// -----------------------------------------------------
 
 export interface CostData {
   month: string;
@@ -22,25 +46,6 @@ export interface CostData {
 }
 
 async function getAwsCost(): Promise<{ data?: CostData[]; error?: string }> {
-  if (
-    !process.env.AWS_ACCESS_KEY_ID ||
-    !process.env.AWS_SECRET_ACCESS_KEY ||
-    !process.env.AWS_REGION
-  ) {
-    const errorMsg =
-      "AWS 자격증명이 서버에 설정되지 않았습니다. .env 파일을 확인하세요.";
-    console.error(errorMsg);
-    return { error: errorMsg };
-  }
-
-  const client = new CostExplorerClient({
-    region: process.env.AWS_REGION,
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    },
-  });
-
   const today = new Date();
   const startDate = new Date(today.getFullYear(), 0, 1)
     .toISOString()
@@ -49,21 +54,22 @@ async function getAwsCost(): Promise<{ data?: CostData[]; error?: string }> {
     .toISOString()
     .split("T")[0];
 
-  const command = new GetCostAndUsageCommand({
-    TimePeriod: { Start: startDate, End: endDate },
-    Granularity: "MONTHLY",
-    Metrics: ["UnblendedCost"],
-    GroupBy: [
-      { Type: "DIMENSION", Key: "SERVICE" },
-      { Type: "DIMENSION", Key: "USAGE_TYPE" },
-    ],
-  });
+  const command = `aws ce get-cost-and-usage --time-period Start=${startDate},End=${endDate} --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=SERVICE Type=DIMENSION,Key=USAGE_TYPE --output json`;
 
   try {
-    const data = await client.send(command);
+    console.log(
+      `[AWS Cost] Fetching Cost Explorer data for ${startDate} to ${endDate}...`,
+    );
+    const { stdout } = await execAsync(command, {
+      maxBuffer: 1024 * 1024 * 10,
+    });
+
+    // [수정됨] 명시적 타입 캐스팅
+    const data = JSON.parse(stdout) as AWSCostResponse;
 
     const processedData: { [month: string]: CostData } = {};
 
+    // [수정됨] 매개변수에서 : any 제거
     data.ResultsByTime?.forEach((result) => {
       if (result.TimePeriod && result.TimePeriod.Start) {
         const month = result.TimePeriod.Start.substring(0, 7);
@@ -72,6 +78,7 @@ async function getAwsCost(): Promise<{ data?: CostData[]; error?: string }> {
           processedData[month] = { month, total: 0, services: {} };
         }
 
+        // [수정됨] 매개변수에서 : any 제거
         result.Groups?.forEach((group) => {
           const serviceName = group.Keys?.[0] || "Unknown";
           const usageType = group.Keys?.[1] || "N/A";
@@ -125,11 +132,9 @@ async function getAwsCost(): Promise<{ data?: CostData[]; error?: string }> {
 
     return { data: finalData };
   } catch (error) {
-    console.error("Failed to fetch AWS cost:", error);
+    console.error("Failed to fetch AWS cost via CLI:", error);
     const errorMessage =
-      error instanceof Error
-        ? error.message
-        : "알 수 없는 오류가 발생했습니다.";
+      error instanceof Error ? error.message : "Unknown error occurred.";
     return { error: `AWS 비용 조회 실패: ${errorMessage}` };
   }
 }
