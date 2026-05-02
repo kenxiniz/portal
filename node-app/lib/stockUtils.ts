@@ -7,17 +7,15 @@ import {
   calculateKamaTrend,
   calculateGaussianTrend,
   calculateVwapRetest,
-  calculateMacdKama, // [추가] MACD 계산 함수 임포트
+  calculateMacdKama,
 } from "@/lib/charts/indicators";
 
-// Re-export indicators to prevent import errors in backend API routes
 export {
   calculateRSI,
   calculateBollingerBands,
   calculateGaussianLine,
 } from "@/lib/charts/indicators";
 
-// --- Configuration ---
 const getEnvNumber = (key: string, defaultValue: number): number => {
   const val = process.env[key] || process.env[`NEXT_PUBLIC_${key}`];
   if (val !== undefined && val !== "") {
@@ -29,7 +27,7 @@ const getEnvNumber = (key: string, defaultValue: number): number => {
 
 const TRADING_CONFIG = {
   get stopLossPercent() {
-    return getEnvNumber("STOP_LOSS_PERCENT", -5.0);
+    return getEnvNumber("STOP_LOSS_PERCENT", -8.0);
   },
   get timeLimit1dDays() {
     return getEnvNumber("TIME_LIMIT_1D_DAYS", 30);
@@ -51,7 +49,6 @@ const TRADING_CONFIG = {
   },
 };
 
-// --- Interfaces ---
 export interface StockDataPoint {
   date: string;
   open: number;
@@ -68,7 +65,6 @@ export interface StockDataPoint {
   vwap?: number;
   ema9?: number;
   ema20?: number;
-  // [추가] Gemini AI 조언 생성 시 컨텍스트로 제공할 추가 지표 상태
   kama?: number;
   kamaTrend?: {
     isUp: boolean;
@@ -117,8 +113,6 @@ export interface CachedStockData {
   advice?: AdviceObject | null;
 }
 
-// --- Signal Analysis (Strategy Runner) ---
-
 export const analyzeAllTradingSignals = (
   data: StockDataPoint[],
   timeframe: "1d" | "1h" | "15m" = "1d",
@@ -137,7 +131,6 @@ export const analyzeAllTradingSignals = (
   let firstPeakIndex: number | null = null;
   let potentialSecondPeak: StockDataPoint | null = null;
 
-  // Intraday Setup States
   let isBullishSetupActive = false;
   let bullishSetupStartDate = "";
   let isBearishSetupActive = false;
@@ -153,7 +146,6 @@ export const analyzeAllTradingSignals = (
       ? TRADING_CONFIG.divergenceMinDays
       : TRADING_CONFIG.divergenceMinDays;
 
-  // Pre-calculate indicators using separated logic
   const closePrices = data.map((d) => d.close);
   const highPrices = data.map((d) => d.high);
   const lowPrices = data.map((d) => d.low);
@@ -173,11 +165,9 @@ export const analyzeAllTradingSignals = (
     localVwapData,
   );
 
-  // [추가] MACD 데이터 계산
   const { macdLineRaw, signalLineRaw, histogramRaw } =
     calculateMacdKama(closePrices);
 
-  // [수정] 외부(Gemini AI 등)에서 사용할 수 있도록 원본 data 배열의 모든 객체에 계산된 지표 일괄 주입
   for (let i = 0; i < data.length; i++) {
     data[i].vwap =
       localVwapData[i] !== null ? (localVwapData[i] as number) : undefined;
@@ -213,7 +203,7 @@ export const analyzeAllTradingSignals = (
         : currentPoint.date,
     ).getTime();
 
-    // --- Stop Loss & Expiration Logic ---
+    // 1. Global stop-loss and time limit
     if (lastBuySignal && lastBuySignal.entryPrice !== undefined) {
       const buyTimestamp = new Date(
         lastBuySignal.date.includes(" ")
@@ -282,8 +272,8 @@ export const analyzeAllTradingSignals = (
           type: "sell",
           reason:
             profitRate >= 0
-              ? "시간 제한 익절 (인버스 만료, 실제 매수 안 함)"
-              : "시간 제한 손절 (인버스 만료, 실제 매수 안 함)",
+              ? "시간 제한 익절 (인버스 만료, 매수 안 함)"
+              : "시간 제한 손절 (인버스 만료, 매수 안 함)",
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
@@ -293,7 +283,7 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    // --- Intraday Trigger Evaluation ---
+    // 2. Intraday triggers
     let isIntradayBullishTrigger = false;
     let isIntradayBearishTrigger = false;
 
@@ -302,7 +292,6 @@ export const analyzeAllTradingSignals = (
       const probStatus = gaussianTrends[i];
       const retestStatus = vwapRetests[i];
 
-      // Bullish Trigger: 5봉 이상 안착된 VWAP을 깨지않고 리테스트 성공 & 상승 지표
       if (
         retestStatus.isBullishRetest &&
         (kamaStatus.isUp || kamaStatus.isGold) &&
@@ -311,7 +300,6 @@ export const analyzeAllTradingSignals = (
         isIntradayBullishTrigger = true;
       }
 
-      // Bearish Trigger: 5봉 이상 이탈된 VWAP을 깨지않고 리테스트 성공 & 하락 지표
       if (
         retestStatus.isBearishRetest &&
         (kamaStatus.isDown || kamaStatus.isDead) &&
@@ -320,7 +308,6 @@ export const analyzeAllTradingSignals = (
         isIntradayBearishTrigger = true;
       }
 
-      // Bullish Wait Loop
       if (isBullishSetupActive && !lastBuySignal) {
         if (
           currentPoint.bollingerBands &&
@@ -344,7 +331,6 @@ export const analyzeAllTradingSignals = (
         }
       }
 
-      // Bearish Wait Loop
       if (isBearishSetupActive && !lastInverseBuySignal) {
         if (
           currentPoint.bollingerBands &&
@@ -369,7 +355,7 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* --- Setup Logic: RSI Double Bottom --- */
+    // 3. Setup Logic
     if (potentialSecondTrough && firstTrough) {
       if (currentPoint.close > potentialSecondTrough.close) {
         if (timeframe === "1d") {
@@ -435,7 +421,6 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* --- Setup Logic: RSI Double Peak --- */
     if (potentialSecondPeak && firstPeak) {
       if (currentPoint.close < potentialSecondPeak.close) {
         if (timeframe === "1d") {
@@ -501,73 +486,166 @@ export const analyzeAllTradingSignals = (
       }
     }
 
-    /* --- Sell Signal Logic (Bollinger Bands) --- */
+    // 4. Sell Signal Logic (Bollinger Bands)
     if (currentPoint.bollingerBands) {
-      // 1. Long Position Exit
+      // 4-1. Long Position Exit
       if (lastBuySignal && lastBuySignal.entryPrice !== undefined) {
-        const isDailyExit =
-          timeframe === "1d" &&
-          currentPoint.close >= currentPoint.bollingerBands.upper;
-        const isIntradayExit =
-          timeframe !== "1d" &&
-          currentPoint.high >= currentPoint.bollingerBands.upper;
+        let triggeredExit = false;
+        let exitPrice = 0;
+        let reasonBase = "";
+        let details = "";
 
-        if (isDailyExit || isIntradayExit) {
-          const exitPrice =
-            timeframe === "1d"
-              ? currentPoint.close
-              : currentPoint.bollingerBands.upper;
+        // Take profit (BB Upper)
+        if (
+          timeframe === "1d" &&
+          currentPoint.close >= currentPoint.bollingerBands.upper
+        ) {
+          triggeredExit = true;
+          exitPrice = currentPoint.close;
+          reasonBase = "BB 상단 도달";
+          details = `BB Upper: ${currentPoint.bollingerBands.upper.toFixed(2)}`;
+        } else if (
+          timeframe !== "1d" &&
+          currentPoint.high >= currentPoint.bollingerBands.upper
+        ) {
+          triggeredExit = true;
+          exitPrice = currentPoint.bollingerBands.upper;
+          reasonBase = "BB 상단 도달";
+          details = `BB Upper: ${currentPoint.bollingerBands.upper.toFixed(2)}`;
+        }
+        // Dynamic stop loss (BB Lower AND Loss >= 5%)
+        else {
+          let isBbLowerBreach = false;
+          let tempExitPrice = 0;
+
+          if (
+            timeframe === "1d" &&
+            currentPoint.close <= currentPoint.bollingerBands.lower
+          ) {
+            isBbLowerBreach = true;
+            tempExitPrice = currentPoint.close;
+          } else if (
+            timeframe !== "1d" &&
+            currentPoint.low <= currentPoint.bollingerBands.lower
+          ) {
+            isBbLowerBreach = true;
+            tempExitPrice = currentPoint.bollingerBands.lower;
+          }
+
+          if (isBbLowerBreach) {
+            const tempProfitRate =
+              ((tempExitPrice - lastBuySignal.entryPrice) /
+                lastBuySignal.entryPrice) *
+              100;
+            // Trigger exit only if the current loss is 5% or more
+            if (tempProfitRate <= -5.0) {
+              triggeredExit = true;
+              exitPrice = tempExitPrice;
+              reasonBase = "BB 하단 이탈 & 5% 이상 손실";
+              details = `BB Lower: ${currentPoint.bollingerBands.lower.toFixed(2)}`;
+            }
+          }
+        }
+
+        if (triggeredExit) {
           const profitRate =
             ((exitPrice - lastBuySignal.entryPrice) /
               lastBuySignal.entryPrice) *
             100;
-
-          signals.push({
-            date: currentPoint.date,
-            type: "sell",
-            reason: profitRate >= 0 ? "수익 실현 (BB 상단)" : "손실 (BB 상단)",
-            realizedPrice: exitPrice,
-            currentPrice: exitPrice,
-            profitRate: profitRate,
-            details: `BB Upper: ${currentPoint.bollingerBands.upper.toFixed(2)}`,
-          });
-          lastBuySignal = null;
-        }
-      }
-
-      // 2. Short (Inverse) Position Exit
-      if (
-        lastInverseBuySignal &&
-        lastInverseBuySignal.entryPrice !== undefined
-      ) {
-        const isDailyExit =
-          timeframe === "1d" &&
-          currentPoint.close <= currentPoint.bollingerBands.lower;
-        const isIntradayExit =
-          timeframe !== "1d" &&
-          currentPoint.low <= currentPoint.bollingerBands.lower;
-
-        if (isDailyExit || isIntradayExit) {
-          const exitPrice =
-            timeframe === "1d"
-              ? currentPoint.close
-              : currentPoint.bollingerBands.lower;
-          const profitRate =
-            ((lastInverseBuySignal.entryPrice - exitPrice) /
-              lastInverseBuySignal.entryPrice) *
-            100;
-
           signals.push({
             date: currentPoint.date,
             type: "sell",
             reason:
               profitRate >= 0
-                ? "수익 실현 (BB 하단, 실제 매수 안 함)"
-                : "손실 (BB 하단, 실제 매수 안 함)",
+                ? `수익 실현 (${reasonBase})`
+                : `손절 (${reasonBase})`,
             realizedPrice: exitPrice,
             currentPrice: exitPrice,
             profitRate: profitRate,
-            details: `BB Lower: ${currentPoint.bollingerBands.lower.toFixed(2)}`,
+            details: details,
+          });
+          lastBuySignal = null;
+        }
+      }
+
+      // 4-2. Short (Inverse) Position Exit
+      if (
+        lastInverseBuySignal &&
+        lastInverseBuySignal.entryPrice !== undefined
+      ) {
+        let triggeredExit = false;
+        let exitPrice = 0;
+        let reasonBase = "";
+        let details = "";
+
+        // Take profit (BB Lower)
+        if (
+          timeframe === "1d" &&
+          currentPoint.close <= currentPoint.bollingerBands.lower
+        ) {
+          triggeredExit = true;
+          exitPrice = currentPoint.close;
+          reasonBase = "BB 하단 도달";
+          details = `BB Lower: ${currentPoint.bollingerBands.lower.toFixed(2)}`;
+        } else if (
+          timeframe !== "1d" &&
+          currentPoint.low <= currentPoint.bollingerBands.lower
+        ) {
+          triggeredExit = true;
+          exitPrice = currentPoint.bollingerBands.lower;
+          reasonBase = "BB 하단 도달";
+          details = `BB Lower: ${currentPoint.bollingerBands.lower.toFixed(2)}`;
+        }
+        // Dynamic stop loss (BB Upper AND Loss >= 5%)
+        else {
+          let isBbUpperBreach = false;
+          let tempExitPrice = 0;
+
+          if (
+            timeframe === "1d" &&
+            currentPoint.close >= currentPoint.bollingerBands.upper
+          ) {
+            isBbUpperBreach = true;
+            tempExitPrice = currentPoint.close;
+          } else if (
+            timeframe !== "1d" &&
+            currentPoint.high >= currentPoint.bollingerBands.upper
+          ) {
+            isBbUpperBreach = true;
+            tempExitPrice = currentPoint.bollingerBands.upper;
+          }
+
+          if (isBbUpperBreach) {
+            const tempProfitRate =
+              ((lastInverseBuySignal.entryPrice - tempExitPrice) /
+                lastInverseBuySignal.entryPrice) *
+              100;
+            // Trigger exit only if the current loss is 5% or more
+            if (tempProfitRate <= -5.0) {
+              triggeredExit = true;
+              exitPrice = tempExitPrice;
+              reasonBase = "BB 상단 돌파 & 5% 이상 손실";
+              details = `BB Upper: ${currentPoint.bollingerBands.upper.toFixed(2)}`;
+            }
+          }
+        }
+
+        if (triggeredExit) {
+          const profitRate =
+            ((lastInverseBuySignal.entryPrice - exitPrice) /
+              lastInverseBuySignal.entryPrice) *
+            100;
+          signals.push({
+            date: currentPoint.date,
+            type: "sell",
+            reason:
+              profitRate >= 0
+                ? `수익 실현 (${reasonBase}, 매수 안 함)`
+                : `손절 (${reasonBase}, 매수 안 함)`,
+            realizedPrice: exitPrice,
+            currentPrice: exitPrice,
+            profitRate: profitRate,
+            details: details,
           });
           lastInverseBuySignal = null;
         }
