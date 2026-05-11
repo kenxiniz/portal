@@ -69,10 +69,10 @@ export default function Home() {
 
       <footer className={styles.footer}>
         {/* [추가] AWS 비용 페이지로 가는 링크 */}
-        <Link href="/aws-cost" className={styles.footerLink}>
+        {/*<Link href="/aws-cost" className={styles.footerLink}>
           <Wallet className={styles.footerIcon} />
           운영 비용
-        </Link>
+        </Link>*/}
         <Link href="/get-token" className={styles.footerLink}>
           <KeyRound className={styles.footerIcon} />
           토큰 발급

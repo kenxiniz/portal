@@ -52,11 +52,13 @@ class JobScheduler {
       schedulerConfig.cronSchedules.collectMarketData || "*/5 * * * *",
       collectMarketData,
     );
+    /*
     this._scheduleJob(
       "Check AWS EC2 Instances",
       schedulerConfig.cronSchedules.awsSecurity || "0 7,19 * * *",
       checkAllRegionsEC2Instances,
     );
+    */
   }
 
   private _scheduleJob(
