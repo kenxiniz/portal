@@ -11,7 +11,7 @@ import {
   TrendingUp,
   BarChart3,
   Ticket,
-  Wallet,
+  //Wallet,
 } from "lucide-react";
 
 export const metadata = {

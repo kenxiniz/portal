@@ -10,15 +10,32 @@ export default function TaxSimulator() {
   const BASE_DEDUCTION = 2500000;
 
   // General state variables
-  const [sellPrice, setSellPrice] = useState<number>(3500000000);
+  const [sellPrice, setSellPrice] = useState<number>(3300000000);
   const [deposit, setDeposit] = useState<number>(1400000000);
-  const [isResidencyMet, setIsResidencyMet] = useState<boolean>(false);
+
+  // Exemption condition states
+  // 'none' = 일반 과세 | 'residency' = 2년 실거주 | 'sangsaeng' = 상생임대주택 특례
+  const [exemptionType, setExemptionType] = useState<
+    "none" | "residency" | "sangsaeng"
+  >("none");
+
   const [brokerageFee, setBrokerageFee] = useState<number>(20000000);
   const [capitalExpenditure, setCapitalExpenditure] = useState<number>(0);
+
+  // Private Loan (대부 대출) state variables for the deposit return
+  const [loanInterestRate, setLoanInterestRate] = useState<number>(10); // 기본 연 10%
+  const [loanMonths, setLoanMonths] = useState<number>(5); // 기본 5개월
 
   // Calculate tax and final cash dynamically based on property division rule
   // Property division unifies the acquired 30% share with the original 70% share
   const simulationResult = useMemo(() => {
+    // 1. 대부 대출 이자 비용 계산 (원금: 전세 보증금 기준)
+    // 상생임대주택 특례 적용 시 세입자 퇴거가 불필요하므로 대출 이자 비용은 0원 처리
+    const isSangsaeng = exemptionType === "sangsaeng";
+    const loanInterestCost = isSangsaeng
+      ? 0
+      : Math.floor(deposit * (loanInterestRate / 100) * (loanMonths / 12));
+
     const totalExpenses = brokerageFee + capitalExpenditure;
     // Entire 100% share uses the 2005 acquisition price due to property division
     const capitalGains = Math.max(
@@ -36,22 +53,28 @@ export default function TaxSimulator() {
       progressiveDeduction: 0,
       baseTax: 0,
       localTax: 0,
+      loanInterestCost,
     };
 
     if (capitalGains <= 0) {
-      return { tax: 0, finalCash: sellPrice - deposit, details: emptyDetails };
+      // 이자 비용을 최종 회수 현금에서 차감
+      return {
+        tax: 0,
+        finalCash: sellPrice - deposit - loanInterestCost,
+        details: emptyDetails,
+      };
     }
 
     let taxableGains = 0;
     let deductionRate = 0;
 
-    if (isResidencyMet) {
-      // Special exemption for residential house
+    if (exemptionType !== "none") {
+      // Special exemption for residential house (12억 비과세 한도 적용)
       const nonTaxableLimit = 1200000000;
       if (sellPrice <= nonTaxableLimit) {
         return {
           tax: 0,
-          finalCash: sellPrice - deposit,
+          finalCash: sellPrice - deposit - loanInterestCost,
           details: emptyDetails,
         };
       }
@@ -59,12 +82,18 @@ export default function TaxSimulator() {
       const taxableRatio = (sellPrice - nonTaxableLimit) / sellPrice;
       taxableGains = capitalGains * taxableRatio;
 
-      // Deduction rate: 40% holding + 8% residency (assuming exactly 2 years)
-      deductionRate = 0.48;
+      if (exemptionType === "residency") {
+        // 실제 2년 거주: 보유공제 40% + 거주공제 8% (2년 기준) = 총 48%
+        deductionRate = 0.48;
+      } else if (exemptionType === "sangsaeng") {
+        // 상생임대주택 특례: 12억 비과세는 발동하지만, 실제 거주는 안했으므로 거주공제 배제
+        // 오직 보유공제(최대 40%)만 적용
+        deductionRate = 0.4;
+      }
     } else {
-      // General taxation
+      // General taxation (일반 다주택/미거주 과세)
       taxableGains = capitalGains;
-      // Deduction rate: 30% holding only
+      // 장기보유특별공제 표1 적용 (15년 이상 최대 30%)
       deductionRate = 0.3;
     }
 
@@ -104,7 +133,9 @@ export default function TaxSimulator() {
     const baseTax = taxBase * taxRate - progressiveDeduction;
     const localTax = baseTax * 0.1;
     const totalTax = baseTax + localTax;
-    const finalCash = sellPrice - totalTax - deposit;
+
+    // 최종 회수 현금 = 매도가 - 총 세금 - 보증금 원금 - 대부 대출 이자
+    const finalCash = sellPrice - totalTax - deposit - loanInterestCost;
 
     return {
       tax: totalTax,
@@ -119,20 +150,30 @@ export default function TaxSimulator() {
         progressiveDeduction,
         baseTax,
         localTax,
+        loanInterestCost,
       },
     };
-  }, [sellPrice, deposit, isResidencyMet, brokerageFee, capitalExpenditure]);
+  }, [
+    sellPrice,
+    deposit,
+    exemptionType,
+    brokerageFee,
+    capitalExpenditure,
+    loanInterestRate,
+    loanMonths,
+  ]);
 
   // Utility for formatting currency
   const formatKRW = (num: number) => Math.floor(num).toLocaleString() + " 원";
 
   const { details } = simulationResult;
+  const isSangsaeng = exemptionType === "sangsaeng";
 
   return (
     <Card className="w-full bg-white dark:bg-slate-900 border-blue-200 dark:border-blue-900 shadow-md">
       <CardHeader className="bg-blue-50 dark:bg-slate-800 rounded-t-lg border-b border-blue-100 dark:border-slate-700">
         <CardTitle className="text-lg md:text-xl font-bold text-blue-800 dark:text-blue-300">
-          트라팰리스 매각 시뮬레이터 (30% 재산분할 승계 반영)
+          트라팰리스 매각 시뮬레이터 (상생임대주택 특례 및 융통 이자 반영)
         </CardTitle>
       </CardHeader>
       <CardContent className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
@@ -171,7 +212,7 @@ export default function TaxSimulator() {
 
           <div className="space-y-2">
             <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 block">
-              반환할 전세 보증금
+              반환할 전세 보증금 (대출 원금 기준)
             </label>
             <input
               type="number"
@@ -180,6 +221,135 @@ export default function TaxSimulator() {
               onChange={(e) => setDeposit(Number(e.target.value))}
               className="w-full p-2 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-sm"
             />
+          </div>
+
+          {/* 비과세 및 특례 조건 선택 (라디오 버튼 방식) */}
+          <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-lg border border-slate-200 dark:border-slate-700 space-y-3">
+            <label className="text-sm font-bold text-slate-800 dark:text-slate-200 block">
+              양도소득세 비과세 및 특례 적용 조건
+            </label>
+            <div className="space-y-2 pt-1">
+              <label className="flex items-start space-x-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="exemption"
+                  checked={exemptionType === "none"}
+                  onChange={() => setExemptionType("none")}
+                  className="mt-1"
+                />
+                <div>
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 block">
+                    적용 없음 (일반 과세)
+                  </span>
+                  <span className="text-xs text-slate-500 block">
+                    12억 비과세 없음 / 장특공 최대 30% 적용
+                  </span>
+                </div>
+              </label>
+
+              <label className="flex items-start space-x-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="exemption"
+                  checked={exemptionType === "residency"}
+                  onChange={() => setExemptionType("residency")}
+                  className="mt-1"
+                />
+                <div>
+                  <span className="text-sm font-semibold text-blue-700 dark:text-blue-400 block">
+                    2년 실거주 요건 충족
+                  </span>
+                  <span className="text-xs text-slate-500 block">
+                    12억 비과세 + 장특공 보유 40% 및 거주공제 합산
+                  </span>
+                </div>
+              </label>
+
+              <label className="flex items-start space-x-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="exemption"
+                  checked={exemptionType === "sangsaeng"}
+                  onChange={() => setExemptionType("sangsaeng")}
+                  className="mt-1"
+                />
+                <div>
+                  <span className="text-sm font-semibold text-teal-700 dark:text-teal-400 block">
+                    상생임대주택 특례 적용 (미거주)
+                  </span>
+                  <span className="text-xs text-slate-500 block break-keep">
+                    거주 없이 12억 비과세 발동 / 단, 실거주는 안했으므로 장특공
+                    거주공제율은 배제 (보유공제 최대 40%만 적용)
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* 대부업체 대출 이자 조건 입력 (상생임대 선택 시 자동 비활성화) */}
+          <div
+            className={`p-4 rounded-lg border transition-all space-y-4 ${
+              isSangsaeng
+                ? "bg-slate-100 dark:bg-slate-800/20 border-slate-200 dark:border-slate-800 opacity-60"
+                : "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900"
+            }`}
+          >
+            <div className="flex justify-between items-center">
+              <h4
+                className={`text-sm font-bold ${isSangsaeng ? "text-slate-500" : "text-orange-800 dark:text-orange-300"}`}
+              >
+                전세금 반환용 대부 대출 조건 (단기 융통)
+              </h4>
+              {isSangsaeng && (
+                <span className="text-[11px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded font-sans">
+                  상생임대 적용 (대출 불필요)
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label
+                  className={`text-xs font-semibold block ${isSangsaeng ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}
+                >
+                  대출 연 이자율 (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  disabled={isSangsaeng}
+                  value={loanInterestRate}
+                  onChange={(e) => setLoanInterestRate(Number(e.target.value))}
+                  className="w-full p-2 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-sm disabled:cursor-not-allowed disabled:bg-slate-200 dark:disabled:bg-slate-900"
+                />
+              </div>
+              <div className="space-y-1">
+                <label
+                  className={`text-xs font-semibold block ${isSangsaeng ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}
+                >
+                  대출 이용 기간 (개월)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  disabled={isSangsaeng}
+                  value={loanMonths}
+                  onChange={(e) => setLoanMonths(Number(e.target.value))}
+                  className="w-full p-2 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-sm disabled:cursor-not-allowed disabled:bg-slate-200 dark:disabled:bg-slate-900"
+                />
+              </div>
+            </div>
+            <div
+              className={`flex justify-between items-center text-xs font-mono pt-1 ${
+                isSangsaeng
+                  ? "text-slate-400"
+                  : "text-orange-700 dark:text-orange-400"
+              }`}
+            >
+              <span>예상 총 이자 비용:</span>
+              <span className="font-bold text-sm">
+                {formatKRW(details.loanInterestCost)}
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -208,24 +378,6 @@ export default function TaxSimulator() {
               />
             </div>
           </div>
-
-          <hr className="border-slate-200 dark:border-slate-700" />
-
-          <div className="flex items-start md:items-center space-x-3">
-            <input
-              type="checkbox"
-              id="residency"
-              checked={isResidencyMet}
-              onChange={(e) => setIsResidencyMet(e.target.checked)}
-              className="w-5 h-5 mt-0.5 md:mt-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
-            />
-            <label
-              htmlFor="residency"
-              className="text-sm font-bold text-slate-800 dark:text-slate-200 cursor-pointer break-keep"
-            >
-              2년 실거주 요건 충족 적용
-            </label>
-          </div>
         </div>
 
         {/* Right Panel: Result & Formula Section */}
@@ -247,6 +399,9 @@ export default function TaxSimulator() {
                 {formatKRW(simulationResult.finalCash)}
               </span>
             </div>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 text-right">
+              * 최종 현금 = 매도가 - 양도세 - 보증금 원금 - 대출 이자
+            </p>
           </div>
 
           {/* Dynamic Formula Display */}
@@ -281,9 +436,12 @@ export default function TaxSimulator() {
 
               <div className="h-2"></div>
 
-              {isResidencyMet ? (
+              {exemptionType !== "none" ? (
                 <div className="flex justify-between gap-2 text-blue-600 dark:text-blue-400">
-                  <span className="break-keep">* 12억 초과 과세비율 적용</span>
+                  <span className="break-keep">
+                    * 12억 초과 과세비율 적용 (
+                    {exemptionType === "sangsaeng" ? "상생임대" : "실거주"})
+                  </span>
                   <span className="text-right">
                     {formatKRW(details.taxableGains)}
                   </span>
@@ -342,6 +500,37 @@ export default function TaxSimulator() {
                 <span className="text-right">
                   {formatKRW(simulationResult.tax)}
                 </span>
+              </div>
+
+              <div className="h-2"></div>
+
+              {/* Cash recovery summary output */}
+              <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded border border-slate-200 dark:border-slate-700 space-y-1 mt-2 text-xs">
+                <div className="text-slate-700 dark:text-slate-300 font-bold pb-1 border-b border-slate-200 dark:border-slate-700">
+                  [현금 흐름 정산]
+                </div>
+                <div className="flex justify-between">
+                  <span>매도 예상 금액:</span>
+                  <span>{formatKRW(sellPrice)}</span>
+                </div>
+                <div className="flex justify-between text-red-500 dark:text-red-400">
+                  <span>- 총 양도세 납부:</span>
+                  <span>{formatKRW(simulationResult.tax)}</span>
+                </div>
+                <div className="flex justify-between text-red-500 dark:text-red-400">
+                  <span>- 보증금 반환 (원금):</span>
+                  <span>{formatKRW(deposit)}</span>
+                </div>
+                <div className="flex justify-between text-orange-600 dark:text-orange-400 font-bold">
+                  <span>
+                    - 대부 대출 이자 ({isSangsaeng ? 0 : loanMonths}개월):
+                  </span>
+                  <span>{formatKRW(details.loanInterestCost)}</span>
+                </div>
+                <div className="flex justify-between text-blue-600 dark:text-blue-400 font-extrabold pt-1 border-t border-slate-200 dark:border-slate-700">
+                  <span>= 최종 손에 쥐는 현금:</span>
+                  <span>{formatKRW(simulationResult.finalCash)}</span>
+                </div>
               </div>
             </div>
           </details>

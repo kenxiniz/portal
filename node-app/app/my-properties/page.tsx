@@ -1,3 +1,4 @@
+/* @/app/page.tsx */
 import {
   calculateComprehensiveRealEstateTax,
   calculatePropertyTax,
@@ -18,12 +19,14 @@ import {
 } from "@/components/ui/collapsible";
 import allDataJson from "@/lib/properties.json";
 import sellStrategiesJson from "@/lib/sell_strategies.json";
-/* [추가] 제목에 사용할 아이콘을 import 합니다. */
+/* Icon import */
 import { TrendingUp } from "lucide-react";
 import StrategyCard from "@/components/StrategyCard";
 
-// Import the new tax simulator component
+// Import existing dad tax simulator component
 import TaxSimulator from "@/components/TaxSimulator";
+// Import the newly created Seungsu tax simulator component
+import SeungsuTaxSimulator from "@/components/SeungsuTaxSimulator";
 
 export default function MyPropertiesPage() {
   const allData: OwnerProperties = allDataJson;
@@ -37,7 +40,7 @@ export default function MyPropertiesPage() {
 
   return (
     <div className="flex flex-col items-center p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
-      {/* [수정] 제목과 스타일을 Z세대 느낌으로 변경합니다. */}
+      {/* Title section */}
       <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-8 flex items-center gap-3">
         <span>내 부동산</span>
         <TrendingUp className="h-8 w-8 text-blue-500" />
@@ -83,10 +86,17 @@ export default function MyPropertiesPage() {
               <AccordionContent className="p-6 pt-2">
                 <div className="border-t border-slate-200 dark:border-slate-800 pt-6">
                   <section className="w-full flex flex-col items-center space-y-6">
-                    {/* Render TaxSimulator specifically for the designated owner */}
+                    {/* Render TaxSimulator specifically for Dad */}
                     {owner === "아빠" && (
                       <div className="w-full max-w-7xl pb-4">
                         <TaxSimulator />
+                      </div>
+                    )}
+
+                    {/* Render SeungsuTaxSimulator specifically for Seungsu */}
+                    {owner === "승수" && (
+                      <div className="w-full max-w-7xl pb-4">
+                        <SeungsuTaxSimulator />
                       </div>
                     )}
 

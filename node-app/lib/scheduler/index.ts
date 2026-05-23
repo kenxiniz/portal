@@ -7,7 +7,7 @@ import { generateDailyAdvice, resetAdviceCache } from "./jobs/advice";
 import { updateLottoWinningNumbers, sendDailyLottoNumbers } from "./jobs/lotto";
 import { sendDailyStockSignals } from "./jobs/stock";
 import { collectMarketData } from "./jobs/collect";
-import { checkAllRegionsEC2Instances } from "./jobs/aws";
+//import { checkAllRegionsEC2Instances } from "./jobs/aws";
 
 export { generateDailyAdvice, resetAdviceCache, collectMarketData };
 
