@@ -29,7 +29,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "27017:27017" # [추가] MongoDB 접속용 포트 개방
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
