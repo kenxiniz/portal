@@ -10,7 +10,7 @@ export default function TaxSimulator() {
   const BASE_DEDUCTION = 2500000;
 
   // General state variables
-  const [sellPrice, setSellPrice] = useState<number>(3300000000);
+  const [sellPrice, setSellPrice] = useState<number>(3600000000);
   const [deposit, setDeposit] = useState<number>(1400000000);
 
   // Exemption condition states
