@@ -8,6 +8,10 @@ import { LottoSet } from "@/types/lotto";
 import { TradingSignal } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 
+// MongoDB 연결 및 소문자로 변경된 모델 임포트
+import { connectDB } from "@/lib/mongodb";
+import { TelegramSignalCache } from "@/lib/models/telegramSignalCache";
+
 export interface InlineKeyboardButton {
   text: string;
   url?: string;
@@ -50,8 +54,6 @@ const ipv4Agent = new https.Agent({ family: 4 });
 export class TelegramLongTermService {
   private botToken: string | undefined = process.env.TELEGRAM_BOT_TOKEN?.trim();
   private longTermChatIds: string[] = [];
-
-  private static sentSignalCache: Record<string, string> = {};
 
   constructor() {
     const rawChatIds = process.env.TELEGRAM_CHAT_ID?.trim();
@@ -150,9 +152,7 @@ export class TelegramLongTermService {
   }
 
   // Helper method to find the matching entry signal for a sell signal
-  private findRecentEntrySignal(
-    signals: TradingSignal[],
-  ): TradingSignal | null {
+  private findRecentEntrySignal(signals: TradingSignal[]): TradingSignal | null {
     for (let i = signals.length - 2; i >= 0; i--) {
       if (signals[i].type === "buy" || signals[i].type === "inverse-buy") {
         return signals[i];
@@ -260,12 +260,28 @@ export class TelegramLongTermService {
 
       const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
 
-      const sendPromises = this.longTermChatIds.map(async (chatId) => {
-        const cacheKey = `${chatId}_${ticker}_${timeframe}`;
-        const lastSentDate = TelegramLongTermService.sentSignalCache[cacheKey];
+      // 💡 MongoDB 연결 보장
+      await connectDB();
 
-        if (lastSentDate !== signalDate) {
-          TelegramLongTermService.sentSignalCache[cacheKey] = signalDate;
+      const sendPromises = this.longTermChatIds.map(async (chatId) => {
+        // 💡 캐시 키에 신호 타입(buy/sell 등)을 추가하여 다른 신호에 의해 덮어씌워지는 것 방지
+        const cacheKey = `${chatId}_${ticker}_${timeframe}_${latestSignal.type}`;
+
+        // 💡 1d (일봉) 인 경우 날짜(YYYY-MM-DD)만 추출하여 하루에 단 한 번만 검증하도록 처리
+        const dateKey = signalDate.split("T")[0].split(" ")[0];
+        const checkValue = timeframe === "1d" ? dateKey : signalDate;
+
+        // 💡 몽고DB에서 기존 발송 기록 조회
+        const existingCache = await TelegramSignalCache.findOne({ cacheKey });
+        const lastSentValue = existingCache ? existingCache.lastSentValue : null;
+
+        if (lastSentValue !== checkValue) {
+          // 💡 중복 발송 방지를 위해 몽고DB에 먼저 덮어쓰기 (Upsert)
+          await TelegramSignalCache.findOneAndUpdate(
+            { cacheKey },
+            { lastSentValue: checkValue, updatedAt: new Date() },
+            { upsert: true, new: true }
+          );
 
           try {
             const payload: SendMessagePayload = {
@@ -280,8 +296,15 @@ export class TelegramLongTermService {
               `[Scheduler] Sent long-term realtime signal for ${ticker} to chat ${chatId}`,
             );
           } catch (error: unknown) {
-            TelegramLongTermService.sentSignalCache[cacheKey] =
-              lastSentDate || "";
+            // 💡 발송 실패 시 몽고DB 캐시 원상복구
+            if (lastSentValue) {
+              await TelegramSignalCache.findOneAndUpdate(
+                { cacheKey },
+                { lastSentValue: lastSentValue, updatedAt: new Date() }
+              );
+            } else {
+              await TelegramSignalCache.deleteOne({ cacheKey });
+            }
 
             console.error(`======================================`);
             console.error(
@@ -491,14 +514,14 @@ export class TelegramLongTermService {
 
   public createLottoSetsMessage =
     (drawNo: number) =>
-    (sets: LottoSet[]): string => {
-      let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
-      message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
+      (sets: LottoSet[]): string => {
+        let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
+        message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
 
-      sets.forEach((set, index) => {
-        message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
-      });
+        sets.forEach((set, index) => {
+          message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
+        });
 
-      return message;
-    };
+        return message;
+      };
 }
