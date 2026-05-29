@@ -113,9 +113,11 @@ export interface CachedStockData {
   advice?: AdviceObject | null;
 }
 
+// 💡 파라미터에 isInverse 추가 (기본값 false 설정으로 하위 호환 유지)
 export const analyzeAllTradingSignals = (
   data: StockDataPoint[],
   timeframe: "1d" | "1h" | "15m" = "1d",
+  isInverse: boolean = false,
 ): TradingSignal[] => {
   if (data.length === 0) return [];
 
@@ -219,7 +221,10 @@ export const analyzeAllTradingSignals = (
         signals.push({
           date: currentPoint.date,
           type: "sell",
-          reason: `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달)`,
+          // 💡 일반 종목이 매수된 상황이라도 isInverse이면 과열 참고 신호로 텍스트 변경
+          reason: isInverse
+            ? `과열 참고 신호 무효화 (${TRADING_CONFIG.stopLossPercent}% 도달)`
+            : `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달)`,
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
@@ -230,8 +235,9 @@ export const analyzeAllTradingSignals = (
         signals.push({
           date: currentPoint.date,
           type: "sell",
-          reason:
-            profitRate >= 0
+          reason: isInverse
+            ? "과열 참고 신호 만료 (시간 제한)"
+            : profitRate >= 0
               ? "시간 제한 익절 (기간 만료)"
               : "시간 제한 손절 (기간 만료)",
           realizedPrice: currentPoint.close,
@@ -259,7 +265,7 @@ export const analyzeAllTradingSignals = (
         signals.push({
           date: currentPoint.date,
           type: "sell",
-          reason: `자동 손절 (${TRADING_CONFIG.stopLossPercent}% 도달, 실제 매수 안 함)`,
+          reason: `과열 참고 신호 무효화 (${TRADING_CONFIG.stopLossPercent}% 도달)`,
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
@@ -270,10 +276,7 @@ export const analyzeAllTradingSignals = (
         signals.push({
           date: currentPoint.date,
           type: "sell",
-          reason:
-            profitRate >= 0
-              ? "시간 제한 익절 (인버스 만료, 매수 안 함)"
-              : "시간 제한 손절 (인버스 만료, 매수 안 함)",
+          reason: "과열 참고 신호 만료 (시간 제한)",
           realizedPrice: currentPoint.close,
           currentPrice: currentPoint.close,
           profitRate: profitRate,
@@ -319,7 +322,9 @@ export const analyzeAllTradingSignals = (
             date: currentPoint.date,
             startDate: bullishSetupStartDate,
             type: "buy",
-            reason: "매수 (쌍바닥+VWAP리테스트+KAMA+Prob상승)",
+            reason: isInverse
+              ? "시장 과열 참고 신호 (쌍바닥+VWAP리테스트+KAMA+Prob상승)"
+              : "매수 (쌍바닥+VWAP리테스트+KAMA+Prob상승)",
             entryPrice: currentPoint.close,
             currentPrice: currentPoint.close,
             details:
@@ -342,7 +347,7 @@ export const analyzeAllTradingSignals = (
             date: currentPoint.date,
             startDate: bearishSetupStartDate,
             type: "inverse-buy",
-            reason: "인버스 매수 (쌍봉+VWAP리테스트+KAMA+Prob하락)",
+            reason: "시장 과열 참고 신호 (쌍봉+VWAP리테스트+KAMA+Prob하락)",
             entryPrice: currentPoint.close,
             currentPrice: currentPoint.close,
             details:
@@ -363,7 +368,9 @@ export const analyzeAllTradingSignals = (
             date: currentPoint.date,
             startDate: firstTrough.date,
             type: "buy",
-            reason: "매수 (RSI 쌍바닥)",
+            reason: isInverse
+              ? "시장 과열 참고 신호 (RSI 쌍바닥)"
+              : "매수 (RSI 쌍바닥)",
             entryPrice: currentPoint.close,
             currentPrice: currentPoint.close,
             details: `RSI Bullish Divergence`,
@@ -428,7 +435,7 @@ export const analyzeAllTradingSignals = (
             date: currentPoint.date,
             startDate: firstPeak.date,
             type: "inverse-buy",
-            reason: "인버스 매수 (RSI 쌍봉)",
+            reason: "시장 과열 참고 신호 (RSI 쌍봉)",
             entryPrice: currentPoint.close,
             currentPrice: currentPoint.close,
             details: `RSI Bearish Divergence`,
@@ -555,8 +562,10 @@ export const analyzeAllTradingSignals = (
           signals.push({
             date: currentPoint.date,
             type: "sell",
-            reason:
-              profitRate >= 0
+            // 💡 일반 종목 매수 조건이었어도 isInverse면 텍스트 변환
+            reason: isInverse
+              ? `과열 참고 신호 해제 (${reasonBase})`
+              : profitRate >= 0
                 ? `수익 실현 (${reasonBase})`
                 : `손절 (${reasonBase})`,
             realizedPrice: exitPrice,
@@ -638,10 +647,7 @@ export const analyzeAllTradingSignals = (
           signals.push({
             date: currentPoint.date,
             type: "sell",
-            reason:
-              profitRate >= 0
-                ? `수익 실현 (${reasonBase}, 매수 안 함)`
-                : `손절 (${reasonBase}, 매수 안 함)`,
+            reason: `과열 참고 신호 해제 (${reasonBase})`,
             realizedPrice: exitPrice,
             currentPrice: exitPrice,
             profitRate: profitRate,

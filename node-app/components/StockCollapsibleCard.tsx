@@ -361,8 +361,9 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             targetSignal.type === "inverse-buy");
                         const sign = currentProfitRate > 0 ? "+" : "";
 
+                        // Update text for inverse/high-risk signals
                         if (isHighRisk) {
-                          return `[인버스 보유 중: ${sign}${currentProfitRate.toFixed(2)}% (매매 참고용)]`;
+                          return `[시장 과열 참고 중: ${sign}${currentProfitRate.toFixed(2)}%]`;
                         } else {
                           return `[보유 중: ${sign}${currentProfitRate.toFixed(2)}%]`;
                         }
@@ -424,7 +425,8 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                       <TableHeader>
                         <TableRow className="bg-slate-50 dark:bg-slate-800">
                           <TableHead className="h-8 px-2 text-xs">
-                            매수 날짜
+                            {/* Changed generic signal date label */}
+                            신호 날짜
                           </TableHead>
                           <TableHead className="h-8 px-2 text-xs">
                             신호
@@ -487,9 +489,10 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                   {showHighRiskWarning && (
                                     <span
                                       className="text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800 whitespace-nowrap"
-                                      title="인버스 투자는 리스크가 매우 큽니다."
+                                      // Update tooltip and text for reference-only
+                                      title="인버스 투자는 리스크가 매우 크므로 시장 과열 지표로만 참고하세요."
                                     >
-                                      고위험 (시장 과열 참고, 매수 금지)
+                                      시장 과열 참고
                                     </span>
                                   )}
                                   {showGazuaBadge && (
@@ -537,9 +540,13 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                         >
                                           {rowCurrentProfitRate > 0 ? "+" : ""}
                                           {rowCurrentProfitRate.toFixed(2)}% (
-                                          {rowCurrentProfitRate > 0
-                                            ? "개이득 중"
-                                            : "눈물"}
+                                          {signal.type === "inverse-buy"
+                                            ? rowCurrentProfitRate > 0
+                                              ? "참고 수익"
+                                              : "참고 손실"
+                                            : rowCurrentProfitRate > 0
+                                              ? "개이득 중"
+                                              : "눈물"}
                                           )
                                         </span>
                                       )}

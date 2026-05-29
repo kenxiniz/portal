@@ -1,7 +1,7 @@
 /* lib/scheduler/telegramLongTermService.ts */
 
 import axios from "axios";
-import https from "https"; // 💡 https 모듈 추가
+import https from "https";
 import { schedulerConfig } from "./config";
 import { StockSignalInfo } from "./types";
 import { LottoSet } from "@/types/lotto";
@@ -44,7 +44,7 @@ interface ExtendedStockSignalInfo extends StockSignalInfo {
   profitRate?: number;
 }
 
-// 💡 전역적으로 IPv4 강제 에이전트 생성
+// Create IPv4 agent
 const ipv4Agent = new https.Agent({ family: 4 });
 
 export class TelegramLongTermService {
@@ -99,7 +99,6 @@ export class TelegramLongTermService {
           payload.reply_markup = replyMarkup;
         }
 
-        // 💡 httpsAgent 옵션을 주입하여 IPv6 접속 시도를 원천 차단
         await axios.post(url, payload, { httpsAgent: ipv4Agent });
         console.log(`Successfully sent Telegram message to chat: ${chatId}`);
       } catch (error: unknown) {
@@ -150,6 +149,18 @@ export class TelegramLongTermService {
     }
   }
 
+  // Helper method to find the matching entry signal for a sell signal
+  private findRecentEntrySignal(
+    signals: TradingSignal[],
+  ): TradingSignal | null {
+    for (let i = signals.length - 2; i >= 0; i--) {
+      if (signals[i].type === "buy" || signals[i].type === "inverse-buy") {
+        return signals[i];
+      }
+    }
+    return null;
+  }
+
   public async notifyRealtimeSignal(
     ticker: string,
     timeframe: string,
@@ -179,28 +190,31 @@ export class TelegramLongTermService {
       );
       const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
 
-      let subTag = "";
+      let message = "";
+
       if (latestSignal.type.includes("buy")) {
         const isMatchingMarketGrowth =
           (!isInverse && latestSignal.type === "buy") ||
           (isInverse && latestSignal.type === "inverse-buy");
 
-        subTag = isMatchingMarketGrowth
+        const subTag = isMatchingMarketGrowth
           ? "🚀 [가즈아!]"
           : "⚠️ [고위험-매매참고]";
-      }
 
-      let message = "";
-
-      if (latestSignal.type.includes("buy")) {
         const priceStr = latestSignal.entryPrice
           ? `$${latestSignal.entryPrice.toFixed(2)}`
           : "N/A";
 
-        message += `🚨 <b>[${timeframeDisplay} 매수 신호 감지]</b> ${subTag}\n\n`;
+        const isInverseSignal =
+          latestSignal.type === "inverse-buy" ||
+          (isInverse && latestSignal.type === "buy");
+        const headerTitle = isInverseSignal ? "시장 과열 참고" : "매수";
+        const priceLabel = isInverseSignal ? "기준가" : "매수가";
+
+        message += `🚨 <b>[${timeframeDisplay} ${headerTitle} 신호 감지]</b> ${subTag}\n\n`;
         message += `<b>종목:</b> ${ticker}\n`;
         message += `<b>발생 시간:</b> ${displayDate}\n`;
-        message += `<b>매수가:</b> ${priceStr}\n`;
+        message += `<b>${priceLabel}:</b> ${priceStr}\n`;
         message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
       } else if (latestSignal.type === "sell") {
         let profitRateNum = Number(latestSignal.profitRate);
@@ -208,13 +222,34 @@ export class TelegramLongTermService {
 
         const isProfit = profitRateNum >= 0;
         const headerIcon = isProfit ? "💰" : "📉";
-        const headerText = isProfit ? "익절(수익)" : "손절";
 
-        message += `${headerIcon} <b>[${timeframeDisplay} ${headerText} 신호 감지]</b>\n\n`;
+        // Find entry signal to check if this is clearing an inverse position
+        const entrySignal = this.findRecentEntrySignal(signals);
+        const isInversePlay =
+          isInverse || (entrySignal && entrySignal.type === "inverse-buy");
+
+        const isExplicitDismissal =
+          latestSignal.reason.includes("해제") ||
+          latestSignal.reason.includes("무효화");
+
+        const isDismissal = isExplicitDismissal || isInversePlay;
+        const headerText = isDismissal
+          ? "시장 과열 참고 해제"
+          : isProfit
+            ? "익절(수익)"
+            : "손절";
+
+        message += `${headerIcon} <b>[${timeframeDisplay} ${headerText} 알림]</b>\n\n`;
         message += `<b>종목:</b> ${ticker}\n`;
         message += `<b>발생 시간:</b> ${displayDate}\n`;
-        message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
-        message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
+
+        if (!isDismissal) {
+          message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
+        } else if (isInversePlay) {
+          message += `<b>참고 수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
+        }
+
+        message += `<b>상세:</b> ${latestSignal.reason}\n\n`;
       }
 
       const targetPath = encodeURIComponent(
@@ -240,8 +275,10 @@ export class TelegramLongTermService {
               disable_web_page_preview: true,
             };
 
-            // 💡 여기도 동일하게 IPv4 강제 옵션 추가
             await axios.post(url, payload, { httpsAgent: ipv4Agent });
+            console.log(
+              `[Scheduler] Sent long-term realtime signal for ${ticker} to chat ${chatId}`,
+            );
           } catch (error: unknown) {
             TelegramLongTermService.sentSignalCache[cacheKey] =
               lastSentDate || "";
@@ -269,21 +306,25 @@ export class TelegramLongTermService {
     let holdingSummary = `<b>💸 [내 계좌 요약 (보유 중)]</b>\n`;
     let holdingCount = 0;
 
+    // Upper summary list: filter out inverse stocks
     signals.forEach((item) => {
+      const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
+        (s) => s.ticker === item.name,
+      );
+      const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
+        (s) => s.ticker === item.name,
+      );
+      const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
+
+      if (isInverse) return;
+
       const { name, currentSignal, lastMeaningfulSignal } = item;
       const isHold = currentSignal.type === "hold";
       const targetSignal =
         isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
 
-      if (
-        isHold ||
-        currentSignal.type === "buy" ||
-        currentSignal.type === "inverse-buy"
-      ) {
-        if (
-          targetSignal.type === "buy" ||
-          targetSignal.type === "inverse-buy"
-        ) {
+      if (isHold || currentSignal.type === "buy") {
+        if (targetSignal.type === "buy") {
           holdingCount++;
 
           if (targetSignal.entryPrice) {
@@ -303,8 +344,6 @@ export class TelegramLongTermService {
             if (currentPrice) {
               if (targetSignal.type === "buy") {
                 profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
-              } else if (targetSignal.type === "inverse-buy") {
-                profitRate = ((entryPrice - currentPrice) / entryPrice) * 100;
               }
             } else if (
               extCurrentSignal.profitRate !== undefined &&
@@ -318,9 +357,6 @@ export class TelegramLongTermService {
               profitRate = Number(extItem.profitRate);
             }
 
-            const inverseTag =
-              targetSignal.type === "inverse-buy" ? " [인버스]" : "";
-
             if (profitRate !== null && !isNaN(profitRate)) {
               const sign = profitRate > 0 ? "+" : "";
               const statusLabel =
@@ -330,14 +366,12 @@ export class TelegramLongTermService {
                     ? "눈물 😭"
                     : "본전 😐";
 
-              holdingSummary += `▪️ <b>${name}${inverseTag}:</b> ${statusLabel} (${sign}${profitRate.toFixed(2)}%)\n`;
+              holdingSummary += `▪️ <b>${name}:</b> ${statusLabel} (${sign}${profitRate.toFixed(2)}%)\n`;
             } else {
-              holdingSummary += `▪️ <b>${name}${inverseTag}:</b> 수익률 계산 불가 <i>(현재가 지연)</i>\n`;
+              holdingSummary += `▪️ <b>${name}:</b> 계산 불가 <i>(현재가 지연)</i>\n`;
             }
           } else {
-            const inverseTag =
-              targetSignal.type === "inverse-buy" ? " [인버스]" : "";
-            holdingSummary += `▪️ <b>${name}${inverseTag}:</b> 수익률 계산 불가 <i>(진입가 지연)</i>\n`;
+            holdingSummary += `▪️ <b>${name}:</b> 계산 불가 <i>(진입가 지연)</i>\n`;
           }
         }
       }
@@ -349,6 +383,7 @@ export class TelegramLongTermService {
 
     message += holdingSummary + `\n━━━━━━━━━━━━━━━━━━\n\n`;
 
+    // Lower detailed list: includes inverse (overheat reference) stocks
     signals.forEach((item: StockSignalInfo, index: number) => {
       const { name, currentSignal, lastMeaningfulSignal, advice } = item;
       const isHold = currentSignal.type === "hold";
@@ -358,7 +393,7 @@ export class TelegramLongTermService {
       let statusText = "";
       if (targetSignal.type === "buy") statusText = "당장 매수각";
       else if (targetSignal.type === "inverse-buy")
-        statusText = "인버스 매수 (방어모드!)";
+        statusText = "시장 과열 참고 (방어모드!)";
       else if (targetSignal.type === "sell") statusText = "지금이 익절 타이밍";
 
       let profitRateText = "";
@@ -366,7 +401,10 @@ export class TelegramLongTermService {
         isHold &&
         (targetSignal.type === "buy" || targetSignal.type === "inverse-buy")
       ) {
-        statusText = "존버 가보자고! (매수 유지)";
+        statusText =
+          targetSignal.type === "buy"
+            ? "존버 가보자고! (매수 유지)"
+            : "시장 과열 지속 (관망 유지)";
 
         if (targetSignal.entryPrice) {
           const entryPrice = targetSignal.entryPrice;
@@ -404,9 +442,9 @@ export class TelegramLongTermService {
             const sign = profitRate > 0 ? "+" : "";
             const color =
               profitRate > 0 ? "개이득" : profitRate < 0 ? "눈물" : "본전";
-            profitRateText = `\n<b>💸 지금까지 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
+            profitRateText = `\n<b>💸 참고 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
           } else {
-            profitRateText = `\n<b>💸 지금까지 수익률:</b> <i>계산 불가 (현재가 데이터 누락)</i>`;
+            profitRateText = `\n<b>💸 참고 수익률:</b> <i>계산 불가 (현재가 데이터 누락)</i>`;
           }
         }
       }

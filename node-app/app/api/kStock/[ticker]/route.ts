@@ -16,6 +16,7 @@ import {
   getMinuteKoreanStockData,
 } from "../../../../lib/koreanKisApi";
 import { TickerAdvice } from "../../../../lib/models/advice";
+import stockConfig from "../../../../lib/stock.json"; // 💡 stock.json 임포트 추가
 
 // Force Next.js to completely disable caching for this API route
 export const dynamic = "force-dynamic";
@@ -32,6 +33,11 @@ type CacheEntry = {
   timestamp: number;
   payload: CachePayload;
 };
+
+interface StockConfigItem {
+  ticker: string;
+  isInverse?: boolean;
+}
 
 const globalCache = global as typeof globalThis & {
   kStockApiCache: Map<string, CacheEntry>;
@@ -117,16 +123,13 @@ export async function GET(request: Request) {
     const now = Date.now();
     const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
 
-    // [핵심 수정] 각 timeframe별로 달성 가능한 '현실적 최대 캔들 수'를 목표치로 설정합니다.
     let targetCandles = 500;
     if (timeframe === "1h") {
-      targetCandles = 120; // 한국 주식 1시간봉은 최대 약 130개까지만 생성 가능
+      targetCandles = 120;
     } else if (timeframe === "15m") {
-      targetCandles = 400; // 한국 주식 15분봉은 최대 약 480개까지만 생성 가능
+      targetCandles = 400;
     }
 
-    // 1. DB에 캔들이 목표치보다 부족하거나 (과거 데이터 누락)
-    // 2. 가장 마지막 업데이트가 1주일이 넘었을 때 (데이터 방치) 풀스캔을 돌립니다.
     const isMissingMoreThanOneWeek =
       uniqueDbCandles.length < targetCandles ||
       now - latestDbTimestamp > oneWeekMs;
@@ -162,10 +165,7 @@ export async function GET(request: Request) {
     // --- Step 5: Strictly Filter & Save ---
     if (apiData && apiData.length > 0) {
       const newDataToSave = apiData.filter((candle) => {
-        // If we did a deep fetch due to missing data, save everything we fetched
         if (isMissingMoreThanOneWeek) return true;
-
-        // Otherwise, only save data newer than our latest DB record
         return new Date(candle.date).getTime() >= latestDbTimestamp;
       });
 
@@ -233,9 +233,21 @@ export async function GET(request: Request) {
       }));
 
       const processedData = calculateBollingerBands(calculateRSI(mappedData));
+
+      // 💡 종목이 인버스인지 체크 (한국 주식과 미국 주식 목록 모두 확인)
+      const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
+        (s) => s.ticker === ticker,
+      );
+      const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
+        (s) => s.ticker === ticker,
+      );
+      const isInverse = !!(kStock?.isInverse || usStock?.isInverse);
+
+      // 💡 세 번째 인자로 isInverse 전달
       const signals = analyzeAllTradingSignals(
         processedData,
         timeframe as "1d" | "1h" | "15m",
+        isInverse,
       );
 
       const responsePayload: CachePayload = {

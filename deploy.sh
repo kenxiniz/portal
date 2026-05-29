@@ -22,6 +22,6 @@ cd ..
 echo "[Deploy] Rebuilding and restarting the Docker container (node-app)..."
 #docker compose up -d --build
 
-docker compose up -d --build node-app
+docker compose up -d --build --no-deps node-app
 
 echo "[Deploy] Deployment process finished successfully."

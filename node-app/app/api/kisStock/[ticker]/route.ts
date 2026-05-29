@@ -13,6 +13,7 @@ import {
 } from "../../../../lib/stockUtils";
 import { getDailyStockData, getMinuteStockData } from "../../../../lib/kisApi";
 import { TickerAdvice } from "../../../../lib/models/advice";
+import stockConfig from "../../../../lib/stock.json"; // 💡 stock.json 임포트 추가
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,6 +29,11 @@ type CacheEntry = {
   timestamp: number;
   payload: CachePayload;
 };
+
+interface StockConfigItem {
+  ticker: string;
+  isInverse?: boolean;
+}
 
 const globalCache = global as typeof globalThis & {
   stockApiCache: Map<string, CacheEntry>;
@@ -217,9 +223,21 @@ export async function GET(request: Request) {
       }));
 
       const processedData = calculateBollingerBands(calculateRSI(mappedData));
+
+      // 💡 종목이 미국 인버스 혹은 한국 인버스 목록에 등록되어 있는지 검사
+      const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
+        (s) => s.ticker === ticker,
+      );
+      const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
+        (s) => s.ticker === ticker,
+      );
+      const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
+
+      // 💡 세 번째 인자로 파싱된 isInverse 상태값 주입
       const signals = analyzeAllTradingSignals(
         processedData,
         timeframe as "1d" | "1h" | "15m",
+        isInverse,
       );
 
       const responsePayload: CachePayload = {

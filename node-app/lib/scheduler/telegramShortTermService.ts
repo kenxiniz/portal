@@ -162,16 +162,32 @@ export class TelegramShortTermService {
               ? `$${latestSignal.entryPrice.toFixed(2)}`
               : "N/A";
 
-            message += `🚨 <b>[${timeframeDisplay} 단타 매수 신호 감지]</b> ${subTag}\n\n`;
+            const isInverseSignal = latestSignal.type === "inverse-buy";
+            const headerTitle = isInverseSignal
+              ? "단타 시장 과열 참고"
+              : "단타 매수";
+            const priceLabel = isInverseSignal ? "기준가" : "매수가";
+
+            message += `🚨 <b>[${timeframeDisplay} ${headerTitle} 신호 감지]</b> ${subTag}\n\n`;
             message += `<b>종목:</b> ${ticker}\n`;
             message += `<b>발생 시간:</b> ${displayDate}\n`;
-            message += `<b>매수가:</b> ${priceStr}\n`;
+            message += `<b>${priceLabel}:</b> ${priceStr}\n`;
             message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
           } else if (latestSignal.type === "sell") {
             const profitRateNum = Number(latestSignal.profitRate) || 0;
             const isProfit = profitRateNum >= 0;
             const headerIcon = isProfit ? "💰" : "📉";
-            const headerText = isProfit ? "익절(수익)" : "손절";
+
+            // 'sell' can also be triggered to dismiss an inverse signal
+            const isDismissal =
+              latestSignal.reason.includes("해제") ||
+              latestSignal.reason.includes("무효화");
+            const headerText = isDismissal
+              ? "신호 해제"
+              : isProfit
+                ? "익절(수익)"
+                : "손절";
+            const actionLabel = isDismissal ? "해제" : "매도";
 
             // Find the entry signal to display entry time and price
             const entrySignal = this.findRecentEntrySignal(signals);
@@ -188,16 +204,19 @@ export class TelegramShortTermService {
               ? `$${latestSignal.realizedPrice.toFixed(2)}`
               : "N/A";
 
-            message += `${headerIcon} <b>[${timeframeDisplay} 단타 ${headerText} 신호 감지]</b>\n\n`;
+            message += `${headerIcon} <b>[${timeframeDisplay} 단타 ${headerText} 알림]</b>\n\n`;
             message += `<b>종목:</b> ${ticker}\n`;
-            message += `<b>매도 시간:</b> ${displayDate}\n`;
-            message += `<b>매도 가격:</b> ${sellPriceDisplay}\n`;
-            message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
-            message += `<b>근거:</b> ${latestSignal.reason}\n\n`;
+            message += `<b>${actionLabel} 시간:</b> ${displayDate}\n`;
+            message += `<b>${actionLabel} 가격:</b> ${sellPriceDisplay}\n`;
+            if (!isDismissal) {
+              message += `<b>수익률:</b> ${profitRateNum > 0 ? "+" : ""}${profitRateNum.toFixed(2)}%\n`;
+            }
+            message += `<b>상세:</b> ${latestSignal.reason}\n\n`;
 
-            message += `<b>--- 진입 정보 ---</b>\n`;
-            message += `<b>진입 시간:</b> ${entryTimeDisplay}\n`;
-            message += `<b>진입 가격:</b> ${entryPriceDisplay}\n\n`;
+            const entryLabel = isDismissal ? "기준" : "진입";
+            message += `<b>--- ${entryLabel} 정보 ---</b>\n`;
+            message += `<b>${entryLabel} 시간:</b> ${entryTimeDisplay}\n`;
+            message += `<b>${entryLabel} 가격:</b> ${entryPriceDisplay}\n\n`;
           }
 
           const targetPath = encodeURIComponent(
