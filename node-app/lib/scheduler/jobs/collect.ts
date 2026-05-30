@@ -9,6 +9,9 @@ import stockConfig from "../../stock.json";
 import { TelegramLongTermService } from "../telegramLongTermService";
 import { TelegramShortTermService } from "../telegramShortTermService";
 
+// Import the pure indicator logic for real-time pivot scanning
+import { calculatePivotPoints } from "../../charts/indicators";
+
 /**
  * Periodically collects market data every 5 minutes during market hours.
  * It triggers the internal API with 'refresh=true' to force update MongoDB.
@@ -74,6 +77,53 @@ export async function collectMarketData(): Promise<void> {
                 timeframe,
                 signals,
               );
+            }
+
+            // 💡 60-min timeframe pivot levels breakthrough check
+            if (
+              timeframe === "1h" &&
+              response.data.data &&
+              response.data.data.length > 0
+            ) {
+              const candles = response.data.data;
+              const pivots = calculatePivotPoints(candles);
+              const lastIdx = candles.length - 1;
+
+              const lastCandle = candles[lastIdx];
+              const lastPivot = pivots[lastIdx];
+
+              if (
+                lastPivot &&
+                lastPivot.p !== null &&
+                lastPivot.r2 !== null &&
+                lastPivot.s2 !== null
+              ) {
+                const currentPrice = lastCandle.close;
+
+                if (currentPrice >= lastPivot.r2) {
+                  console.log(
+                    `[PIVOT BREACH] Ticker: ${stock.ticker}, Price: ${currentPrice} >= R2: ${lastPivot.r2}`,
+                  );
+                  await telegramLongTermService.notifyPivotBreach(
+                    stock.ticker,
+                    currentPrice,
+                    lastPivot.r2,
+                    "R2_UP",
+                    lastCandle.date,
+                  );
+                } else if (currentPrice <= lastPivot.s2) {
+                  console.log(
+                    `[PIVOT BREACH] Ticker: ${stock.ticker}, Price: ${currentPrice} <= S2: ${lastPivot.s2}`,
+                  );
+                  await telegramLongTermService.notifyPivotBreach(
+                    stock.ticker,
+                    currentPrice,
+                    lastPivot.s2,
+                    "S2_DOWN",
+                    lastCandle.date,
+                  );
+                }
+              }
             }
           }
         } catch (error) {

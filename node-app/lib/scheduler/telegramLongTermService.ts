@@ -8,7 +8,7 @@ import { LottoSet } from "@/types/lotto";
 import { TradingSignal } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 
-// MongoDB 연결 및 소문자로 변경된 모델 임포트
+// Import database connection and lowercase model file
 import { connectDB } from "@/lib/mongodb";
 import { TelegramSignalCache } from "@/lib/models/telegramSignalCache";
 
@@ -151,8 +151,9 @@ export class TelegramLongTermService {
     }
   }
 
-  // Helper method to find the matching entry signal for a sell signal
-  private findRecentEntrySignal(signals: TradingSignal[]): TradingSignal | null {
+  private findRecentEntrySignal(
+    signals: TradingSignal[],
+  ): TradingSignal | null {
     for (let i = signals.length - 2; i >= 0; i--) {
       if (signals[i].type === "buy" || signals[i].type === "inverse-buy") {
         return signals[i];
@@ -180,7 +181,8 @@ export class TelegramLongTermService {
     if (latestSignal.type.includes("buy") || latestSignal.type === "sell") {
       const signalDate = latestSignal.date;
       const displayDate = this.formatSignalTime(signalDate);
-      const timeframeDisplay = "일봉";
+      const timeframeDisplay =
+        timeframe === "1d" ? "일봉" : timeframe === "1h" ? "60분봉" : "15m분봉";
 
       const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
         (s) => s.ticker === ticker,
@@ -223,7 +225,6 @@ export class TelegramLongTermService {
         const isProfit = profitRateNum >= 0;
         const headerIcon = isProfit ? "💰" : "📉";
 
-        // Find entry signal to check if this is clearing an inverse position
         const entrySignal = this.findRecentEntrySignal(signals);
         const isInversePlay =
           isInverse || (entrySignal && entrySignal.type === "inverse-buy");
@@ -260,27 +261,26 @@ export class TelegramLongTermService {
 
       const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
 
-      // 💡 MongoDB 연결 보장
+      // Connect to MongoDB
       await connectDB();
 
       const sendPromises = this.longTermChatIds.map(async (chatId) => {
-        // 💡 캐시 키에 신호 타입(buy/sell 등)을 추가하여 다른 신호에 의해 덮어씌워지는 것 방지
         const cacheKey = `${chatId}_${ticker}_${timeframe}_${latestSignal.type}`;
 
-        // 💡 1d (일봉) 인 경우 날짜(YYYY-MM-DD)만 추출하여 하루에 단 한 번만 검증하도록 처리
+        // 💡 1d뿐만 아니라 60분봉(1h) 스케줄러에서도 하루 1회 한정을 위해 YYYY-MM-DD 추출
         const dateKey = signalDate.split("T")[0].split(" ")[0];
-        const checkValue = timeframe === "1d" ? dateKey : signalDate;
+        const checkValue = dateKey; // Force checking on daily boundary for 1-time alert
 
-        // 💡 몽고DB에서 기존 발송 기록 조회
         const existingCache = await TelegramSignalCache.findOne({ cacheKey });
-        const lastSentValue = existingCache ? existingCache.lastSentValue : null;
+        const lastSentValue = existingCache
+          ? existingCache.lastSentValue
+          : null;
 
         if (lastSentValue !== checkValue) {
-          // 💡 중복 발송 방지를 위해 몽고DB에 먼저 덮어쓰기 (Upsert)
           await TelegramSignalCache.findOneAndUpdate(
             { cacheKey },
             { lastSentValue: checkValue, updatedAt: new Date() },
-            { upsert: true, new: true }
+            { upsert: true, new: true },
           );
 
           try {
@@ -296,11 +296,10 @@ export class TelegramLongTermService {
               `[Scheduler] Sent long-term realtime signal for ${ticker} to chat ${chatId}`,
             );
           } catch (error: unknown) {
-            // 💡 발송 실패 시 몽고DB 캐시 원상복구
             if (lastSentValue) {
               await TelegramSignalCache.findOneAndUpdate(
                 { cacheKey },
-                { lastSentValue: lastSentValue, updatedAt: new Date() }
+                { lastSentValue: lastSentValue, updatedAt: new Date() },
               );
             } else {
               await TelegramSignalCache.deleteOne({ cacheKey });
@@ -321,6 +320,91 @@ export class TelegramLongTermService {
     }
   }
 
+  // 💡 60분봉 피봇 돌파 알림 함수 신설
+  public async notifyPivotBreach(
+    ticker: string,
+    currentPrice: number,
+    pivotValue: number,
+    type: "R2_UP" | "S2_DOWN",
+    dateStr: string,
+  ): Promise<void> {
+    if (!this.botToken || this.longTermChatIds.length === 0) return;
+
+    // Format display content
+    const dateKey = dateStr.split("T")[0].split(" ")[0];
+    const headerTitle =
+      type === "R2_UP"
+        ? "📈 [60분봉 피봇 R2 저항선 돌파]"
+        : "📉 [60분봉 피봇 S2 지지선 이탈]";
+    const description =
+      type === "R2_UP"
+        ? `현재 주가가 피봇 R2 저항선 이상으로 상승했습니다. 시장 과열 가능성에 유의하세요.`
+        : `현재 주가가 피봇 S2 지지선 이하로 하락했습니다. 지지선 붕괴에 유의하세요.`;
+
+    let message = `🚨 <b>${headerTitle}</b>\n\n`;
+    message += `<b>종목:</b> ${ticker}\n`;
+    message += `<b>기준 일자:</b> ${dateKey}\n`;
+    message += `<b>현재가:</b> $${currentPrice.toFixed(2)}\n`;
+    message += `<b>피봇 기준가:</b> $${pivotValue.toFixed(2)}\n\n`;
+    message += `<b>상세 정보:</b>\n${description}\n\n`;
+
+    const targetPath = encodeURIComponent(`kis-stock?ticker=${ticker}&tf=1h`);
+    const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
+    message += `<a href="${redirectLink}">👉 60분봉 차트 확인하기</a>\n\n`;
+
+    await connectDB();
+
+    const sendPromises = this.longTermChatIds.map(async (chatId) => {
+      // Create a specific cache key for pivot notifications
+      const cacheKey = `${chatId}_${ticker}_1h_pivot_${type}`;
+
+      const existingCache = await TelegramSignalCache.findOne({ cacheKey });
+      const lastSentValue = existingCache ? existingCache.lastSentValue : null;
+
+      // Restrict notification to once per day using dateKey
+      if (lastSentValue !== dateKey) {
+        await TelegramSignalCache.findOneAndUpdate(
+          { cacheKey },
+          { lastSentValue: dateKey, updatedAt: new Date() },
+          { upsert: true, new: true },
+        );
+
+        try {
+          const payload: SendMessagePayload = {
+            chat_id: chatId,
+            text: message,
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+          };
+
+          await axios.post(
+            `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+            payload,
+            { httpsAgent: ipv4Agent },
+          );
+          console.log(
+            `[Pivot Alert] Successfully notified ${type} for ${ticker}`,
+          );
+        } catch (error: unknown) {
+          if (lastSentValue) {
+            await TelegramSignalCache.findOneAndUpdate(
+              { cacheKey },
+              { lastSentValue },
+            );
+          } else {
+            await TelegramSignalCache.deleteOne({ cacheKey });
+          }
+          console.error(
+            `[Pivot Alert Error] Failed to send message to ${chatId}`,
+            error,
+          );
+        }
+      }
+    });
+
+    await Promise.all(sendPromises);
+  }
+
   public createStockStatusMessage = (signals: StockSignalInfo[]): string => {
     let message = `<b>🚀 오늘의 주식 폼 미쳤다! 📈</b>\n`;
     message += `오늘의 투자 인사이트, 켄신님이 콕 집어드려요.\n`;
@@ -329,7 +413,6 @@ export class TelegramLongTermService {
     let holdingSummary = `<b>💸 [내 계좌 요약 (보유 중)]</b>\n`;
     let holdingCount = 0;
 
-    // Upper summary list: filter out inverse stocks
     signals.forEach((item) => {
       const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
         (s) => s.ticker === item.name,
@@ -406,7 +489,6 @@ export class TelegramLongTermService {
 
     message += holdingSummary + `\n━━━━━━━━━━━━━━━━━━\n\n`;
 
-    // Lower detailed list: includes inverse (overheat reference) stocks
     signals.forEach((item: StockSignalInfo, index: number) => {
       const { name, currentSignal, lastMeaningfulSignal, advice } = item;
       const isHold = currentSignal.type === "hold";
@@ -514,14 +596,14 @@ export class TelegramLongTermService {
 
   public createLottoSetsMessage =
     (drawNo: number) =>
-      (sets: LottoSet[]): string => {
-        let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
-        message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
+    (sets: LottoSet[]): string => {
+      let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
+      message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
 
-        sets.forEach((set, index) => {
-          message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
-        });
+      sets.forEach((set, index) => {
+        message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
+      });
 
-        return message;
-      };
+      return message;
+    };
 }
