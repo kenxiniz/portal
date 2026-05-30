@@ -110,7 +110,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   const chartRef = useRef<StockChartDisplayHandles>(null);
   const cardContainerRef = useRef<HTMLDivElement>(null);
 
-  // Get history years from env, default to 1
   const historyYears = Number(process.env.NEXT_PUBLIC_HISTORY_YEARS) || 1;
 
   const targetSignal = useMemo(() => {
@@ -139,7 +138,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   const isInverseStock = !!stockInfo?.isInverse;
   const inverseTarget = stockInfo?.inverse;
 
-  // Calculate cutoff date based on history years
   const cutoffDate = useMemo(() => {
     const date = new Date();
     date.setFullYear(date.getFullYear() - historyYears);
@@ -194,7 +192,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     return null;
   }, [targetSignal, currentPrice]);
 
-  // Calculate cumulative profit and filter historical signals based on sell date
   const { historicalSignals, cumulativeProfitRate } = useMemo(() => {
     if (!Array.isArray(tickerState.signals))
       return { historicalSignals: [], cumulativeProfitRate: null };
@@ -229,17 +226,15 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
         currentPositionType = signal.type;
         currentBuySignal = signal;
 
-        // Add buy signal if it falls within the window
         if (isWithinWindow) {
           validDisplaySignals.push(signal);
         }
       } else if (signal.type === "sell") {
         if (currentPositionType) {
           const isHighRisk =
-            (isInverseStock && currentPositionType === "buy") ||
-            (!isInverseStock && currentPositionType === "inverse-buy");
+            (!isInverseStock && currentPositionType === "inverse-buy") ||
+            (isInverseStock && currentPositionType === "buy");
 
-          // Include in cumulative profit if sell signal is within the window
           if (isWithinWindow) {
             if (
               !isHighRisk &&
@@ -253,7 +248,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
               }
             }
 
-            // Add matching buy signal if sell is within window but buy is older
             if (
               currentBuySignal &&
               new Date(
@@ -294,8 +288,8 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
 
     if (type.includes("buy") && currentProfitRate !== null) {
       const isHighRisk =
-        (isInverseStock && type === "buy") ||
-        (!isInverseStock && type === "inverse-buy");
+        (!isInverseStock && type === "inverse-buy") ||
+        (isInverseStock && type === "buy");
 
       if (isHighRisk) {
         return "text-slate-500 dark:text-slate-400";
@@ -324,7 +318,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
   const hasAdviceError = adviceObject?.error === true;
   const isAdviceAvailable = !!adviceObject;
 
-  // Separate fetching and initial loading states
   const isFetching = tickerState.loading;
   const isInitialLoading = tickerState.loading && !tickerState.data;
 
@@ -350,7 +343,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
               >
                 <span className="font-bold">{displayName}</span>
 
-                {/* Hide profit rate texts completely while fetching */}
                 {!isFetching &&
                   targetSignal &&
                   targetSignal.type.includes("buy") &&
@@ -358,12 +350,11 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                     <span className="font-normal text-base ml-1.5">
                       {(() => {
                         const isHighRisk =
-                          (isInverseStock && targetSignal.type === "buy") ||
                           (!isInverseStock &&
-                            targetSignal.type === "inverse-buy");
+                            targetSignal.type === "inverse-buy") ||
+                          (isInverseStock && targetSignal.type === "buy");
                         const sign = currentProfitRate > 0 ? "+" : "";
 
-                        // Update text for inverse/high-risk signals
                         if (isHighRisk) {
                           return `[시장 과열 참고 중: ${sign}${currentProfitRate.toFixed(2)}%]`;
                         } else {
@@ -391,7 +382,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
               </CardTitle>
 
               <div className="flex items-center space-x-2 shrink-0">
-                {/* Show loading text during any fetch operation */}
                 {isFetching && (
                   <span className="text-xs text-blue-500 animate-pulse whitespace-nowrap">
                     데이터 로딩 중...
@@ -444,28 +434,92 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             index === historicalSignals.length - 1 &&
                             isBuySignal;
 
-                          const showHighRiskWarning =
-                            (isInverseStock && signal.type === "buy") ||
-                            (!isInverseStock && signal.type === "inverse-buy");
+                          // 💡 1. Replace backend text output containing '시장 과열 신호' for inverse-buy scenarios
+                          let displayReason = signal.reason;
+                          if (isInverseStock && signal.type === "inverse-buy") {
+                            const replacementText = inverseTarget
+                              ? `이 종목은 ${inverseTarget}의 인버스`
+                              : "정방향 매수 구간입니다";
 
-                          // Determine badge content: inverse specified text vs default gazua
-                          let badgeText = "가즈아!";
-                          if (
-                            isInverseStock &&
-                            signal.type === "inverse-buy" &&
-                            inverseTarget
-                          ) {
-                            badgeText = `${inverseTarget} 매수!`;
-                          } else if (
-                            !isInverseStock &&
-                            signal.type === "buy"
-                          ) {
-                            badgeText = "가즈아!";
+                            if (displayReason.includes("시장 과열 신호")) {
+                              displayReason = displayReason.replace(
+                                "시장 과열 신호",
+                                replacementText,
+                              );
+                            } else if (
+                              displayReason.includes("시장 과열 참고")
+                            ) {
+                              displayReason = displayReason.replace(
+                                "시장 과열 참고",
+                                replacementText,
+                              );
+                            } else if (displayReason.includes("시장 과열")) {
+                              displayReason = displayReason.replace(
+                                "시장 과열",
+                                replacementText,
+                              );
+                            } else {
+                              displayReason = `${replacementText} (${displayReason})`;
+                            }
+                          } else if (isInverseStock && signal.type === "sell") {
+                            // 💡 2. Sell 시 "시장 과열 신호 해제" 문구를 수익/손실 여부에 따라 "수익 실현" 또는 "손절"로 교체
+                            const isProfit =
+                              signal.profitRate !== undefined &&
+                              Number(signal.profitRate) >= 0;
+                            const replacementText = isProfit
+                              ? "수익 실현"
+                              : "손절";
+
+                            if (displayReason.includes("시장 과열 신호 해제")) {
+                              displayReason = displayReason.replace(
+                                "시장 과열 신호 해제",
+                                replacementText,
+                              );
+                            } else if (
+                              displayReason.includes("시장 과열 참고 해제")
+                            ) {
+                              displayReason = displayReason.replace(
+                                "시장 과열 참고 해제",
+                                replacementText,
+                              );
+                            } else if (
+                              displayReason.includes("과열 참고 해제")
+                            ) {
+                              displayReason = displayReason.replace(
+                                "과열 참고 해제",
+                                replacementText,
+                              );
+                            } else if (
+                              displayReason.includes("시장 과열 해제")
+                            ) {
+                              displayReason = displayReason.replace(
+                                "시장 과열 해제",
+                                replacementText,
+                              );
+                            }
                           }
 
-                          const showBadge =
-                            (!isInverseStock && signal.type === "buy") ||
-                            (isInverseStock && signal.type === "inverse-buy");
+                          // 💡 3. Warning tag condition (Red Badge)
+                          const isRedWarning =
+                            (!isInverseStock &&
+                              signal.type === "inverse-buy") ||
+                            (isInverseStock && signal.type === "buy");
+
+                          // 💡 4. Determine Blue Badge content text
+                          let badgeText = "";
+                          if (!isInverseStock && signal.type === "buy") {
+                            badgeText = "가즈아!";
+                          } else if (
+                            isInverseStock &&
+                            signal.type === "inverse-buy"
+                          ) {
+                            badgeText = inverseTarget
+                              ? `${inverseTarget} 매수`
+                              : "정방향 매수";
+                          }
+
+                          // 💡 5. Mutually exclusive badge rendering
+                          const showBlueBadge = !!badgeText && !isRedWarning;
 
                           let rowCurrentProfitRate = null;
                           if (
@@ -498,18 +552,18 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                               <TableCell className="text-xs py-1 px-2">
                                 <div className="flex items-center gap-1 flex-wrap">
                                   {getSignalIcon(signal)}
-                                  <span className="sm:max-w-none">
-                                    {signal.reason}
+                                  <span className="sm:max-w-none mr-1">
+                                    {displayReason}
                                   </span>
-                                  {showHighRiskWarning && (
+                                  {isRedWarning && (
                                     <span
                                       className="text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800 whitespace-nowrap"
-                                      title="인버스 투자는 리스크가 매우 크므로 시장 과열 지표로만 참고하세요."
+                                      title="시장 상황 지표로만 필히 모니터링 하세요."
                                     >
-                                      시장 과열 참고
+                                      주의!
                                     </span>
                                   )}
-                                  {showBadge && (
+                                  {showBlueBadge && (
                                     <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800 whitespace-nowrap">
                                       {badgeText}
                                     </span>

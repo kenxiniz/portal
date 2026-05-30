@@ -276,7 +276,9 @@ export class TelegramLongTermService {
         const checkValue = timeframe === "1d" ? dateKey : signalDate;
 
         const existingCache = await TelegramSignalCache.findOne({ cacheKey });
-        const lastSentValue = existingCache ? existingCache.lastSentValue : null;
+        const lastSentValue = existingCache
+          ? existingCache.lastSentValue
+          : null;
 
         if (lastSentValue !== checkValue) {
           await TelegramSignalCache.findOneAndUpdate(
@@ -678,14 +680,14 @@ export class TelegramLongTermService {
 
   public createLottoSetsMessage =
     (drawNo: number) =>
-      (sets: LottoSet[]): string => {
-        let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
-        message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
+    (sets: LottoSet[]): string => {
+      let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
+      message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
 
-        sets.forEach((set, index) => {
-          message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
-        });
+      sets.forEach((set, index) => {
+        message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
+      });
 
-        return message;
-      };
+      return message;
+    };
 }
