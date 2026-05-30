@@ -27,6 +27,7 @@ import {
 import { MainChart } from "./charts/MainChart";
 import { RsiChart } from "./charts/RsiChart";
 import { MacdChart } from "./charts/MacdChart";
+import { PivotChart } from "./charts/PivotChart";
 
 export interface ProcessedChartData {
   time: Time;
@@ -74,9 +75,13 @@ export const StockChartDisplay = forwardRef<
     const [mainChart, setMainChart] = useState<IChartApi | null>(null);
     const [rsiChart, setRsiChart] = useState<IChartApi | null>(null);
     const [macdChart, setMacdChart] = useState<IChartApi | null>(null);
+    const [pivotChart, setPivotChart] = useState<IChartApi | null>(null);
 
     const [chartHeights, setChartHeights] = useState({ main: 250, sub: 100 });
     const isInitialZoomApplied = useRef(false);
+
+    // 💡 날짜 이동 애니메이션 진행 상태를 추적하는 Ref 추가
+    const isMovingToDate = useRef(false);
 
     useEffect(() => {
       isInitialZoomApplied.current = false;
@@ -122,12 +127,10 @@ export const StockChartDisplay = forwardRef<
       );
       const closes = uniqueData.map((d) => Number(d.close));
 
-      // Calculate indicators locally using pure data
       const vwapResults = calculateVWAP(uniqueData, timeframe);
       const ema9Results = calculateEMA(closes, 9);
       const ema20Results = calculateEMA(closes, 20);
 
-      // Track active holding period state
       let isHolding = false;
 
       const processed = uniqueData.map((d, i) => {
@@ -141,10 +144,8 @@ export const StockChartDisplay = forwardRef<
           if (s.type === "sell") turnOff = true;
         });
 
-        // Start holding if buy signal occurs
         if (turnOn) isHolding = true;
 
-        // Legacy check: Keep highlighting pattern formation periods (e.g. RSI Double Bottom formation)
         const isPatternFormation = signals.some(
           (s) =>
             s.startDate &&
@@ -153,15 +154,13 @@ export const StockChartDisplay = forwardRef<
             s.type.includes("buy"),
         );
 
-        // [수정] 보유 기간은 초록색, 매수 대기(패턴 형성) 기간은 노란색으로 구분
         let highlightColor: string | undefined = undefined;
         if (isHolding || turnOff) {
-          highlightColor = "#4CAF50"; // Green for holding period and sell day
+          highlightColor = "#4CAF50";
         } else if (isPatternFormation) {
-          highlightColor = "#FFEB3B"; // Yellow for setup/waiting period
+          highlightColor = "#FFEB3B";
         }
 
-        // End holding after processing the sell candle
         if (turnOff) isHolding = false;
 
         const extD = d as ExtendedDataPoint;
@@ -177,7 +176,6 @@ export const StockChartDisplay = forwardRef<
           upper: d.bollingerBands?.upper,
           lower: d.bollingerBands?.lower,
 
-          // Use backend calculated values if available, otherwise use local calculated values
           vwap:
             typeof extD.vwap === "number" && !isNaN(extD.vwap)
               ? extD.vwap
@@ -197,7 +195,6 @@ export const StockChartDisplay = forwardRef<
                 ? ema20Results[i]
                 : undefined,
 
-          // Apply line break between date and time for UI formatting
           date: d.date.replace(/[ T]/, "\n"),
         } as ProcessedChartData;
       });
@@ -244,18 +241,41 @@ export const StockChartDisplay = forwardRef<
     }, [closePrices, processedData]);
 
     useEffect(() => {
-      if (mainChart && rsiChart && macdChart) {
+      const charts = [mainChart, pivotChart, rsiChart, macdChart].filter(
+        (c): c is IChartApi => c !== null,
+      );
+
+      if (charts.length < 2) return;
+
+      let isSyncing = false;
+
+      const syncHandlers = charts.map((sourceChart) => {
         const handler = (logicalRange: LogicalRange | null) => {
-          if (logicalRange) {
-            rsiChart.timeScale().setVisibleLogicalRange(logicalRange);
-            macdChart.timeScale().setVisibleLogicalRange(logicalRange);
-          }
+          if (!logicalRange || isSyncing) return;
+
+          isSyncing = true;
+          charts.forEach((targetChart) => {
+            if (targetChart !== sourceChart) {
+              // 💡 테이블 클릭으로 MainChart가 이동 중일 때는 에코(Echo)를 무시하여 애니메이션 끊김을 방지합니다.
+              if (isMovingToDate.current && targetChart === mainChart) {
+                return;
+              }
+              targetChart.timeScale().setVisibleLogicalRange(logicalRange);
+            }
+          });
+          isSyncing = false;
         };
-        mainChart.timeScale().subscribeVisibleLogicalRangeChange(handler);
-        return () =>
-          mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
-      }
-    }, [mainChart, rsiChart, macdChart]);
+
+        sourceChart.timeScale().subscribeVisibleLogicalRangeChange(handler);
+        return { sourceChart, handler };
+      });
+
+      return () => {
+        syncHandlers.forEach(({ sourceChart, handler }) => {
+          sourceChart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
+        });
+      };
+    }, [mainChart, pivotChart, rsiChart, macdChart]);
 
     useEffect(() => {
       if (
@@ -293,14 +313,16 @@ export const StockChartDisplay = forwardRef<
     useImperativeHandle(ref, () => ({
       moveToDate(date: string) {
         if (mainChart && processedData.length > 0) {
-          // Format the incoming date string to match the applied line break for searching
           const formattedDate = date.replace(/[ T]/, "\n");
           const idx = processedData.findIndex(
             (d) => d.date === formattedDate || d.date === date,
           );
           if (idx !== -1) {
             const range = mainChart.timeScale().getVisibleLogicalRange();
-            if (range)
+            if (range) {
+              // 💡 애니메이션 시작 전 방어막(Shield) 활성화
+              isMovingToDate.current = true;
+
               mainChart
                 .timeScale()
                 .scrollToPosition(
@@ -308,6 +330,12 @@ export const StockChartDisplay = forwardRef<
                     Math.floor((range.to - range.from) / 2),
                   true,
                 );
+
+              // 💡 1초 후 방어막 해제 (스크롤 애니메이션이 완전히 종료되는 시점)
+              setTimeout(() => {
+                isMovingToDate.current = false;
+              }, 1000);
+            }
           }
         }
       },
@@ -353,6 +381,17 @@ export const StockChartDisplay = forwardRef<
           height={chartHeights.main}
           onReady={setMainChart}
         />
+
+        {["1h", "15m"].includes(timeframe) && (
+          <PivotChart
+            data={processedData}
+            timeframe={timeframe}
+            gridStrokeColor={gridStrokeColor}
+            height={chartHeights.main}
+            onReady={setPivotChart}
+          />
+        )}
+
         <RsiChart
           data={processedData}
           gridStrokeColor={gridStrokeColor}

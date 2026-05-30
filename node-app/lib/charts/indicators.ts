@@ -451,7 +451,7 @@ export const calculateGaussianTrend = (
   });
 };
 
-// --- [추가] VWAP Retest Algorithm ---
+// --- VWAP Retest Algorithm ---
 export interface VwapRetestStatus {
   isBullishRetest: boolean;
   isBearishRetest: boolean;
@@ -480,7 +480,6 @@ export const calculateVwapRetest = (
     let isBearishRetest = false;
 
     if (v !== null) {
-      // 1. 카운팅 규칙: 종가가 VWAP 위에 있으면 유지, 아래로 깨지면 즉시 리셋
       if (c > v) {
         consecutiveAbove++;
         consecutiveBelow = 0;
@@ -488,18 +487,14 @@ export const calculateVwapRetest = (
         consecutiveBelow++;
         consecutiveAbove = 0;
       } else {
-        // VWAP과 종가가 완전히 동일한 경우 (안전을 위해 리셋)
         consecutiveAbove = 0;
         consecutiveBelow = 0;
       }
 
-      // 2. 리테스트 조건 확정
-      // 5봉 이상 안착 성공 상태 + 꼬리로 VWAP 터치(low <= v) + 종가는 VWAP 방어 성공(c > v)
       if (consecutiveAbove >= 5 && l <= v && c > v) {
         isBullishRetest = true;
       }
 
-      // 5봉 이상 하락 안착 상태 + 꼬리로 VWAP 터치(high >= v) + 종가는 저항 방어 성공(c < v)
       if (consecutiveBelow >= 5 && h >= v && c < v) {
         isBearishRetest = true;
       }
@@ -508,4 +503,147 @@ export const calculateVwapRetest = (
     status[i] = { isBullishRetest, isBearishRetest };
   }
   return status;
+};
+
+// --- Pivot Points Algorithm ---
+export interface PivotLevels {
+  p: number | null;
+  r2: number | null;
+  r3: number | null;
+  s2: number | null;
+  s3: number | null;
+}
+
+export const calculatePivotPoints = <
+  T extends {
+    date?: string;
+    chartTime?: Time;
+    high: number;
+    low: number;
+    close: number;
+  },
+>(
+  data: T[],
+): PivotLevels[] => {
+  const emptyPivot: PivotLevels = {
+    p: null,
+    r2: null,
+    r3: null,
+    s2: null,
+    s3: null,
+  };
+
+  if (data.length === 0) return [];
+
+  const dailyData: {
+    date: string;
+    high: number;
+    low: number;
+    close: number;
+  }[] = [];
+
+  let currentDay = "";
+  let curHigh = -Infinity;
+  let curLow = Infinity;
+  let curClose = 0;
+
+  for (let i = 0; i < data.length; i++) {
+    const candle = data[i];
+    let dateStr = "";
+
+    if (candle.date) {
+      dateStr = candle.date;
+    } else if (candle.chartTime !== undefined) {
+      if (typeof candle.chartTime === "number") {
+        dateStr = new Date(candle.chartTime * 1000).toISOString();
+      } else if (typeof candle.chartTime === "string") {
+        dateStr = candle.chartTime;
+      } else {
+        const bd = candle.chartTime as BusinessDay;
+        dateStr = `${bd.year}-${String(bd.month).padStart(2, "0")}-${String(bd.day).padStart(2, "0")}`;
+      }
+    } else {
+      continue;
+    }
+
+    const datePart = dateStr.includes("T")
+      ? dateStr.split("T")[0]
+      : dateStr.split(" ")[0];
+
+    if (datePart !== currentDay) {
+      if (currentDay !== "") {
+        dailyData.push({
+          date: currentDay,
+          high: curHigh,
+          low: curLow,
+          close: curClose,
+        });
+      }
+      currentDay = datePart;
+      curHigh = candle.high;
+      curLow = candle.low;
+      curClose = candle.close;
+    } else {
+      curHigh = Math.max(curHigh, candle.high);
+      curLow = Math.min(curLow, candle.low);
+      curClose = candle.close;
+    }
+  }
+
+  if (currentDay !== "") {
+    dailyData.push({
+      date: currentDay,
+      high: curHigh,
+      low: curLow,
+      close: curClose,
+    });
+  }
+
+  const prevDayMap = new Map<
+    string,
+    { high: number; low: number; close: number }
+  >();
+  for (let i = 1; i < dailyData.length; i++) {
+    prevDayMap.set(dailyData[i].date, dailyData[i - 1]);
+  }
+
+  const pivots: PivotLevels[] = new Array(data.length).fill(emptyPivot);
+
+  for (let i = 0; i < data.length; i++) {
+    const candle = data[i];
+    let dateStr = "";
+
+    if (candle.date) {
+      dateStr = candle.date;
+    } else if (candle.chartTime !== undefined) {
+      if (typeof candle.chartTime === "number") {
+        dateStr = new Date(candle.chartTime * 1000).toISOString();
+      } else if (typeof candle.chartTime === "string") {
+        dateStr = candle.chartTime;
+      } else {
+        const bd = candle.chartTime as BusinessDay;
+        dateStr = `${bd.year}-${String(bd.month).padStart(2, "0")}-${String(bd.day).padStart(2, "0")}`;
+      }
+    } else {
+      continue;
+    }
+
+    const datePart = dateStr.includes("T")
+      ? dateStr.split("T")[0]
+      : dateStr.split(" ")[0];
+
+    const prevDay = prevDayMap.get(datePart);
+
+    if (prevDay) {
+      const p = (prevDay.high + prevDay.low + prevDay.close) / 3;
+      const r2 = p + (prevDay.high - prevDay.low);
+      const r3 = prevDay.high + 2 * (p - prevDay.low);
+      const s2 = p - (prevDay.high - prevDay.low);
+      const s3 = prevDay.low - 2 * (prevDay.high - p);
+
+      pivots[i] = { p, r2, r3, s2, s3 };
+    }
+  }
+
+  return pivots;
 };

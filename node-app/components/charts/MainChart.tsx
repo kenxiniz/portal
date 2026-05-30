@@ -123,11 +123,13 @@ export const MainChart: React.FC<MainChartProps> = ({
       color: "#000000",
       lineWidth: 1,
       lineStyle: 1,
+      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
     });
     const lowerSeries = chart.addSeries(LineSeries, {
       color: "#000000",
       lineWidth: 1,
       lineStyle: 1,
+      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
     });
 
     // 1. VWAP Series (Yellow)
@@ -135,6 +137,7 @@ export const MainChart: React.FC<MainChartProps> = ({
       color: "rgba(255, 235, 59, 1)",
       lineWidth: 2,
       crosshairMarkerVisible: false,
+      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
     });
 
     // 2. 9 EMA Series (White, Dashed)
@@ -143,6 +146,7 @@ export const MainChart: React.FC<MainChartProps> = ({
       lineWidth: 1,
       lineStyle: 2,
       crosshairMarkerVisible: false,
+      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
     });
 
     // 3. 20 EMA Series (Blue)
@@ -150,6 +154,7 @@ export const MainChart: React.FC<MainChartProps> = ({
       color: "rgba(33, 150, 243, 0.8)",
       lineWidth: 1,
       crosshairMarkerVisible: false,
+      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
     });
 
     chartRef.current = chart;
