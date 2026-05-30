@@ -261,15 +261,13 @@ export class TelegramLongTermService {
 
       const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
 
-      // Connect to MongoDB
       await connectDB();
 
       const sendPromises = this.longTermChatIds.map(async (chatId) => {
         const cacheKey = `${chatId}_${ticker}_${timeframe}_${latestSignal.type}`;
 
-        // 💡 1d뿐만 아니라 60분봉(1h) 스케줄러에서도 하루 1회 한정을 위해 YYYY-MM-DD 추출
         const dateKey = signalDate.split("T")[0].split(" ")[0];
-        const checkValue = dateKey; // Force checking on daily boundary for 1-time alert
+        const checkValue = timeframe === "1d" ? dateKey : signalDate;
 
         const existingCache = await TelegramSignalCache.findOne({ cacheKey });
         const lastSentValue = existingCache
@@ -320,7 +318,7 @@ export class TelegramLongTermService {
     }
   }
 
-  // 💡 60분봉 피봇 돌파 알림 함수 신설
+  // Restore Pivot notification method in long-term service
   public async notifyPivotBreach(
     ticker: string,
     currentPrice: number,
@@ -330,7 +328,6 @@ export class TelegramLongTermService {
   ): Promise<void> {
     if (!this.botToken || this.longTermChatIds.length === 0) return;
 
-    // Format display content
     const dateKey = dateStr.split("T")[0].split(" ")[0];
     const headerTitle =
       type === "R2_UP"
@@ -355,7 +352,6 @@ export class TelegramLongTermService {
     await connectDB();
 
     const sendPromises = this.longTermChatIds.map(async (chatId) => {
-      // Create a specific cache key for pivot notifications
       const cacheKey = `${chatId}_${ticker}_1h_pivot_${type}`;
 
       const existingCache = await TelegramSignalCache.findOne({ cacheKey });
@@ -413,6 +409,10 @@ export class TelegramLongTermService {
     let holdingSummary = `<b>💸 [내 계좌 요약 (보유 중)]</b>\n`;
     let holdingCount = 0;
 
+    const heldSignals: StockSignalInfo[] = [];
+    const overheatSignals: StockSignalInfo[] = [];
+
+    // Parse signals to populate the account summary and categorize lists
     signals.forEach((item) => {
       const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
         (s) => s.ticker === item.name,
@@ -422,16 +422,26 @@ export class TelegramLongTermService {
       );
       const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
 
-      if (isInverse) return;
-
       const { name, currentSignal, lastMeaningfulSignal } = item;
       const isHold = currentSignal.type === "hold";
       const targetSignal =
         isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
 
+      // Classify as overheat if stock is inverse or signal is inverse-buy
+      if (
+        isInverse ||
+        targetSignal.type === "inverse-buy" ||
+        currentSignal.type === "inverse-buy"
+      ) {
+        overheatSignals.push(item);
+        return;
+      }
+
+      // Classify as held if it has an active buy signal
       if (isHold || currentSignal.type === "buy") {
         if (targetSignal.type === "buy") {
           holdingCount++;
+          heldSignals.push(item);
 
           if (targetSignal.entryPrice) {
             const entryPrice = targetSignal.entryPrice;
@@ -489,72 +499,63 @@ export class TelegramLongTermService {
 
     message += holdingSummary + `\n━━━━━━━━━━━━━━━━━━\n\n`;
 
-    signals.forEach((item: StockSignalInfo, index: number) => {
+    // Lower Detailed Section 1: Held Stocks
+    message += `<b>📋 [보유 종목 상세 정보]</b>\n\n`;
+    let heldDisplayIndex = 1;
+
+    heldSignals.forEach((item) => {
       const { name, currentSignal, lastMeaningfulSignal, advice } = item;
       const isHold = currentSignal.type === "hold";
       const targetSignal =
         isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
 
-      let statusText = "";
-      if (targetSignal.type === "buy") statusText = "당장 매수각";
-      else if (targetSignal.type === "inverse-buy")
-        statusText = "시장 과열 참고 (방어모드!)";
-      else if (targetSignal.type === "sell") statusText = "지금이 익절 타이밍";
+      let statusText = "당장 매수각";
+      if (isHold && targetSignal.type === "buy") {
+        statusText = "존버 가보자고! (매수 유지)";
+      } else if (targetSignal.type === "sell") {
+        statusText = "지금이 익절 타이밍";
+      }
 
       let profitRateText = "";
-      if (
-        isHold &&
-        (targetSignal.type === "buy" || targetSignal.type === "inverse-buy")
-      ) {
-        statusText =
-          targetSignal.type === "buy"
-            ? "존버 가보자고! (매수 유지)"
-            : "시장 과열 지속 (관망 유지)";
+      if (targetSignal.entryPrice) {
+        const entryPrice = targetSignal.entryPrice;
+        const extItem = item as ExtendedStockSignalInfo;
+        const extCurrentSignal = currentSignal as ExtendedTradingSignal;
 
-        if (targetSignal.entryPrice) {
-          const entryPrice = targetSignal.entryPrice;
-          const extItem = item as ExtendedStockSignalInfo;
-          const extCurrentSignal = currentSignal as ExtendedTradingSignal;
+        const currentPrice =
+          extItem.currentPrice ||
+          extCurrentSignal.currentPrice ||
+          extCurrentSignal.price ||
+          extCurrentSignal.close ||
+          currentSignal.realizedPrice;
 
-          const currentPrice =
-            extItem.currentPrice ||
-            extCurrentSignal.currentPrice ||
-            extCurrentSignal.price ||
-            extCurrentSignal.close ||
-            currentSignal.realizedPrice;
+        let profitRate: number | null = null;
 
-          let profitRate: number | null = null;
+        if (currentPrice) {
+          profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
+        } else if (
+          extCurrentSignal.profitRate !== undefined &&
+          extCurrentSignal.profitRate !== null
+        ) {
+          profitRate = Number(extCurrentSignal.profitRate);
+        } else if (
+          extItem.profitRate !== undefined &&
+          extItem.profitRate !== null
+        ) {
+          profitRate = Number(extItem.profitRate);
+        }
 
-          if (currentPrice) {
-            if (targetSignal.type === "buy") {
-              profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
-            } else if (targetSignal.type === "inverse-buy") {
-              profitRate = ((entryPrice - currentPrice) / entryPrice) * 100;
-            }
-          } else if (
-            extCurrentSignal.profitRate !== undefined &&
-            extCurrentSignal.profitRate !== null
-          ) {
-            profitRate = Number(extCurrentSignal.profitRate);
-          } else if (
-            extItem.profitRate !== undefined &&
-            extItem.profitRate !== null
-          ) {
-            profitRate = Number(extItem.profitRate);
-          }
-
-          if (profitRate !== null && !isNaN(profitRate)) {
-            const sign = profitRate > 0 ? "+" : "";
-            const color =
-              profitRate > 0 ? "개이득" : profitRate < 0 ? "눈물" : "본전";
-            profitRateText = `\n<b>💸 참고 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
-          } else {
-            profitRateText = `\n<b>💸 참고 수익률:</b> <i>계산 불가 (현재가 데이터 누락)</i>`;
-          }
+        if (profitRate !== null && !isNaN(profitRate)) {
+          const sign = profitRate > 0 ? "+" : "";
+          const color =
+            profitRate > 0 ? "개이득" : profitRate < 0 ? "눈물" : "본전";
+          profitRateText = `\n<b>💸 참고 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
+        } else {
+          profitRateText = `\n<b>💸 참고 수익률:</b> <i>계산 불가 (현재가 데이터 누락)</i>`;
         }
       }
 
-      message += `<b>${index + 1}. 💎 ${name}</b>\n`;
+      message += `<b>${heldDisplayIndex}. 💎 ${name}</b>\n`;
       message += `<b>🔥 시그널:</b> <code>${statusText}</code>`;
       if (profitRateText) {
         message += profitRateText;
@@ -589,7 +590,91 @@ export class TelegramLongTermService {
       const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
       message += `\n<a href="${redirectLink}">👉 [${name}] 상세 차트 확인하기</a>\n`;
       message += `\n━━━━━━━━━━━━━━━━━━\n`;
+
+      heldDisplayIndex++;
     });
+
+    if (heldSignals.length === 0) {
+      message += `보유 중인 포지션 상세 정보가 없습니다.\n\n━━━━━━━━━━━━━━━━━━\n`;
+    }
+
+    message += `\n`;
+
+    // Lower Detailed Section 2: Market Overheat & Hedge Stocks
+    message += `<b>⚠️ [시장 과열 및 헤지 종목 참고]</b>\n`;
+    message += `<i>시장 과열 상태 신호 리스트입니다.</i>\n\n`;
+    let overheatDisplayIndex = 1;
+
+    overheatSignals.forEach((item) => {
+      const { name, currentSignal, lastMeaningfulSignal, advice } = item;
+      const isHold = currentSignal.type === "hold";
+      const targetSignal =
+        isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
+
+      let statusText = "";
+      if (
+        targetSignal.type === "inverse-buy" ||
+        currentSignal.type === "inverse-buy"
+      ) {
+        statusText = isHold
+          ? "시장 과열 지속 (관망 유지)"
+          : "시장 과열 참고 (방어모드!)";
+      } else if (targetSignal.type === "sell") {
+        statusText = "시장 과열 참고 해제";
+      } else {
+        statusText = `관망 및 방어 제어 중 (${targetSignal.type})`;
+      }
+
+      let profitRateText = "";
+      if (targetSignal.entryPrice) {
+        const entryPrice = targetSignal.entryPrice;
+        const extItem = item as ExtendedStockSignalInfo;
+        const extCurrentSignal = currentSignal as ExtendedTradingSignal;
+
+        const currentPrice =
+          extItem.currentPrice ||
+          extCurrentSignal.currentPrice ||
+          extCurrentSignal.price ||
+          extCurrentSignal.close ||
+          currentSignal.realizedPrice;
+
+        let profitRate: number | null = null;
+        if (currentPrice) {
+          if (targetSignal.type === "inverse-buy") {
+            profitRate = ((entryPrice - currentPrice) / entryPrice) * 100;
+          } else {
+            profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
+          }
+        }
+
+        if (profitRate !== null && !isNaN(profitRate)) {
+          const sign = profitRate > 0 ? "+" : "";
+          profitRateText = `\n<b>💸 헤지 수익률:</b> ${sign}${profitRate.toFixed(2)}%`;
+        }
+      }
+
+      message += `<b>${overheatDisplayIndex}. 🚨 ${name}</b>\n`;
+      message += `<b>⚡ 상태:</b> <code>${statusText}</code>`;
+      if (profitRateText) {
+        message += profitRateText;
+      }
+      message += `\n<b>⏰ 발생 시간:</b> ${targetSignal.date} (${targetSignal.reason})\n`;
+
+      if (advice && !advice.error) {
+        message += `<b>🤖 AI 코멘트:</b> ${advice.message}\n`;
+      }
+
+      const targetPath = encodeURIComponent(`kis-stock?ticker=${name}&tf=1d`);
+      const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
+      message += `<a href="${redirectLink}">👉 [${name}] 차트 바로가기</a>\n`;
+      message += `──────────────────\n`;
+
+      overheatDisplayIndex++;
+    });
+
+    if (overheatSignals.length === 0) {
+      message += `특이사항 없음 (시장 지수 안정화 상태)\n`;
+    }
 
     return message;
   };
