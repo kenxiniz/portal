@@ -35,6 +35,7 @@ interface SendMessagePayload {
 interface StockConfigItem {
   ticker: string;
   isInverse?: boolean;
+  inverse?: string;
 }
 
 interface ExtendedTradingSignal extends TradingSignal {
@@ -190,7 +191,8 @@ export class TelegramLongTermService {
       const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
         (s) => s.ticker === ticker,
       );
-      const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
+      const stockInfo = usStock || kStock;
+      const isInverse = !!stockInfo?.isInverse;
 
       let message = "";
 
@@ -199,9 +201,13 @@ export class TelegramLongTermService {
           (!isInverse && latestSignal.type === "buy") ||
           (isInverse && latestSignal.type === "inverse-buy");
 
-        const subTag = isMatchingMarketGrowth
+        let subTag = isMatchingMarketGrowth
           ? "🚀 [가즈아!]"
           : "⚠️ [고위험-매매참고]";
+
+        if (isInverse && stockInfo?.inverse) {
+          subTag = `🚀 [${stockInfo.inverse} 매수]`;
+        }
 
         const priceStr = latestSignal.entryPrice
           ? `$${latestSignal.entryPrice.toFixed(2)}`
@@ -270,9 +276,7 @@ export class TelegramLongTermService {
         const checkValue = timeframe === "1d" ? dateKey : signalDate;
 
         const existingCache = await TelegramSignalCache.findOne({ cacheKey });
-        const lastSentValue = existingCache
-          ? existingCache.lastSentValue
-          : null;
+        const lastSentValue = existingCache ? existingCache.lastSentValue : null;
 
         if (lastSentValue !== checkValue) {
           await TelegramSignalCache.findOneAndUpdate(
@@ -318,7 +322,6 @@ export class TelegramLongTermService {
     }
   }
 
-  // Restore Pivot notification method in long-term service
   public async notifyPivotBreach(
     ticker: string,
     currentPrice: number,
@@ -357,7 +360,6 @@ export class TelegramLongTermService {
       const existingCache = await TelegramSignalCache.findOne({ cacheKey });
       const lastSentValue = existingCache ? existingCache.lastSentValue : null;
 
-      // Restrict notification to once per day using dateKey
       if (lastSentValue !== dateKey) {
         await TelegramSignalCache.findOneAndUpdate(
           { cacheKey },
@@ -412,7 +414,6 @@ export class TelegramLongTermService {
     const heldSignals: StockSignalInfo[] = [];
     const overheatSignals: StockSignalInfo[] = [];
 
-    // Parse signals to populate the account summary and categorize lists
     signals.forEach((item) => {
       const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
         (s) => s.ticker === item.name,
@@ -427,7 +428,6 @@ export class TelegramLongTermService {
       const targetSignal =
         isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
 
-      // Classify as overheat if stock is inverse or signal is inverse-buy
       if (
         isInverse ||
         targetSignal.type === "inverse-buy" ||
@@ -437,7 +437,6 @@ export class TelegramLongTermService {
         return;
       }
 
-      // Classify as held if it has an active buy signal
       if (isHold || currentSignal.type === "buy") {
         if (targetSignal.type === "buy") {
           holdingCount++;
@@ -499,7 +498,6 @@ export class TelegramLongTermService {
 
     message += holdingSummary + `\n━━━━━━━━━━━━━━━━━━\n\n`;
 
-    // Lower Detailed Section 1: Held Stocks
     message += `<b>📋 [보유 종목 상세 정보]</b>\n\n`;
     let heldDisplayIndex = 1;
 
@@ -600,9 +598,8 @@ export class TelegramLongTermService {
 
     message += `\n`;
 
-    // Lower Detailed Section 2: Market Overheat & Hedge Stocks
     message += `<b>⚠️ [시장 과열 및 헤지 종목 참고]</b>\n`;
-    message += `<i>시장 과열 상태 신호 리스트입니다.</i>\n\n`;
+    message += `<i>시장 과열 상태 신호 또는 인버스 관련 포지션 리스트입니다.</i>\n\n`;
     let overheatDisplayIndex = 1;
 
     overheatSignals.forEach((item) => {
@@ -681,14 +678,14 @@ export class TelegramLongTermService {
 
   public createLottoSetsMessage =
     (drawNo: number) =>
-    (sets: LottoSet[]): string => {
-      let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
-      message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
+      (sets: LottoSet[]): string => {
+        let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
+        message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
 
-      sets.forEach((set, index) => {
-        message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
-      });
+        sets.forEach((set, index) => {
+          message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
+        });
 
-      return message;
-    };
+        return message;
+      };
 }

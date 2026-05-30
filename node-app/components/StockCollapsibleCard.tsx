@@ -40,6 +40,7 @@ interface StockConfigItem {
   exchange?: string;
   isInverse?: boolean;
   name?: string;
+  inverse?: string;
 }
 
 interface StockCollapsibleCardProps {
@@ -123,19 +124,20 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
     return null;
   }, [tickerState.signals]);
 
-  const isInverseStock = useMemo(() => {
+  const stockInfo = useMemo(() => {
     const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
       (s) => s.ticker === tickerSymbol,
     );
-    if (usStock?.isInverse) return true;
+    if (usStock) return usStock;
 
     const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
       (s) => s.ticker === tickerSymbol,
     );
-    if (kStock?.isInverse) return true;
-
-    return false;
+    return kStock || null;
   }, [tickerSymbol]);
+
+  const isInverseStock = !!stockInfo?.isInverse;
+  const inverseTarget = stockInfo?.inverse;
 
   // Calculate cutoff date based on history years
   const cutoffDate = useMemo(() => {
@@ -425,7 +427,6 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                       <TableHeader>
                         <TableRow className="bg-slate-50 dark:bg-slate-800">
                           <TableHead className="h-8 px-2 text-xs">
-                            {/* Changed generic signal date label */}
                             신호 날짜
                           </TableHead>
                           <TableHead className="h-8 px-2 text-xs">
@@ -443,12 +444,26 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                             index === historicalSignals.length - 1 &&
                             isBuySignal;
 
-                          // Removed the timeframe === "1d" restriction to allow all timeframes to show warnings
                           const showHighRiskWarning =
                             (isInverseStock && signal.type === "buy") ||
                             (!isInverseStock && signal.type === "inverse-buy");
 
-                          const showGazuaBadge =
+                          // Determine badge content: inverse specified text vs default gazua
+                          let badgeText = "가즈아!";
+                          if (
+                            isInverseStock &&
+                            signal.type === "inverse-buy" &&
+                            inverseTarget
+                          ) {
+                            badgeText = `${inverseTarget} 매수!`;
+                          } else if (
+                            !isInverseStock &&
+                            signal.type === "buy"
+                          ) {
+                            badgeText = "가즈아!";
+                          }
+
+                          const showBadge =
                             (!isInverseStock && signal.type === "buy") ||
                             (isInverseStock && signal.type === "inverse-buy");
 
@@ -489,15 +504,14 @@ export const StockCollapsibleCard: React.FC<StockCollapsibleCardProps> = ({
                                   {showHighRiskWarning && (
                                     <span
                                       className="text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800 whitespace-nowrap"
-                                      // Update tooltip and text for reference-only
                                       title="인버스 투자는 리스크가 매우 크므로 시장 과열 지표로만 참고하세요."
                                     >
                                       시장 과열 참고
                                     </span>
                                   )}
-                                  {showGazuaBadge && (
+                                  {showBadge && (
                                     <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800 whitespace-nowrap">
-                                      가즈아!
+                                      {badgeText}
                                     </span>
                                   )}
                                 </div>
