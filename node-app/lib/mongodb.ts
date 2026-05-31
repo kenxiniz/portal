@@ -29,7 +29,14 @@ export async function connectDB() {
   if (cached.conn) return cached.conn;
 
   if (!cached.promise) {
-    const opts = { bufferCommands: false };
+    const opts = {
+      bufferCommands: false,
+      // Add options to prevent stale connection and ECONNRESET errors
+      maxIdleTimeMS: 10000,
+      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 5000,
+    };
+
     cached.promise = mongoose.connect(MONGODB_URI!, opts).then((m) => {
       console.log("New MongoDB connection established.");
       return m;

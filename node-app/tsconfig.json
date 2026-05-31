@@ -29,5 +29,6 @@
     ".next/types/**/*.ts",
     "types"
   ],
-  "exclude": ["node_modules"]
+  // Add build output directories to prevent memory exhaustion during type checking
+  "exclude": ["node_modules", ".next", "out", "dist", "build"]
 }

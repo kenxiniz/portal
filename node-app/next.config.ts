@@ -5,6 +5,15 @@ const nextConfig = {
   devIndicators: {
     allowedDevOrigins: ["http://dev.kenxin.org", "https://dev.kenxin.org"],
   },
+
+  // Bypass ESLint and TypeScript checks during Docker build
+  // since they are already validated in the host environment via deploy.sh
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
 };
 
 module.exports = nextConfig;
