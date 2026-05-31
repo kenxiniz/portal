@@ -41,6 +41,12 @@ ENV NEXT_PUBLIC_AUTH_COOKIE_NAME=${NEXT_PUBLIC_AUTH_COOKIE_NAME}
 ENV NEXT_PUBLIC_KAKAO_CLIENT_ID=${NEXT_PUBLIC_KAKAO_CLIENT_ID}
 ENV NEXT_PUBLIC_KAKAO_REDIRECT_URI=${NEXT_PUBLIC_KAKAO_REDIRECT_URI}
 
+# 💡 [추가] Node.js의 V8 엔진 힙 메모리 제한을 8GB(8192MB)로 대폭 확장 
+ENV NODE_OPTIONS="--max-old-space-size=8192"
+
+# 💡 [추가] 불필요한 원격 측정 데이터 수집을 꺼서 메모리와 네트워크 자원 절약
+ENV NEXT_TELEMETRY_DISABLED=1
+
 # 프로덕션용으로 애플리케이션을 빌드
 RUN npm run build
 
@@ -51,6 +57,9 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+
+# [보안/안정성 추가] PID 1 문제를 해결하여 좀비 프로세스 방지 및 안전한 종료(SIGTERM) 처리
+RUN apk add --no-cache dumb-init
 
 # 보안을 위해 root가 아닌 별도의 유저와 그룹을 생성
 RUN addgroup --system --gid 1001 appgroup

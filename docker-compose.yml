@@ -17,10 +17,42 @@ services:
       - ./node-app/.env
     depends_on:
       - mongodb
+
+    # ==========================================================
+    # 🔥 [보안 강화 구역] 해커의 RCE 및 채굴기 실행 원천 차단
+    # ==========================================================
+
+    # 1. 파일 시스템 읽기 전용 모드 (악성코드 다운로드 및 파일 생성 차단)
+    read_only: true
+
+    # 2. Next.js 구동에 필수적인 임시 폴더만 메모리(RAM)로 제공
+    # noexec: 이 폴더에 파일을 넣어도 절대 실행(Execute)할 수 없음
+    tmpfs:
+      - /tmp:rw,noexec,nosuid
+
+    # 3. 컨테이너 내부에서 더 높은 권한(root 등)으로의 상승 금지
+    security_opt:
+      - no-new-privileges:true
+
+    # 4. 불필요한 리눅스 커널 권한 전체 압수 (네트워크 해킹, 시스템 조작 방지)
+    cap_drop:
+      - ALL
+
+    # 5. 하드 리소스 제한 (만약 뚫려도 채굴기가 CPU 전체를 먹지 못하게 가둠)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.80'  # 최대 CPU 80% 제한 (서버 환경에 맞게 조절하세요)
+          memory: 2G    # 최대 메모리 2GB 제한
+
+    # ==========================================================
     volumes:
+      # Next.js 캐시 디렉토리는 쓰기가 필요하므로 볼륨으로 열어둠
       - ./node-app/.next/cache:/app/.next/cache
       - ./node-app/.cache:/app/.cache
-      - ./node-app/lib:/app/lib
+      # 🚨 [매우 중요] 소스 코드 볼륨은 반드시 ':ro'(Read-Only) 옵션을 붙여야 합니다.
+      # 이 옵션이 없으면 해커가 호스트 서버의 파일을 변조할 수 있습니다.
+      - ./node-app/lib:/app/lib:ro
 
   # Nginx reverse proxy service
   nginx:
