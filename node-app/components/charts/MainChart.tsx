@@ -10,7 +10,7 @@ import {
   CrosshairMode,
   IChartApi,
   ISeriesApi,
-  IPriceLine,
+  IPriceLine, // 💡 다시 추가됨
   Time,
   CandlestickData,
 } from "lightweight-charts";
@@ -61,7 +61,7 @@ export const MainChart: React.FC<MainChartProps> = ({
     ema20: null,
   });
 
-  const priceLinesRef = useRef<IPriceLine[]>([]);
+  const priceLinesRef = useRef<IPriceLine[]>([]); // 💡 다시 추가됨
   const boxPrimitiveRef = useRef<GaussianBoxPrimitive | null>(null);
 
   useEffect(() => {
@@ -123,38 +123,35 @@ export const MainChart: React.FC<MainChartProps> = ({
       color: "#000000",
       lineWidth: 1,
       lineStyle: 1,
-      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
+      priceLineVisible: false,
     });
     const lowerSeries = chart.addSeries(LineSeries, {
       color: "#000000",
       lineWidth: 1,
       lineStyle: 1,
-      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
+      priceLineVisible: false,
     });
 
-    // 1. VWAP Series (Yellow)
     const vwapSeries = chart.addSeries(LineSeries, {
       color: "rgba(255, 235, 59, 1)",
       lineWidth: 2,
       crosshairMarkerVisible: false,
-      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
+      priceLineVisible: false,
     });
 
-    // 2. 9 EMA Series (White, Dashed)
     const ema9Series = chart.addSeries(LineSeries, {
       color: "rgba(255, 255, 255, 0.8)",
       lineWidth: 1,
       lineStyle: 2,
       crosshairMarkerVisible: false,
-      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
+      priceLineVisible: false,
     });
 
-    // 3. 20 EMA Series (Blue)
     const ema20Series = chart.addSeries(LineSeries, {
       color: "rgba(33, 150, 243, 0.8)",
       lineWidth: 1,
       crosshairMarkerVisible: false,
-      priceLineVisible: false, // 💡 점선 제거 (Tag만 유지)
+      priceLineVisible: false,
     });
 
     chartRef.current = chart;
@@ -215,7 +212,6 @@ export const MainChart: React.FC<MainChartProps> = ({
 
     const extData = data as ExtendedChartData[];
 
-    // Ensure robust filtering against null, undefined, and NaN values
     const vwapData = extData
       .filter((d) => d.vwap !== undefined && d.vwap !== null && !isNaN(d.vwap))
       .map((d) => ({ time: d.time, value: d.vwap! }));
@@ -234,6 +230,7 @@ export const MainChart: React.FC<MainChartProps> = ({
     seriesRef.current.ema9?.setData(ema9Data);
     seriesRef.current.ema20?.setData(ema20Data);
 
+    // 💡 기존 priceLine 초기화 로직 복구
     priceLinesRef.current.forEach((pl) => {
       try {
         seriesRef.current.candle?.removePriceLine(pl);
@@ -241,11 +238,13 @@ export const MainChart: React.FC<MainChartProps> = ({
     });
     priceLinesRef.current = [];
 
+    // 💡 태그(라벨)만 남기고 선은 투명하게 처리
     probLevels.forEach((lvl) => {
       try {
         const pl = seriesRef.current.candle?.createPriceLine({
           price: lvl.price,
-          color: lvl.color,
+          color: "transparent", // 핵심 1: 선 자체는 보이지 않게 투명 처리
+          axisLabelColor: lvl.color, // 핵심 2: 우측 축 라벨의 배경색은 명시적으로 지정
           lineWidth: 1,
           lineStyle: 2,
           axisLabelVisible: true,

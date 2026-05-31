@@ -101,49 +101,54 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       wickDownColor: "#1E88E5",
     });
 
-    // P (Pivot Point) - 핑크색(Pink), 두껍게(lineWidth 3)
+    // P (Pivot Point)
     const pSeries = chart.addSeries(LineSeries, {
-      color: "#E91E63",
+      color: "#FFB6C1", // Changed to light pink
       lineWidth: 3,
-      lineStyle: 0,
+      lineStyle: 0, // Solid line
+      lineType: 1, // WithSteps (Right-angled stepped line)
       crosshairMarkerVisible: false,
-      priceLineVisible: false, // 💡 차트를 가로지르는 점선 제거
+      priceLineVisible: false,
       title: "Pivot",
     });
 
-    // R2, R3 (Resistance) - 파랑 계열(Blue)
+    // R2, R3 (Resistance)
     const r2Series = chart.addSeries(LineSeries, {
       color: "#42A5F5",
       lineWidth: 1,
-      lineStyle: 2,
+      lineStyle: 0, // Changed to 0 for solid line
+      lineType: 1, // WithSteps
       crosshairMarkerVisible: false,
-      priceLineVisible: false, // 💡 차트를 가로지르는 점선 제거
+      priceLineVisible: false,
       title: "R2",
     });
     const r3Series = chart.addSeries(LineSeries, {
       color: "#1E88E5",
       lineWidth: 1,
-      lineStyle: 2,
+      lineStyle: 0, // Changed to 0 for solid line
+      lineType: 1, // WithSteps
       crosshairMarkerVisible: false,
-      priceLineVisible: false, // 💡 차트를 가로지르는 점선 제거
+      priceLineVisible: false,
       title: "R3",
     });
 
-    // S2, S3 (Support) - 빨강 계열(Red)
+    // S2, S3 (Support)
     const s2Series = chart.addSeries(LineSeries, {
       color: "#EF5350",
       lineWidth: 1,
-      lineStyle: 2,
+      lineStyle: 0, // Changed to 0 for solid line
+      lineType: 1, // WithSteps
       crosshairMarkerVisible: false,
-      priceLineVisible: false, // 💡 차트를 가로지르는 점선 제거
+      priceLineVisible: false,
       title: "S2",
     });
     const s3Series = chart.addSeries(LineSeries, {
       color: "#E53935",
       lineWidth: 1,
-      lineStyle: 2,
+      lineStyle: 0, // Changed to 0 for solid line
+      lineType: 1, // WithSteps
       crosshairMarkerVisible: false,
-      priceLineVisible: false, // 💡 차트를 가로지르는 점선 제거
+      priceLineVisible: false,
       title: "S3",
     });
 
