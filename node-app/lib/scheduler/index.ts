@@ -1,22 +1,119 @@
 /* lib/scheduler/index.ts */
 import cron from "node-cron";
 import { schedulerConfig } from "./config";
-// [FIXED] Updated import to use the new separated long-term service
 import { TelegramLongTermService } from "./telegramLongTermService";
 import { generateDailyAdvice, resetAdviceCache } from "./jobs/advice";
 import { updateLottoWinningNumbers, sendDailyLottoNumbers } from "./jobs/lotto";
 import { sendDailyStockSignals } from "./jobs/stock";
 import { collectMarketData } from "./jobs/collect";
-//import { checkAllRegionsEC2Instances } from "./jobs/aws";
+
+// Import modules required for the initial cache warm-up sequence
+import { connectDB } from "../mongodb";
+import { getCandles } from "../candle/service";
+import { setCacheData } from "../cache";
+import stockConfig from "../stock.json";
+import {
+  calculateRSI,
+  calculateBollingerBands,
+  analyzeAllTradingSignals,
+} from "../stockUtils";
+import { TickerAdvice } from "../models/advice";
 
 export { generateDailyAdvice, resetAdviceCache, collectMarketData };
 
+/**
+ * Executes a sequential hydration of the shared memory cache from MongoDB.
+ * Processes one ticker at a time to prevent OOM (Out of Memory) on 1GB RAM limits.
+ */
+async function warmUpCache(): Promise<void> {
+  console.log("[Warm-up] Starting memory cache hydration from MongoDB...");
+  try {
+    await connectDB();
+    const timeframes = ["1d", "1h", "15m"];
+
+    const processAndCache = async (
+      region: "US" | "KR",
+      ticker: string,
+      isInverse: boolean,
+    ) => {
+      for (const timeframe of timeframes) {
+        const cacheKey =
+          region === "US"
+            ? `kisStock:${ticker}:${timeframe}`
+            : `kStock:${ticker}:${timeframe}`;
+
+        const rawDbData = await getCandles(
+          region,
+          ticker,
+          timeframe,
+          500,
+          false,
+        );
+
+        if (rawDbData && rawDbData.length > 0) {
+          const mappedData = rawDbData
+            .map((c) => ({
+              date:
+                timeframe === "1d"
+                  ? new Date(c.timestamp).toISOString().split("T")[0]
+                  : new Date(c.timestamp)
+                      .toISOString()
+                      .replace("Z", "")
+                      .replace("T", " "),
+              open: c.open,
+              high: c.high,
+              low: c.low,
+              close: c.close,
+              volume: c.volume,
+            }))
+            .sort(
+              (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+            );
+
+          const processedData = calculateBollingerBands(
+            calculateRSI(mappedData),
+          );
+          const signals = analyzeAllTradingSignals(
+            processedData,
+            timeframe as "1d" | "1h" | "15m",
+            isInverse,
+          );
+
+          const adviceDoc = (await TickerAdvice.findOne({
+            ticker,
+          }).lean()) as { advice?: object } | null;
+          const latestAdvice = adviceDoc?.advice || null;
+
+          setCacheData(cacheKey, {
+            data: processedData,
+            signals,
+            advice: latestAdvice,
+          });
+        }
+      }
+    };
+
+    // Sequentially process US stocks
+    for (const stock of stockConfig.us_stocks) {
+      await processAndCache("US", stock.ticker, !!stock.isInverse);
+    }
+
+    // Sequentially process KR stocks
+    for (const stock of stockConfig.k_stocks) {
+      await processAndCache("KR", stock.ticker, !!stock.isInverse);
+    }
+
+    console.log("[Warm-up] Memory cache hydration completed successfully.");
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[Warm-up] Critical failure during cache hydration:", msg);
+  }
+}
+
 class JobScheduler {
-  // [FIXED] Change type to TelegramLongTermService
   private telegramService: TelegramLongTermService;
 
   constructor() {
-    // [FIXED] Instantiate the new long-term service
     this.telegramService = new TelegramLongTermService();
     this.initializeJobs();
   }
@@ -86,12 +183,23 @@ declare global {
   var isSchedulerRunning: boolean | undefined;
 }
 
-if (!global.isSchedulerRunning) {
+// Block scheduler initialization during the build process to prevent hanging
+if (process.env.IS_BUILD === "true") {
   console.log(
-    `Initializing scheduler... (NODE_ENV: ${process.env.NODE_ENV || "unknown"})`,
+    "[Scheduler] Build phase detected. Skipping scheduler initialization.",
   );
-  new JobScheduler();
-  global.isSchedulerRunning = true;
 } else {
-  console.log("Scheduler is already running.");
+  if (!global.isSchedulerRunning) {
+    console.log(
+      `Initializing scheduler... (NODE_ENV: ${process.env.NODE_ENV || "unknown"})`,
+    );
+
+    // Trigger the background warm-up routine asynchronously
+    warmUpCache();
+
+    new JobScheduler();
+    global.isSchedulerRunning = true;
+  } else {
+    console.log("Scheduler is already running.");
+  }
 }
