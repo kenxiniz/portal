@@ -15,12 +15,10 @@ import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
 import { RefreshCw, Globe, MapPin, Sparkles } from "lucide-react";
 
-// US Stocks를 불러옵니다.
+// Load US Stocks.
 const tickers = stockConfig.us_stocks.map((t) => t.ticker);
 
 type Timeframe = "1d" | "1h" | "15m";
-
-const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function KisStockPage() {
   const router = useRouter();
@@ -48,15 +46,10 @@ export default function KisStockPage() {
   const [isAiSyncing, setIsAiSyncing] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
-  const [timeUntilNextSync, setTimeUntilNextSync] = useState<number>(
-    AUTO_REFRESH_INTERVAL_MS,
-  );
-
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
   const adviceTriggered = useRef(false);
   const previousTimeframe = useRef<Timeframe>("1d");
-  const nextSyncTimeRef = useRef<number | null>(null);
   const isForceRefreshingRef = useRef(false);
 
   const fetchStockData = useCallback(
@@ -81,7 +74,7 @@ export default function KisStockPage() {
         );
 
         const noCacheTimestamp = Date.now();
-        // US 주식 API 라우트 호출 (/api/kisStock/)
+        // US Stock API Route (/api/kisStock/)
         const endpoint = `/api/kisStock/${ticker}?timeframe=${timeframe}${shouldBypassCache ? "&refresh=true" : ""}&t=${noCacheTimestamp}`;
 
         const response = await fetch(endpoint, { cache: "no-store" });
@@ -162,7 +155,6 @@ export default function KisStockPage() {
       timeframeToLoad: Timeframe,
       forceRefresh: boolean = false,
       isTimeframeChange: boolean = false,
-      isAutoRefresh: boolean = false,
     ) => {
       if (tickers.length > 0) {
         const urlParams = new URLSearchParams(window.location.search);
@@ -178,7 +170,7 @@ export default function KisStockPage() {
 
         if (
           !fullLoadInitiated.current ||
-          (!isTimeframeChange && !forceRefresh && !isAutoRefresh)
+          (!isTimeframeChange && !forceRefresh)
         ) {
           setOpenedTicker(initialTicker);
         }
@@ -194,8 +186,6 @@ export default function KisStockPage() {
         }
 
         setLastSyncTime(new Date());
-        nextSyncTimeRef.current = Date.now() + AUTO_REFRESH_INTERVAL_MS;
-        setTimeUntilNextSync(AUTO_REFRESH_INTERVAL_MS);
       }
     },
     [fetchStockData, openedTicker],
@@ -207,7 +197,7 @@ export default function KisStockPage() {
     isForceRefreshingRef.current = true;
 
     console.log("[MANUAL SYNC] Starting forced refresh for all US tickers");
-    await loadAllTickersSequentially(selectedTimeframe, true, false, false);
+    await loadAllTickersSequentially(selectedTimeframe, true, false);
 
     isForceRefreshingRef.current = false;
     setIsSyncing(false);
@@ -299,29 +289,8 @@ export default function KisStockPage() {
         window.history.replaceState({}, "", url.toString());
       }
 
-      loadAllTickersSequentially(selectedTimeframe, false, true, false);
+      loadAllTickersSequentially(selectedTimeframe, false, true);
     }
-  }, [loadAllTickersSequentially, selectedTimeframe]);
-
-  useEffect(() => {
-    const unifiedSyncTimer = setInterval(() => {
-      if (nextSyncTimeRef.current) {
-        const remainingTime = nextSyncTimeRef.current - Date.now();
-
-        if (remainingTime <= 0) {
-          console.log(
-            "[AUTO SYNC] Countdown reached 0. Initiating background US data refresh...",
-          );
-          nextSyncTimeRef.current = Date.now() + AUTO_REFRESH_INTERVAL_MS;
-          setTimeUntilNextSync(AUTO_REFRESH_INTERVAL_MS);
-          loadAllTickersSequentially(selectedTimeframe, true, false, true);
-        } else {
-          setTimeUntilNextSync(remainingTime);
-        }
-      }
-    }, 1000);
-
-    return () => clearInterval(unifiedSyncTimer);
   }, [loadAllTickersSequentially, selectedTimeframe]);
 
   const handleOpenChange = (ticker: string) => {
@@ -331,10 +300,6 @@ export default function KisStockPage() {
 
   const getSyncButtonText = () => {
     if (isSyncing) return "동기화 중...";
-
-    const minutes = Math.floor(timeUntilNextSync / 60000);
-    const seconds = Math.floor((timeUntilNextSync % 60000) / 1000);
-    const formattedCountdown = `${minutes}:${seconds.toString().padStart(2, "0")}`;
 
     if (lastSyncTime) {
       const syncHours = lastSyncTime.getHours().toString().padStart(2, "0");
@@ -346,18 +311,18 @@ export default function KisStockPage() {
             {syncHours}:{syncMinutes} 완료
           </span>
           <span className="hidden sm:inline opacity-50">|</span>
-          <span>{formattedCountdown} 후 갱신</span>
+          <span>수동 갱신</span>
         </span>
       );
     }
 
-    return `${formattedCountdown} 갱신`;
+    return "갱신";
   };
 
   return (
     <div className="flex flex-col items-center p-2 sm:p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
       <div className="flex flex-col md:flex-row justify-between items-center w-full md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mb-6 md:mb-8 gap-4 overflow-hidden">
-        {/* 상단 타이틀 */}
+        {/* Top Title */}
         <div className="flex flex-col md:flex-row items-center gap-4">
           <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0 whitespace-nowrap">
             미국 주식/ETF
@@ -369,31 +334,28 @@ export default function KisStockPage() {
           <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center shrink-0">
             <button
               onClick={() => setSelectedTimeframe("1d")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "1d"
+              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${selectedTimeframe === "1d"
                   ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
+                }`}
             >
               일봉
             </button>
             <button
               onClick={() => setSelectedTimeframe("1h")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "1h"
+              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${selectedTimeframe === "1h"
                   ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
+                }`}
             >
               1시간 봉 (단타)
             </button>
             <button
               onClick={() => setSelectedTimeframe("15m")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "15m"
+              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${selectedTimeframe === "15m"
                   ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
+                }`}
             >
               15분 봉 (단타)
             </button>
@@ -430,11 +392,10 @@ export default function KisStockPage() {
               onClick={handleAiSync}
               disabled={isAiSyncing}
               className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap
-                  ${
-                    isAiSyncing
-                      ? "bg-purple-100 text-purple-400 cursor-not-allowed dark:bg-purple-900/30 dark:text-purple-500"
-                      : "bg-purple-600 text-white hover:bg-purple-700 shadow-md active:scale-95"
-                  }`}
+                  ${isAiSyncing
+                  ? "bg-purple-100 text-purple-400 cursor-not-allowed dark:bg-purple-900/30 dark:text-purple-500"
+                  : "bg-purple-600 text-white hover:bg-purple-700 shadow-md active:scale-95"
+                }`}
             >
               <Sparkles
                 className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isAiSyncing ? "animate-pulse" : ""}`}
@@ -446,11 +407,10 @@ export default function KisStockPage() {
               onClick={handleManualSync}
               disabled={isSyncing}
               className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap min-w-[120px] sm:min-w-[140px]
-                  ${
-                    isSyncing
-                      ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
-                      : "bg-blue-600 text-white hover:bg-blue-700 shadow-md active:scale-95"
-                  }`}
+                  ${isSyncing
+                  ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
+                  : "bg-blue-600 text-white hover:bg-blue-700 shadow-md active:scale-95"
+                }`}
             >
               <RefreshCw
                 className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
@@ -477,12 +437,12 @@ export default function KisStockPage() {
               key={ticker}
               tickerSymbol={ticker}
               displayName={displayName}
-              apiType="kisStock" // 미국 주식 API 타입
+              apiType="kisStock"
               tickerState={state}
               gridStrokeColor={gridStrokeColor}
               isOpen={openedTicker === ticker}
               onOpenChange={() => handleOpenChange(ticker)}
-              currency="USD" // 미국 달러
+              currency="USD"
               timeframe={selectedTimeframe}
             />
           );
