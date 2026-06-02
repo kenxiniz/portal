@@ -3,7 +3,7 @@ services:
   node-app:
     build:
       context: ./node-app
-      dockerfile: ${DOCKERFILE_PATH:-Dockerfile.localbuild}
+      dockerfile: Dockerfile
       args:
         - APP_ENV=docker
     image: node-app
