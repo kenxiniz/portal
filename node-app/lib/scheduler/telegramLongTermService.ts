@@ -414,8 +414,8 @@ export class TelegramLongTermService {
     let holdingCount = 0;
 
     const heldSignals: StockSignalInfo[] = [];
-    const overheatSignals: StockSignalInfo[] = [];
 
+    // Filter out inverse and overbought signals entirely
     signals.forEach((item) => {
       const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
         (s) => s.ticker === item.name,
@@ -430,12 +430,12 @@ export class TelegramLongTermService {
       const targetSignal =
         isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
 
+      // Skip overheat or inverse-related items to remove them from the message
       if (
         isInverse ||
         targetSignal.type === "inverse-buy" ||
         currentSignal.type === "inverse-buy"
       ) {
-        overheatSignals.push(item);
         return;
       }
 
@@ -600,94 +600,19 @@ export class TelegramLongTermService {
 
     message += `\n`;
 
-    message += `<b>⚠️ [시장 과열 및 헤지 종목 참고]</b>\n`;
-    message += `<i>시장 과열 상태 신호 또는 인버스 관련 포지션 리스트입니다.</i>\n\n`;
-    let overheatDisplayIndex = 1;
-
-    overheatSignals.forEach((item) => {
-      const { name, currentSignal, lastMeaningfulSignal, advice } = item;
-      const isHold = currentSignal.type === "hold";
-      const targetSignal =
-        isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
-
-      let statusText = "";
-      if (
-        targetSignal.type === "inverse-buy" ||
-        currentSignal.type === "inverse-buy"
-      ) {
-        statusText = isHold
-          ? "시장 과열 지속 (관망 유지)"
-          : "시장 과열 참고 (방어모드!)";
-      } else if (targetSignal.type === "sell") {
-        statusText = "시장 과열 참고 해제";
-      } else {
-        statusText = `관망 및 방어 제어 중 (${targetSignal.type})`;
-      }
-
-      let profitRateText = "";
-      if (targetSignal.entryPrice) {
-        const entryPrice = targetSignal.entryPrice;
-        const extItem = item as ExtendedStockSignalInfo;
-        const extCurrentSignal = currentSignal as ExtendedTradingSignal;
-
-        const currentPrice =
-          extItem.currentPrice ||
-          extCurrentSignal.currentPrice ||
-          extCurrentSignal.price ||
-          extCurrentSignal.close ||
-          currentSignal.realizedPrice;
-
-        let profitRate: number | null = null;
-        if (currentPrice) {
-          if (targetSignal.type === "inverse-buy") {
-            profitRate = ((entryPrice - currentPrice) / entryPrice) * 100;
-          } else {
-            profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
-          }
-        }
-
-        if (profitRate !== null && !isNaN(profitRate)) {
-          const sign = profitRate > 0 ? "+" : "";
-          profitRateText = `\n<b>💸 헤지 수익률:</b> ${sign}${profitRate.toFixed(2)}%`;
-        }
-      }
-
-      message += `<b>${overheatDisplayIndex}. 🚨 ${name}</b>\n`;
-      message += `<b>⚡ 상태:</b> <code>${statusText}</code>`;
-      if (profitRateText) {
-        message += profitRateText;
-      }
-      message += `\n<b>⏰ 발생 시간:</b> ${targetSignal.date} (${targetSignal.reason})\n`;
-
-      if (advice && !advice.error) {
-        message += `<b>🤖 AI 코멘트:</b> ${advice.message}\n`;
-      }
-
-      const targetPath = encodeURIComponent(`kis-stock?ticker=${name}&tf=1d`);
-      const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
-      message += `<a href="${redirectLink}">👉 [${name}] 차트 바로가기</a>\n`;
-      message += `──────────────────\n`;
-
-      overheatDisplayIndex++;
-    });
-
-    if (overheatSignals.length === 0) {
-      message += `특이사항 없음 (시장 지수 안정화 상태)\n`;
-    }
-
     return message;
   };
 
   public createLottoSetsMessage =
     (drawNo: number) =>
-    (sets: LottoSet[]): string => {
-      let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
-      message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
+      (sets: LottoSet[]): string => {
+        let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
+        message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
 
-      sets.forEach((set, index) => {
-        message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
-      });
+        sets.forEach((set, index) => {
+          message += `<b>Set ${index + 1}:</b> ${set.numbers.join(", ")}\n`;
+        });
 
-      return message;
-    };
+        return message;
+      };
 }
