@@ -119,15 +119,30 @@ export class TelegramLongTermService {
   }
 
   public async notifyInChunks<T>(
-    createMessage: (chunk: T[]) => string,
+    createMessage: (chunk: T[], isFallback?: boolean) => string | null,
     items: T[],
     chunkSize: number,
     replyMarkup?: ReplyMarkup,
   ): Promise<void> {
+    if (!items || items.length === 0) return;
+
+    let sentCount = 0;
+
     for (let i = 0; i < items.length; i += chunkSize) {
       const chunk = items.slice(i, i + chunkSize);
-      const message = createMessage(chunk);
-      await this.notify(message, replyMarkup);
+      const message = createMessage(chunk, false);
+
+      if (message) {
+        await this.notify(message, replyMarkup);
+        sentCount++;
+      }
+    }
+
+    if (sentCount === 0) {
+      const fallbackMessage = createMessage(items, true);
+      if (fallbackMessage) {
+        await this.notify(fallbackMessage, replyMarkup);
+      }
     }
   }
 
@@ -405,17 +420,13 @@ export class TelegramLongTermService {
     await Promise.all(sendPromises);
   }
 
-  public createStockStatusMessage = (signals: StockSignalInfo[]): string => {
-    let message = `<b>🚀 오늘의 주식 폼 미쳤다! 📈</b>\n`;
-    message += `오늘의 투자 인사이트, 켄신님이 콕 집어드려요.\n`;
-    message += `━━━━━━━━━━━━━━━━━━\n\n`;
-
-    let holdingSummary = `<b>💸 [내 계좌 요약 (보유 중)]</b>\n`;
+  public createStockStatusMessage = (
+    signals: StockSignalInfo[],
+    isFallback: boolean = false,
+  ): string | null => {
     let holdingCount = 0;
-
     const heldSignals: StockSignalInfo[] = [];
 
-    // Filter out inverse and overbought signals entirely
     signals.forEach((item) => {
       const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
         (s) => s.ticker === item.name,
@@ -425,12 +436,11 @@ export class TelegramLongTermService {
       );
       const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
 
-      const { name, currentSignal, lastMeaningfulSignal } = item;
+      const { currentSignal, lastMeaningfulSignal } = item;
       const isHold = currentSignal.type === "hold";
       const targetSignal =
         isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
 
-      // Skip overheat or inverse-related items to remove them from the message
       if (
         isInverse ||
         targetSignal.type === "inverse-buy" ||
@@ -443,54 +453,71 @@ export class TelegramLongTermService {
         if (targetSignal.type === "buy") {
           holdingCount++;
           heldSignals.push(item);
-
-          if (targetSignal.entryPrice) {
-            const entryPrice = targetSignal.entryPrice;
-            const extItem = item as ExtendedStockSignalInfo;
-            const extCurrentSignal = currentSignal as ExtendedTradingSignal;
-
-            const currentPrice =
-              extItem.currentPrice ||
-              extCurrentSignal.currentPrice ||
-              extCurrentSignal.price ||
-              extCurrentSignal.close ||
-              currentSignal.realizedPrice;
-
-            let profitRate: number | null = null;
-
-            if (currentPrice) {
-              if (targetSignal.type === "buy") {
-                profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
-              }
-            } else if (
-              extCurrentSignal.profitRate !== undefined &&
-              extCurrentSignal.profitRate !== null
-            ) {
-              profitRate = Number(extCurrentSignal.profitRate);
-            } else if (
-              extItem.profitRate !== undefined &&
-              extItem.profitRate !== null
-            ) {
-              profitRate = Number(extItem.profitRate);
-            }
-
-            if (profitRate !== null && !isNaN(profitRate)) {
-              const sign = profitRate > 0 ? "+" : "";
-              const statusLabel =
-                profitRate > 0
-                  ? "개이득 중 😍"
-                  : profitRate < 0
-                    ? "눈물 😭"
-                    : "본전 😐";
-
-              holdingSummary += `▪️ <b>${name}:</b> ${statusLabel} (${sign}${profitRate.toFixed(2)}%)\n`;
-            } else {
-              holdingSummary += `▪️ <b>${name}:</b> 계산 불가 <i>(현재가 지연)</i>\n`;
-            }
-          } else {
-            holdingSummary += `▪️ <b>${name}:</b> 계산 불가 <i>(진입가 지연)</i>\n`;
-          }
         }
+      }
+    });
+
+    if (heldSignals.length === 0 && !isFallback) {
+      return null;
+    }
+
+    let message = `<b>🚀 오늘의 주식 폼 미쳤다! 📈</b>\n`;
+    message += `오늘의 투자 인사이트, 켄신님이 콕 집어드려요.\n`;
+    message += `━━━━━━━━━━━━━━━━━━\n\n`;
+
+    let holdingSummary = `<b>💸 [내 계좌 요약 (보유 중)]</b>\n`;
+
+    heldSignals.forEach((item) => {
+      const { name, currentSignal, lastMeaningfulSignal } = item;
+      const isHold = currentSignal.type === "hold";
+      const targetSignal =
+        isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
+
+      if (targetSignal.entryPrice) {
+        const entryPrice = targetSignal.entryPrice;
+        const extItem = item as ExtendedStockSignalInfo;
+        const extCurrentSignal = currentSignal as ExtendedTradingSignal;
+
+        const currentPrice =
+          extItem.currentPrice ||
+          extCurrentSignal.currentPrice ||
+          extCurrentSignal.price ||
+          extCurrentSignal.close ||
+          currentSignal.realizedPrice;
+
+        let profitRate: number | null = null;
+
+        if (currentPrice) {
+          if (targetSignal.type === "buy") {
+            profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
+          }
+        } else if (
+          extCurrentSignal.profitRate !== undefined &&
+          extCurrentSignal.profitRate !== null
+        ) {
+          profitRate = Number(extCurrentSignal.profitRate);
+        } else if (
+          extItem.profitRate !== undefined &&
+          extItem.profitRate !== null
+        ) {
+          profitRate = Number(extItem.profitRate);
+        }
+
+        if (profitRate !== null && !isNaN(profitRate)) {
+          const sign = profitRate > 0 ? "+" : "";
+          const statusLabel =
+            profitRate > 0
+              ? "개이득 중 😍"
+              : profitRate < 0
+                ? "눈물 😭"
+                : "본전 😐";
+
+          holdingSummary += `▪️ <b>${name}:</b> ${statusLabel} (${sign}${profitRate.toFixed(2)}%)\n`;
+        } else {
+          holdingSummary += `▪️ <b>${name}:</b> 계산 불가 <i>(현재가 지연)</i>\n`;
+        }
+      } else {
+        holdingSummary += `▪️ <b>${name}:</b> 계산 불가 <i>(진입가 지연)</i>\n`;
       }
     });
 
@@ -605,7 +632,9 @@ export class TelegramLongTermService {
 
   public createLottoSetsMessage =
     (drawNo: number) =>
-    (sets: LottoSet[]): string => {
+    (sets: LottoSet[]): string | null => {
+      if (!sets || sets.length === 0) return null;
+
       let message = `<b>[Draw No. ${drawNo}] Lotto Numbers</b>\n`;
       message += `<a href="${schedulerConfig.apiBaseUrl}/lotto">Check Full Numbers</a>\n\n`;
 
