@@ -302,16 +302,9 @@ export default function KisStockPage() {
     if (isSyncing) return "동기화 중...";
 
     if (lastSyncTime) {
-      const syncHours = lastSyncTime.getHours().toString().padStart(2, "0");
-      const syncMinutes = lastSyncTime.getMinutes().toString().padStart(2, "0");
-
       return (
         <span className="flex items-center gap-1">
-          <span className="hidden sm:inline text-xs opacity-75">
-            {syncHours}:{syncMinutes} 완료
-          </span>
-          <span className="hidden sm:inline opacity-50">|</span>
-          <span>수동 갱신</span>
+          <span>주가 갱신</span>
         </span>
       );
     }
@@ -334,28 +327,31 @@ export default function KisStockPage() {
           <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center shrink-0">
             <button
               onClick={() => setSelectedTimeframe("1d")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${selectedTimeframe === "1d"
+              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                selectedTimeframe === "1d"
                   ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
+              }`}
             >
               일봉
             </button>
             <button
               onClick={() => setSelectedTimeframe("1h")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${selectedTimeframe === "1h"
+              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                selectedTimeframe === "1h"
                   ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
+              }`}
             >
               1시간 봉 (단타)
             </button>
             <button
               onClick={() => setSelectedTimeframe("15m")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${selectedTimeframe === "15m"
+              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                selectedTimeframe === "15m"
                   ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
+              }`}
             >
               15분 봉 (단타)
             </button>
@@ -392,10 +388,11 @@ export default function KisStockPage() {
               onClick={handleAiSync}
               disabled={isAiSyncing}
               className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap
-                  ${isAiSyncing
-                  ? "bg-purple-100 text-purple-400 cursor-not-allowed dark:bg-purple-900/30 dark:text-purple-500"
-                  : "bg-purple-600 text-white hover:bg-purple-700 shadow-md active:scale-95"
-                }`}
+                  ${
+                    isAiSyncing
+                      ? "bg-purple-100 text-purple-400 cursor-not-allowed dark:bg-purple-900/30 dark:text-purple-500"
+                      : "bg-purple-600 text-white hover:bg-purple-700 shadow-md active:scale-95"
+                  }`}
             >
               <Sparkles
                 className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isAiSyncing ? "animate-pulse" : ""}`}
@@ -407,10 +404,11 @@ export default function KisStockPage() {
               onClick={handleManualSync}
               disabled={isSyncing}
               className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap min-w-[120px] sm:min-w-[140px]
-                  ${isSyncing
-                  ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
-                  : "bg-blue-600 text-white hover:bg-blue-700 shadow-md active:scale-95"
-                }`}
+                  ${
+                    isSyncing
+                      ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
+                      : "bg-blue-600 text-white hover:bg-blue-700 shadow-md active:scale-95"
+                  }`}
             >
               <RefreshCw
                 className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}

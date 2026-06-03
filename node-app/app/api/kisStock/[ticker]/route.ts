@@ -118,7 +118,7 @@ export async function GET(request: Request) {
         };
 
         // Cache the fallback result to prevent subsequent DB hammering on quick tab toggling
-        setCacheData(cacheKey, responsePayload);
+        //setCacheData(cacheKey, responsePayload);
         return NextResponse.json(responsePayload);
       }
 
