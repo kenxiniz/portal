@@ -106,7 +106,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       color: "#FFB6C1", // Changed to light pink
       lineWidth: 3,
       lineStyle: 0, // Solid line
-      lineType: 1, // WithSteps (Right-angled stepped line)
+      lineType: 0, // Changed to Simple (diagonal line)
       crosshairMarkerVisible: false,
       priceLineVisible: false,
       title: "Pivot",
@@ -117,7 +117,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       color: "#42A5F5",
       lineWidth: 1,
       lineStyle: 0, // Changed to 0 for solid line
-      lineType: 1, // WithSteps
+      lineType: 0, // Changed to Simple (diagonal line)
       crosshairMarkerVisible: false,
       priceLineVisible: false,
       title: "R2",
@@ -126,7 +126,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       color: "#1E88E5",
       lineWidth: 1,
       lineStyle: 0, // Changed to 0 for solid line
-      lineType: 1, // WithSteps
+      lineType: 0, // Changed to Simple (diagonal line)
       crosshairMarkerVisible: false,
       priceLineVisible: false,
       title: "R3",
@@ -137,7 +137,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       color: "#EF5350",
       lineWidth: 1,
       lineStyle: 0, // Changed to 0 for solid line
-      lineType: 1, // WithSteps
+      lineType: 0, // Changed to Simple (diagonal line)
       crosshairMarkerVisible: false,
       priceLineVisible: false,
       title: "S2",
@@ -146,7 +146,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       color: "#E53935",
       lineWidth: 1,
       lineStyle: 0, // Changed to 0 for solid line
-      lineType: 1, // WithSteps
+      lineType: 0, // Changed to Simple (diagonal line)
       crosshairMarkerVisible: false,
       priceLineVisible: false,
       title: "S3",
