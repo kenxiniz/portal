@@ -79,8 +79,6 @@ export const StockChartDisplay = forwardRef<
 
     const [chartHeights, setChartHeights] = useState({ main: 250, sub: 100 });
     const isInitialZoomApplied = useRef(false);
-
-    // 💡 날짜 이동 애니메이션 진행 상태를 추적하는 Ref 추가
     const isMovingToDate = useRef(false);
 
     useEffect(() => {
@@ -135,7 +133,6 @@ export const StockChartDisplay = forwardRef<
 
       const processed = uniqueData.map((d, i) => {
         const signalsOnDate = signals.filter((s) => s.date === d.date);
-
         let turnOn = false;
         let turnOff = false;
 
@@ -175,7 +172,6 @@ export const StockChartDisplay = forwardRef<
           rsi: typeof d.rsi === "number" && !isNaN(d.rsi) ? d.rsi : undefined,
           upper: d.bollingerBands?.upper,
           lower: d.bollingerBands?.lower,
-
           vwap:
             typeof extD.vwap === "number" && !isNaN(extD.vwap)
               ? extD.vwap
@@ -194,7 +190,6 @@ export const StockChartDisplay = forwardRef<
               : ema20Results[i] !== null
                 ? ema20Results[i]
                 : undefined,
-
           date: d.date.replace(/[ T]/, "\n"),
         } as ProcessedChartData;
       });
@@ -256,7 +251,6 @@ export const StockChartDisplay = forwardRef<
           isSyncing = true;
           charts.forEach((targetChart) => {
             if (targetChart !== sourceChart) {
-              // 💡 테이블 클릭으로 MainChart가 이동 중일 때는 에코(Echo)를 무시하여 애니메이션 끊김을 방지합니다.
               if (isMovingToDate.current && targetChart === mainChart) {
                 return;
               }
@@ -285,16 +279,14 @@ export const StockChartDisplay = forwardRef<
       ) {
         const timer = setTimeout(() => {
           try {
-            const width = window.innerWidth;
-            let visibleBars = 60;
+            const screenWidth = window.innerWidth;
+            const BASE_WIDTH = 400;
+            const BASE_BARS = 30;
 
-            if (width >= 1024) {
-              visibleBars = 150;
-            } else if (width >= 768) {
-              visibleBars = 100;
-            } else {
-              visibleBars = 50;
-            }
+            let visibleBars = Math.floor(
+              (screenWidth / BASE_WIDTH) * BASE_BARS,
+            );
+            visibleBars = Math.max(30, Math.min(visibleBars, 200));
 
             mainChart.timeScale().setVisibleLogicalRange({
               from: processedData.length - 1 - visibleBars,
@@ -320,7 +312,6 @@ export const StockChartDisplay = forwardRef<
           if (idx !== -1) {
             const range = mainChart.timeScale().getVisibleLogicalRange();
             if (range) {
-              // 💡 애니메이션 시작 전 방어막(Shield) 활성화
               isMovingToDate.current = true;
 
               mainChart
@@ -331,7 +322,6 @@ export const StockChartDisplay = forwardRef<
                   true,
                 );
 
-              // 💡 1초 후 방어막 해제 (스크롤 애니메이션이 완전히 종료되는 시점)
               setTimeout(() => {
                 isMovingToDate.current = false;
               }, 1000);
