@@ -193,7 +193,9 @@ export const PivotChart: React.FC<PivotChartProps> = ({
     }));
     seriesRef.current.candle.setData(candleData);
 
+    // 💡 수정됨: date 필드를 반드시 포함하여 넘겨주고, 줄바꿈(\n)을 다시 공백으로 복원합니다.
     const pivotInputs = data.map((d) => ({
+      date: d.date.replace("\n", " "),
       chartTime: d.time,
       high: d.high,
       low: d.low,

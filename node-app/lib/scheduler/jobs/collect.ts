@@ -12,8 +12,8 @@ import { setCacheData } from "../../cache";
 import { TelegramLongTermService } from "../telegramLongTermService";
 import { TelegramShortTermService } from "../telegramShortTermService";
 
-// Import the pure indicator logic for real-time pivot scanning
-import { calculatePivotPoints } from "../../charts/indicators";
+// Import the pure indicator logic and PivotLevels interface for real-time pivot scanning
+import { calculatePivotPoints, PivotLevels } from "../../charts/indicators";
 
 /**
  * Periodically collects market data every 5 minutes during market hours.
@@ -46,6 +46,9 @@ export async function collectMarketData(): Promise<void> {
       // 1h and 15m are critical for short-term trading signals
       const timeframes = ["1d", "1h", "15m"];
 
+      // 💡 1일봉(1d)에서 계산된 정확한 피봇 값을 저장하여 하위 분봉에서 공유합니다.
+      let dailyPivot: PivotLevels | null = null;
+
       for (const timeframe of timeframes) {
         try {
           const url = `${schedulerConfig.apiBaseUrl}/api/kisStock/${stock.ticker}?timeframe=${timeframe}&refresh=true`;
@@ -56,6 +59,17 @@ export async function collectMarketData(): Promise<void> {
             // This architecture guarantees that the UI queries will read straight from RAM.
             const cacheKey = `kisStock:${stock.ticker}:${timeframe}`;
             setCacheData(cacheKey, response.data);
+
+            // 💡 1일봉일 때, 완전한 세션 단위의 정확한 피봇 값을 미리 계산해둡니다.
+            if (
+              timeframe === "1d" &&
+              response.data.data &&
+              response.data.data.length > 0
+            ) {
+              const candles = response.data.data;
+              const pivots = calculatePivotPoints(candles);
+              dailyPivot = pivots[pivots.length - 1];
+            }
 
             if (response.data.signals && response.data.signals.length > 0) {
               const signals = response.data.signals;
@@ -92,39 +106,38 @@ export async function collectMarketData(): Promise<void> {
                 response.data.data.length > 0
               ) {
                 const candles = response.data.data;
-                const pivots = calculatePivotPoints(candles);
                 const lastIdx = candles.length - 1;
-
                 const lastCandle = candles[lastIdx];
-                const lastPivot = pivots[lastIdx];
 
+                // 💡 1시간봉 기준 피봇(리페인팅/자정 분할 오류 유발) 대신,
+                // 미리 구해둔 정확한 1일봉 피봇(dailyPivot)을 사용하여 검증합니다.
                 if (
-                  lastPivot &&
-                  lastPivot.p !== null &&
-                  lastPivot.r2 !== null &&
-                  lastPivot.s2 !== null
+                  dailyPivot &&
+                  dailyPivot.p !== null &&
+                  dailyPivot.r2 !== null &&
+                  dailyPivot.s2 !== null
                 ) {
                   const currentPrice = lastCandle.close;
 
-                  if (currentPrice >= lastPivot.r2) {
+                  if (currentPrice >= dailyPivot.r2) {
                     console.log(
-                      `[PIVOT BREACH] Ticker: ${stock.ticker}, Price: ${currentPrice} >= R2: ${lastPivot.r2}`,
+                      `[PIVOT BREACH] Ticker: ${stock.ticker}, Price: ${currentPrice} >= R2: ${dailyPivot.r2}`,
                     );
                     await telegramLongTermService.notifyPivotBreach(
                       stock.ticker,
                       currentPrice,
-                      lastPivot.r2,
+                      dailyPivot.r2,
                       "R2_UP",
                       lastCandle.date,
                     );
-                  } else if (currentPrice <= lastPivot.s2) {
+                  } else if (currentPrice <= dailyPivot.s2) {
                     console.log(
-                      `[PIVOT BREACH] Ticker: ${stock.ticker}, Price: ${currentPrice} <= S2: ${lastPivot.s2}`,
+                      `[PIVOT BREACH] Ticker: ${stock.ticker}, Price: ${currentPrice} <= S2: ${dailyPivot.s2}`,
                     );
                     await telegramLongTermService.notifyPivotBreach(
                       stock.ticker,
                       currentPrice,
-                      lastPivot.s2,
+                      dailyPivot.s2,
                       "S2_DOWN",
                       lastCandle.date,
                     );

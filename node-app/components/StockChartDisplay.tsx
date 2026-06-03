@@ -64,6 +64,49 @@ type ExtendedDataPoint = StockDataPoint & {
   ema20?: number | null;
 };
 
+// Helper function to convert raw US Eastern Time (ET) to Korean Standard Time (KST)
+const convertEstToKst = (dateStr: string): { date: string; time: Time } => {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})[T\s\n](\d{2}):(\d{2})/);
+  if (!match) {
+    const ts = Math.floor(new Date(dateStr.replace(" ", "T")).getTime() / 1000);
+    return { date: dateStr, time: (isNaN(ts) ? 0 : ts) as Time };
+  }
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10) - 1;
+  const day = parseInt(match[3], 10);
+  const hour = parseInt(match[4], 10);
+  const min = parseInt(match[5], 10);
+
+  // Dynamic US Daylight Saving Time (DST) calculation
+  // Starts: 2nd Sunday of March, Ends: 1st Sunday of November
+  const march1 = new Date(Date.UTC(year, 2, 1));
+  const dstStartDay = 1 + ((14 - march1.getUTCDay()) % 7) + 7;
+  const dstStart = new Date(Date.UTC(year, 2, dstStartDay, 7, 0, 0)).getTime();
+
+  const nov1 = new Date(Date.UTC(year, 10, 1));
+  const dstEndDay = 1 + ((7 - nov1.getUTCDay()) % 7);
+  const dstEnd = new Date(Date.UTC(year, 10, dstEndDay, 6, 0, 0)).getTime();
+
+  const estUtcEstimate = Date.UTC(year, month, day, hour + 5, min, 0);
+  const isDst = estUtcEstimate >= dstStart && estUtcEstimate < dstEnd;
+  const offset = isDst ? -4 : -5;
+
+  const utcTs = Date.UTC(year, month, day, hour - offset, min, 0);
+  const kstDate = new Date(utcTs + 9 * 60 * 60 * 1000);
+
+  const kstY = kstDate.getUTCFullYear();
+  const kstM = String(kstDate.getUTCMonth() + 1).padStart(2, "0");
+  const kstD = String(kstDate.getUTCDate()).padStart(2, "0");
+  const kstH = String(kstDate.getUTCHours()).padStart(2, "0");
+  const kstMin = String(kstDate.getUTCMinutes()).padStart(2, "0");
+
+  return {
+    date: `${kstY}-${kstM}-${kstD} ${kstH}:${kstMin}:00`,
+    time: Math.floor(utcTs / 1000) as Time,
+  };
+};
+
 export const StockChartDisplay = forwardRef<
   StockChartDisplayHandles,
   StockChartDisplayProps
@@ -100,17 +143,34 @@ export const StockChartDisplay = forwardRef<
       if (!data || data.length === 0)
         return { processedData: [], closePrices: [] };
 
-      const formatTime = (dStr: string): Time => {
-        if (timeframe === "1d") return dStr.split("T")[0].split(" ")[0] as Time;
-        const ts = Math.floor(
-          new Date(dStr.replace(" ", "T")).getTime() / 1000,
+      // Detect if incoming dataset uses raw US Eastern Time stamps
+      const isUsRawEt = data.slice(0, 20).some((d) => {
+        if (!d?.date) return false;
+        const hour = parseInt(
+          d.date.split(/[T\s]/)[1]?.split(":")[0] || "0",
+          10,
         );
-        return isNaN(ts) ? (0 as Time) : (ts as Time);
-      };
+        return hour >= 4 && hour <= 8;
+      });
 
       const cleanData = data
         .filter((d) => d?.date)
-        .map((d) => ({ ...d, chartTime: formatTime(d.date) }))
+        .map((d) => {
+          if (isUsRawEt && timeframe !== "1d") {
+            const converted = convertEstToKst(d.date);
+            return { ...d, date: converted.date, chartTime: converted.time };
+          } else {
+            const formatTime = (dStr: string): Time => {
+              if (timeframe === "1d")
+                return dStr.split("T")[0].split(" ")[0] as Time;
+              const ts = Math.floor(
+                new Date(dStr.replace(" ", "T")).getTime() / 1000,
+              );
+              return isNaN(ts) ? (0 as Time) : (ts as Time);
+            };
+            return { ...d, chartTime: formatTime(d.date) };
+          }
+        })
         .filter((d) => d.chartTime !== 0);
 
       cleanData.sort((a, b) =>
@@ -281,7 +341,7 @@ export const StockChartDisplay = forwardRef<
           try {
             const screenWidth = window.innerWidth;
             const BASE_WIDTH = 400;
-            const BASE_BARS = 30;
+            const BASE_BARS = 40;
 
             let visibleBars = Math.floor(
               (screenWidth / BASE_WIDTH) * BASE_BARS,

@@ -542,6 +542,26 @@ export const calculatePivotPoints = <
     close: number;
   }[] = [];
 
+  // Helper to group trade sessions accurately from 17:00 KST to 10:00 KST next day
+  const getSessionDate = (dateStr: string) => {
+    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})[T\s\n](\d{2})/);
+    if (match) {
+      const year = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const day = parseInt(match[3], 10);
+      const hour = parseInt(match[4], 10);
+
+      const d = new Date(Date.UTC(year, month, day, hour, 0, 0));
+      // Shift by 11 hours to bundle both summer and winter overnight sessions into a unified trading date
+      d.setUTCHours(d.getUTCHours() - 11);
+
+      return d.toISOString().split("T")[0];
+    }
+    return dateStr.includes("T")
+      ? dateStr.split("T")[0]
+      : dateStr.split(" ")[0];
+  };
+
   let currentDay = "";
   let curHigh = -Infinity;
   let curLow = Infinity;
@@ -566,9 +586,7 @@ export const calculatePivotPoints = <
       continue;
     }
 
-    const datePart = dateStr.includes("T")
-      ? dateStr.split("T")[0]
-      : dateStr.split(" ")[0];
+    const datePart = getSessionDate(dateStr);
 
     if (datePart !== currentDay) {
       if (currentDay !== "") {
@@ -628,10 +646,7 @@ export const calculatePivotPoints = <
       continue;
     }
 
-    const datePart = dateStr.includes("T")
-      ? dateStr.split("T")[0]
-      : dateStr.split(" ")[0];
-
+    const datePart = getSessionDate(dateStr);
     const prevDay = prevDayMap.get(datePart);
 
     if (prevDay) {
