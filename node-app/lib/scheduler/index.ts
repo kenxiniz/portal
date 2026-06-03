@@ -146,7 +146,7 @@ class JobScheduler {
     );
     this._scheduleJob(
       "Collect Market Data Every 5 Minutes",
-      schedulerConfig.cronSchedules.collectMarketData || "*/5 * * * *",
+      schedulerConfig.cronSchedules.collectMarketData || "*/10 * * * *",
       collectMarketData,
     );
     /*
