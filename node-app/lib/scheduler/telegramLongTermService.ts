@@ -420,13 +420,17 @@ export class TelegramLongTermService {
     await Promise.all(sendPromises);
   }
 
-  public createStockStatusMessage = (
+  // Handle entire daily portfolio status formatting and delivery logic
+  public async notifyPortfolioStatus(
     signals: StockSignalInfo[],
-    isFallback: boolean = false,
-  ): string | null => {
+  ): Promise<void> {
+    if (!signals || signals.length === 0) return;
+
     let holdingCount = 0;
+    const overheatTickers: string[] = [];
     const heldSignals: StockSignalInfo[] = [];
 
+    // Step 1: Segregate overheat stocks vs held stocks
     signals.forEach((item) => {
       const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
         (s) => s.ticker === item.name,
@@ -440,6 +444,14 @@ export class TelegramLongTermService {
       const isHold = currentSignal.type === "hold";
       const targetSignal =
         isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
+
+      const isOverheatActive =
+        targetSignal.type === "inverse-buy" ||
+        (isInverse && targetSignal.type === "buy");
+
+      if (isOverheatActive) {
+        overheatTickers.push(item.name);
+      }
 
       if (
         isInverse ||
@@ -457,13 +469,14 @@ export class TelegramLongTermService {
       }
     });
 
-    if (heldSignals.length === 0 && !isFallback) {
-      return null;
+    if (heldSignals.length === 0 && overheatTickers.length === 0) {
+      return;
     }
 
-    let message = `<b>🚀 오늘의 주식 폼 미쳤다! 📈</b>\n`;
-    message += `오늘의 투자 인사이트, 켄신님이 콕 집어드려요.\n`;
-    message += `━━━━━━━━━━━━━━━━━━\n\n`;
+    // Step 2: Build and send the summary message (Page 1 only)
+    let summaryMessage = `<b>🚀 오늘의 주식 폼 미쳤다! 📈</b>\n`;
+    summaryMessage += `오늘의 투자 인사이트, 켄신님이 콕 집어드려요.\n`;
+    summaryMessage += `━━━━━━━━━━━━━━━━━━\n\n`;
 
     let holdingSummary = `<b>💸 [내 계좌 요약 (보유 중)]</b>\n`;
 
@@ -525,110 +538,124 @@ export class TelegramLongTermService {
       holdingSummary += `현재 보유 중인 종목이 없습니다 (현금 관망 🧘‍♂️)\n`;
     }
 
-    message += holdingSummary + `\n━━━━━━━━━━━━━━━━━━\n\n`;
-
-    message += `<b>📋 [보유 종목 상세 정보]</b>\n\n`;
-    let heldDisplayIndex = 1;
-
-    heldSignals.forEach((item) => {
-      const { name, currentSignal, lastMeaningfulSignal, advice } = item;
-      const isHold = currentSignal.type === "hold";
-      const targetSignal =
-        isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
-
-      let statusText = "당장 매수각";
-      if (isHold && targetSignal.type === "buy") {
-        statusText = "존버 가보자고! (매수 유지)";
-      } else if (targetSignal.type === "sell") {
-        statusText = "지금이 익절 타이밍";
-      }
-
-      let profitRateText = "";
-      if (targetSignal.entryPrice) {
-        const entryPrice = targetSignal.entryPrice;
-        const extItem = item as ExtendedStockSignalInfo;
-        const extCurrentSignal = currentSignal as ExtendedTradingSignal;
-
-        const currentPrice =
-          extItem.currentPrice ||
-          extCurrentSignal.currentPrice ||
-          extCurrentSignal.price ||
-          extCurrentSignal.close ||
-          currentSignal.realizedPrice;
-
-        let profitRate: number | null = null;
-
-        if (currentPrice) {
-          profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
-        } else if (
-          extCurrentSignal.profitRate !== undefined &&
-          extCurrentSignal.profitRate !== null
-        ) {
-          profitRate = Number(extCurrentSignal.profitRate);
-        } else if (
-          extItem.profitRate !== undefined &&
-          extItem.profitRate !== null
-        ) {
-          profitRate = Number(extItem.profitRate);
-        }
-
-        if (profitRate !== null && !isNaN(profitRate)) {
-          const sign = profitRate > 0 ? "+" : "";
-          const color =
-            profitRate > 0 ? "개이득" : profitRate < 0 ? "눈물" : "본전";
-          profitRateText = `\n<b>💸 참고 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
-        } else {
-          profitRateText = `\n<b>💸 참고 수익률:</b> <i>계산 불가 (현재가 데이터 누락)</i>`;
-        }
-      }
-
-      message += `<b>${heldDisplayIndex}. 💎 ${name}</b>\n`;
-      message += `<b>🔥 시그널:</b> <code>${statusText}</code>`;
-      if (profitRateText) {
-        message += profitRateText;
-      }
-      message += `\n<b>⏰ 신호 발생:</b> ${targetSignal.date} (${targetSignal.reason})\n`;
-
-      if (advice && !advice.error) {
-        message += `\n<b>🤖 AI의 팩폭 한마디:</b>\n`;
-        message += `${advice.message}\n`;
-
-        if (advice.action) {
-          let actionLabel = advice.action.toUpperCase();
-          let emoji = "👀";
-          if (actionLabel === "BUY") {
-            actionLabel = "풀매수 가즈아";
-            emoji = "✅";
-          } else if (actionLabel === "SELL") {
-            actionLabel = "일단 튀어! (매도)";
-            emoji = "🚨";
-          } else if (actionLabel === "HOLD") {
-            actionLabel = "일단 지켜보자";
-            emoji = "⏸";
-          }
-
-          message += `<b>✨ AI의 결론:</b> ${emoji} #${actionLabel}\n`;
-        }
-      } else if (advice?.error) {
-        message += `\n<b>⚠️ AI가 아직 분석 중이에요. 조금만 기다려주세요!</b>\n`;
-      }
-
-      const targetPath = encodeURIComponent(`kis-stock?ticker=${name}&tf=1d`);
-      const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
-      message += `\n<a href="${redirectLink}">👉 [${name}] 상세 차트 확인하기</a>\n`;
-      message += `\n━━━━━━━━━━━━━━━━━━\n`;
-
-      heldDisplayIndex++;
-    });
-
-    if (heldSignals.length === 0) {
-      message += `보유 중인 포지션 상세 정보가 없습니다.\n\n━━━━━━━━━━━━━━━━━━\n`;
+    if (overheatTickers.length > 0) {
+      const overheatLinks = overheatTickers.map((ticker) => {
+        const targetPath = encodeURIComponent(
+          `kis-stock?ticker=${ticker}&tf=1d`,
+        );
+        const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
+        return `<a href="${redirectLink}">${ticker}</a>`;
+      });
+      holdingSummary += `\n⚠️ <b>시장 과열 종목:</b> ${overheatLinks.join(", ")} (매매 주의)\n`;
     }
 
-    message += `\n`;
+    summaryMessage += holdingSummary + `\n━━━━━━━━━━━━━━━━━━\n`;
 
-    return message;
-  };
+    if (heldSignals.length > 0) {
+      summaryMessage += `\n⬇️ 아래부터 일반 종목 상세 분석이 이어집니다.`;
+    }
+
+    await this.notify(summaryMessage);
+
+    // Step 3: Chunk and send detailed messages for held stocks only (3 items limit)
+    const CHUNK_SIZE = 3;
+    for (let i = 0; i < heldSignals.length; i += CHUNK_SIZE) {
+      const chunk = heldSignals.slice(i, i + CHUNK_SIZE);
+      let detailMessage = `<b>📋 [보유 종목 상세 정보 - 파트 ${Math.floor(i / CHUNK_SIZE) + 1}]</b>\n\n`;
+
+      chunk.forEach((item, index) => {
+        const heldDisplayIndex = i + index + 1;
+        const { name, currentSignal, lastMeaningfulSignal, advice } = item;
+        const isHold = currentSignal.type === "hold";
+        const targetSignal =
+          isHold && lastMeaningfulSignal ? lastMeaningfulSignal : currentSignal;
+
+        let statusText = "당장 매수각";
+        if (isHold && targetSignal.type === "buy") {
+          statusText = "존버 가보자고! (매수 유지)";
+        } else if (targetSignal.type === "sell") {
+          statusText = "지금이 익절 타이밍";
+        }
+
+        let profitRateText = "";
+        if (targetSignal.entryPrice) {
+          const entryPrice = targetSignal.entryPrice;
+          const extItem = item as ExtendedStockSignalInfo;
+          const extCurrentSignal = currentSignal as ExtendedTradingSignal;
+
+          const currentPrice =
+            extItem.currentPrice ||
+            extCurrentSignal.currentPrice ||
+            extCurrentSignal.price ||
+            extCurrentSignal.close ||
+            currentSignal.realizedPrice;
+
+          let profitRate: number | null = null;
+
+          if (currentPrice) {
+            profitRate = ((currentPrice - entryPrice) / entryPrice) * 100;
+          } else if (
+            extCurrentSignal.profitRate !== undefined &&
+            extCurrentSignal.profitRate !== null
+          ) {
+            profitRate = Number(extCurrentSignal.profitRate);
+          } else if (
+            extItem.profitRate !== undefined &&
+            extItem.profitRate !== null
+          ) {
+            profitRate = Number(extItem.profitRate);
+          }
+
+          if (profitRate !== null && !isNaN(profitRate)) {
+            const sign = profitRate > 0 ? "+" : "";
+            const color =
+              profitRate > 0 ? "개이득" : profitRate < 0 ? "눈물" : "본전";
+            profitRateText = `\n<b>💸 참고 수익률:</b> ${sign}${profitRate.toFixed(2)}% (${color} 진행 중)`;
+          } else {
+            profitRateText = `\n<b>💸 참고 수익률:</b> <i>계산 불가 (현재가 데이터 누락)</i>`;
+          }
+        }
+
+        detailMessage += `<b>${heldDisplayIndex}. 💎 ${name}</b>\n`;
+        detailMessage += `<b>🔥 시그널:</b> <code>${statusText}</code>`;
+        if (profitRateText) {
+          detailMessage += profitRateText;
+        }
+        detailMessage += `\n<b>⏰ 신호 발생:</b> ${targetSignal.date} (${targetSignal.reason})\n`;
+
+        if (advice && !advice.error) {
+          detailMessage += `\n<b>🤖 AI의 팩폭 한마디:</b>\n`;
+          detailMessage += `${advice.message}\n`;
+
+          if (advice.action) {
+            let actionLabel = advice.action.toUpperCase();
+            let emoji = "👀";
+            if (actionLabel === "BUY") {
+              actionLabel = "풀매수 가즈아";
+              emoji = "✅";
+            } else if (actionLabel === "SELL") {
+              actionLabel = "일단 튀어! (매도)";
+              emoji = "🚨";
+            } else if (actionLabel === "HOLD") {
+              actionLabel = "일단 지켜보자";
+              emoji = "⏸";
+            }
+
+            detailMessage += `<b>✨ AI의 결론:</b> ${emoji} #${actionLabel}\n`;
+          }
+        } else if (advice?.error) {
+          detailMessage += `\n<b>⚠️ AI가 아직 분석 중이에요. 조금만 기다려주세요!</b>\n`;
+        }
+
+        const targetPath = encodeURIComponent(`kis-stock?ticker=${name}&tf=1d`);
+        const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
+        detailMessage += `\n<a href="${redirectLink}">👉 [${name}] 상세 차트 확인하기</a>\n`;
+        detailMessage += `\n━━━━━━━━━━━━━━━━━━\n`;
+      });
+
+      await this.notify(detailMessage);
+    }
+  }
 
   public createLottoSetsMessage =
     (drawNo: number) =>

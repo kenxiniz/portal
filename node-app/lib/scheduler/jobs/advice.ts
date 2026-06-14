@@ -8,12 +8,12 @@ import stockConfig from "../../stock.json";
 
 let isAdviceRunning = false;
 
-// In-memory cache to store tickers that are already processed today
-const memoryCache = new Set<string>();
-let lastCacheUpdateDate = "";
+// 💡 헷갈림 방지: 시세 캐시가 아니라 '오늘 조언 생성이 끝난 종목'을 기록하는 출석부(Set)입니다.
+const processedTickersTracker = new Set<string>();
+let lastAdviceDate = "";
 
 /**
- * Filter tickers that already have valid advice for today from Memory or DB.
+ * Filter tickers that already have valid advice for today from Tracker or DB.
  * @param tickers List of ticker strings to check
  * @param market 'us_stocks' or 'k_stocks'
  */
@@ -23,20 +23,20 @@ async function getTickersRequiringUpdate(
 ): Promise<string[]> {
   const todayStr = new Date().toISOString().split("T")[0];
 
-  // Reset memory cache if the day has changed
-  if (lastCacheUpdateDate !== todayStr) {
+  // 날짜가 바뀌면 어제 기록된 출석부를 비워야 오늘치 조언을 새로 생성할 수 있습니다.
+  if (lastAdviceDate !== todayStr) {
     console.log(
-      `[AdviceJob] Date changed from ${lastCacheUpdateDate} to ${todayStr}. Clearing memory cache.`,
+      `[AdviceJob] Date changed from ${lastAdviceDate} to ${todayStr}. Resetting daily ticker tracker.`,
     );
-    memoryCache.clear();
-    lastCacheUpdateDate = todayStr;
+    processedTickersTracker.clear();
+    lastAdviceDate = todayStr;
   }
 
-  // 1. Check Memory Cache
-  const missingInMem = tickers.filter(
-    (ticker) => !memoryCache.has(`${market}:${ticker}`),
+  // 1. Check Tracker (Memory Set)
+  const missingInTracker = tickers.filter(
+    (ticker) => !processedTickersTracker.has(`${market}:${ticker}`),
   );
-  if (missingInMem.length === 0) return [];
+  if (missingInTracker.length === 0) return [];
 
   // 2. Check Database
   try {
@@ -45,23 +45,25 @@ async function getTickersRequiringUpdate(
     today.setHours(0, 0, 0, 0);
 
     const existingDocs = await TickerAdvice.find({
-      ticker: { $in: missingInMem },
+      ticker: { $in: missingInTracker },
       updatedAt: { $gte: today },
       advice: { $ne: null },
     }).select("ticker");
 
     const existingTickersInDb = new Set(existingDocs.map((doc) => doc.ticker));
 
-    // Update memory cache with DB hits
+    // Update tracker with DB hits
     existingTickersInDb.forEach((ticker) => {
-      memoryCache.add(`${market}:${ticker}`);
+      processedTickersTracker.add(`${market}:${ticker}`);
     });
 
-    // 3. Return only tickers missing in both Memory and DB
-    return missingInMem.filter((ticker) => !existingTickersInDb.has(ticker));
+    // 3. Return only tickers missing in both Tracker and DB
+    return missingInTracker.filter(
+      (ticker) => !existingTickersInDb.has(ticker),
+    );
   } catch (error) {
     console.error("[AdviceJob] Failed to check DB for existing advice:", error);
-    return missingInMem; // Fallback to processing all missing in memory
+    return missingInTracker; // Fallback to processing all missing in tracker
   }
 }
 
@@ -78,7 +80,6 @@ export async function generateDailyAdvice(): Promise<void> {
 
   try {
     // 1. Process US Market
-    // Convert object array to string array using .map() to fix Type Error
     const usTickersToProcess = await getTickersRequiringUpdate(
       stockConfig.us_stocks.map((s: { ticker: string }) => s.ticker),
       "us_stocks",
@@ -86,14 +87,14 @@ export async function generateDailyAdvice(): Promise<void> {
 
     if (usTickersToProcess.length > 0) {
       console.log(
-        `[AdviceJob] Triggering analysis for ${usTickersToProcess.length} US stocks (Cache MISS)...`,
+        `[AdviceJob] Triggering analysis for ${usTickersToProcess.length} US stocks (Tracker MISS)...`,
       );
       try {
         await axios.post(`${schedulerConfig.apiBaseUrl}/api/advice`, {
           isBatch: true,
           apiType: "kisStock",
-          tickers: usTickersToProcess, // Send only filtered tickers
-          refresh: false, // Do not force, use cache-first logic in API handler
+          tickers: usTickersToProcess,
+          refresh: false,
         });
         console.log(
           "[AdviceJob] US market batch generation completed successfully.",
@@ -118,7 +119,6 @@ export async function generateDailyAdvice(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 60000));
 
     // 2. Process KR Market
-    // Convert object array to string array using .map() to fix Type Error
     const krTickersToProcess = await getTickersRequiringUpdate(
       stockConfig.k_stocks.map((s: { ticker: string }) => s.ticker),
       "k_stocks",
@@ -126,7 +126,7 @@ export async function generateDailyAdvice(): Promise<void> {
 
     if (krTickersToProcess.length > 0) {
       console.log(
-        `[AdviceJob] Triggering analysis for ${krTickersToProcess.length} KR stocks (Cache MISS)...`,
+        `[AdviceJob] Triggering analysis for ${krTickersToProcess.length} KR stocks (Tracker MISS)...`,
       );
       try {
         await axios.post(`${schedulerConfig.apiBaseUrl}/api/advice`, {
@@ -177,9 +177,9 @@ export async function resetAdviceCache(): Promise<void> {
       },
     );
 
-    // Also clear in-memory cache
-    memoryCache.clear();
-    lastCacheUpdateDate = "";
+    // Tracker 초기화
+    processedTickersTracker.clear();
+    lastAdviceDate = "";
 
     console.log(
       `[CacheReset] MongoDB update finished. Matched: ${result.matchedCount}, Modified: ${result.modifiedCount}`,

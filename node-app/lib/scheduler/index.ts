@@ -28,7 +28,24 @@ export { generateDailyAdvice, resetAdviceCache, collectMarketData };
 async function warmUpCache(): Promise<void> {
   console.log("[Warm-up] Starting memory cache hydration from MongoDB...");
   try {
-    await connectDB();
+    // 💡 [수정됨] DB 연결 재시도 로직 추가 (최대 5번, 5초 간격 대기)
+    let dbConnected = false;
+    let retries = 5;
+
+    while (retries > 0 && !dbConnected) {
+      try {
+        await connectDB();
+        dbConnected = true;
+      } catch (connError) {
+        retries--;
+        console.warn(
+          `[Warm-up] DB not ready yet. Retrying in 5 seconds... (${retries} attempts left)`,
+        );
+        if (retries === 0) throw connError;
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+    }
+
     const timeframes = ["1d", "1h", "15m"];
 
     const processAndCache = async (
@@ -84,7 +101,7 @@ async function warmUpCache(): Promise<void> {
           }).lean()) as { advice?: object } | null;
           const latestAdvice = adviceDoc?.advice || null;
 
-          setCacheData(cacheKey, {
+          await setCacheData(cacheKey, {
             data: processedData,
             signals,
             advice: latestAdvice,
@@ -145,7 +162,7 @@ class JobScheduler {
       resetAdviceCache,
     );
     this._scheduleJob(
-      "Collect Market Data Every 5 Minutes",
+      "Collect Market Data Every 10 Minutes",
       schedulerConfig.cronSchedules.collectMarketData || "*/10 * * * *",
       collectMarketData,
     );

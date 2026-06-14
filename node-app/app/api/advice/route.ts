@@ -6,6 +6,8 @@ import { TickerAdvice } from "@/lib/models/advice";
 import { CachedStockData, AdviceObject } from "@/lib/stockUtils";
 import { getBatchGeminiAdvice, BatchInputItem } from "@/lib/geminiUtils";
 import stockConfig from "@/lib/stock.json";
+// 💡 NEW: 공유 메모리 캐시에서 직접 데이터를 읽어오기 위해 getCacheData 임포트
+import { getCacheData } from "@/lib/cache";
 
 type ApiType = "stock" | "kisStock" | "kStock";
 
@@ -199,51 +201,72 @@ export async function POST(request: Request) {
         }
       }
 
-      // Tier 3: Prepare for API Call
+      // Tier 3: Prepare for API Call (Data Recovery)
       if (!adviceFound) {
-        // Data Recovery: If raw data (candles/signals) is missing, fetch it first
         if (
           !currentCachedData.data ||
           currentCachedData.data.length === 0 ||
           !currentCachedData.signals
         ) {
-          console.log(
-            `[INFO] [${t}/${apiType}/advice] Missing raw data. Fetching from source API...`,
-          );
-          try {
-            const baseUrl =
-              process.env.NEXT_PUBLIC_BASE_URL || "http://node-app:3000";
-            const fetchRes = await fetch(`${baseUrl}/api/${apiType}/${t}`, {
-              method: "GET",
-            });
-            if (!fetchRes.ok)
-              throw new Error(`Source API error: ${fetchRes.status}`);
+          // 💡 NEW: HTTP Fetch 대신 collect가 채워놓은 RAM 공유 캐시를 직접 열어봅니다.
+          const cacheKey = `${apiType}:${t}:1d`;
+          const sharedCacheData = await getCacheData(cacheKey);
 
-            const responseJson = await fetchRes.json();
+          if (
+            sharedCacheData &&
+            sharedCacheData.data &&
+            sharedCacheData.signals
+          ) {
+            console.log(
+              `[INFO] [${t}/${apiType}/advice] Direct RAM Hit: Pulled raw data from Shared Memory.`,
+            );
             memoryStore[apiType][t] = {
               ...memoryStore[apiType][t],
-              ...responseJson,
+              data: sharedCacheData.data,
+              signals: sharedCacheData.signals,
             };
             currentCachedData = memoryStore[apiType][t];
-          } catch (err) {
-            console.error(
-              `[ERROR] [${t}/${apiType}/advice] Data recovery failed:`,
-              err,
+          } else {
+            console.log(
+              `[INFO] [${t}/${apiType}/advice] Missing raw data in RAM. Fetching via HTTP fallback...`,
             );
-            // Last resort fallback to DB if available
-            if (fallbacks[t]) {
-              responseData[t] = {
-                ...fallbacks[t],
-                isCached: true,
-                isFallback: true,
+            try {
+              const baseUrl =
+                process.env.NEXT_PUBLIC_BASE_URL || "http://node-app:3000";
+              // 💡 FIX: HTTP fallback 통신 시에도 ?timeframe=1d 를 반드시 명시하여 Cache MISS 방지
+              const fetchRes = await fetch(
+                `${baseUrl}/api/${apiType}/${t}?timeframe=1d`,
+                { method: "GET" },
+              );
+              if (!fetchRes.ok)
+                throw new Error(`Source API error: ${fetchRes.status}`);
+
+              const responseJson = await fetchRes.json();
+              memoryStore[apiType][t] = {
+                ...memoryStore[apiType][t],
+                ...responseJson,
               };
-            } else {
-              responseData[t] = {
-                error: true,
-                message: "Data recovery failed for analysis",
-              };
+              currentCachedData = memoryStore[apiType][t];
+            } catch (err) {
+              console.error(
+                `[ERROR] [${t}/${apiType}/advice] Data recovery failed:`,
+                err,
+              );
+              // Last resort fallback to DB if available
+              if (fallbacks[t]) {
+                responseData[t] = {
+                  ...fallbacks[t],
+                  isCached: true,
+                  isFallback: true,
+                };
+              } else {
+                responseData[t] = {
+                  error: true,
+                  message: "Data recovery failed for analysis",
+                };
+              }
+              continue;
             }
-            continue;
           }
         }
 

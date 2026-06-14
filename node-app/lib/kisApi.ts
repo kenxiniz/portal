@@ -66,7 +66,7 @@ async function fetchWithRetry(
   throw new Error("API request failed after retries");
 }
 
-async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
   const now = Date.now();
 
   // 1. 이미 유효한 토큰이 전역 캐시에 있으면 즉시 반환

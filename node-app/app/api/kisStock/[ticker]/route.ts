@@ -16,7 +16,7 @@ import { TickerAdvice } from "../../../../lib/models/advice";
 import stockConfig from "../../../../lib/stock.json";
 
 // Import global memory cache helpers to bridge the scheduler and the endpoint
-import { getCacheData, setCacheData } from "../../../../lib/cache";
+import { getCacheData } from "../../../../lib/cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -59,7 +59,9 @@ export async function GET(request: Request) {
     // -------------------------------------------------------------------------
     if (!isForceRefresh) {
       // Step 1: Query the shared memory cache populated by the 5-min scheduler
-      const cachedPayload = getCacheData(cacheKey) as CachePayload | null;
+      const cachedPayload = (await getCacheData(
+        cacheKey,
+      )) as CachePayload | null;
       if (cachedPayload) {
         console.log(
           `[INFO] [${ticker}] Shared Memory Cache HIT for ${timeframe}`,
@@ -117,8 +119,6 @@ export async function GET(request: Request) {
           advice: latestAdvice as AdviceObject | null,
         };
 
-        // Cache the fallback result to prevent subsequent DB hammering on quick tab toggling
-        //setCacheData(cacheKey, responsePayload);
         return NextResponse.json(responsePayload);
       }
 
@@ -298,8 +298,6 @@ export async function GET(request: Request) {
         advice: latestAdvice as AdviceObject | null,
       };
 
-      // Ensure the shared memory cache stays completely in sync with the fresh data
-      setCacheData(cacheKey, responsePayload);
       return NextResponse.json(responsePayload);
     }
 

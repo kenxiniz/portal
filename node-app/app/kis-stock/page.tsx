@@ -13,15 +13,45 @@ import {
 } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
 import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
+import NasdaqFuturesChart from "@/components/NasdaqFuturesChart";
 import { RefreshCw, Globe, MapPin, Sparkles } from "lucide-react";
 
-// Load US Stocks.
 const tickers = stockConfig.us_stocks.map((t) => t.ticker);
 
 type Timeframe = "1d" | "1h" | "15m";
 
+function getFrontMonthTicker(baseTicker: string): string {
+  const now = new Date();
+  let year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+
+  let monthCode = "";
+
+  if (month < 3 || (month === 3 && day < 15)) {
+    monthCode = "H";
+  } else if (month < 6 || (month === 6 && day < 15)) {
+    monthCode = "M";
+  } else if (month < 9 || (month === 9 && day < 15)) {
+    monthCode = "U";
+  } else if (month < 12 || (month === 12 && day < 15)) {
+    monthCode = "Z";
+  } else {
+    monthCode = "H";
+    year += 1;
+  }
+
+  // Use 2 digits for year to match KIS API specification
+  const yearDigit = year.toString().slice(-2);
+  return `${baseTicker}${monthCode}${yearDigit}`;
+}
+
 export default function KisStockPage() {
   const router = useRouter();
+
+  const [dynamicFuturesTicker] = useState<string>(() =>
+    getFrontMonthTicker("NQ"),
+  );
 
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(
     () => {
@@ -74,7 +104,6 @@ export default function KisStockPage() {
         );
 
         const noCacheTimestamp = Date.now();
-        // US Stock API Route (/api/kisStock/)
         const endpoint = `/api/kisStock/${ticker}?timeframe=${timeframe}${shouldBypassCache ? "&refresh=true" : ""}&t=${noCacheTimestamp}`;
 
         const response = await fetch(endpoint, { cache: "no-store" });
@@ -218,7 +247,7 @@ export default function KisStockPage() {
         },
         body: JSON.stringify({
           isBatch: true,
-          apiType: "kisStock", // US Stock type
+          apiType: "kisStock",
           refresh: true,
         }),
       });
@@ -315,7 +344,6 @@ export default function KisStockPage() {
   return (
     <div className="flex flex-col items-center p-2 sm:p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
       <div className="flex flex-col md:flex-row justify-between items-center w-full md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mb-6 md:mb-8 gap-4 overflow-hidden">
-        {/* Top Title */}
         <div className="flex flex-col md:flex-row items-center gap-4">
           <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0 whitespace-nowrap">
             미국 주식/ETF
@@ -323,7 +351,6 @@ export default function KisStockPage() {
         </div>
 
         <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto overflow-hidden">
-          {/* Timeframe buttons */}
           <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center shrink-0">
             <button
               onClick={() => setSelectedTimeframe("1d")}
@@ -420,6 +447,10 @@ export default function KisStockPage() {
       </div>
 
       <div className="w-full grid grid-cols-1 gap-4 md:gap-6 md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px]">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-4 md:p-6 w-full">
+          <NasdaqFuturesChart ticker={dynamicFuturesTicker} />
+        </div>
+
         {tickers.map((ticker) => {
           const state = tickerStates[ticker];
           if (!state) return null;

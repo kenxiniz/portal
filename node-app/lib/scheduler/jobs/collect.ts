@@ -58,7 +58,7 @@ export async function collectMarketData(): Promise<void> {
             // 🚨 [ADDED] Hydrate the shared memory cache immediately upon a successful scheduler fetch.
             // This architecture guarantees that the UI queries will read straight from RAM.
             const cacheKey = `kisStock:${stock.ticker}:${timeframe}`;
-            setCacheData(cacheKey, response.data);
+            await setCacheData(cacheKey, response.data);
 
             // 💡 1일봉일 때, 완전한 세션 단위의 정확한 피봇 값을 미리 계산해둡니다.
             if (
@@ -173,7 +173,7 @@ export async function collectMarketData(): Promise<void> {
           if (response.data) {
             // Hydrate the Korean stock shared memory cache
             const cacheKey = `kStock:${stock.ticker}:${timeframe}`;
-            setCacheData(cacheKey, response.data);
+            await setCacheData(cacheKey, response.data);
           }
         } catch (error) {
           const axiosError = error as AxiosError;
