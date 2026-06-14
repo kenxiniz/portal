@@ -2,16 +2,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./page.module.css";
-/* [수정] Wallet 아이콘 추가 */
+/* [수정] Wallet 및 상속 메뉴용 Scale 아이콘 추가 */
 import {
   KeyRound,
   Users,
   Building2,
-  //LineChart,
   TrendingUp,
   BarChart3,
   Ticket,
-  //Wallet,
+  Scale,
 } from "lucide-react";
 
 export const metadata = {
@@ -44,11 +43,6 @@ export default function Home() {
         </div>
 
         <div className={styles.ctas}>
-          {/* MODIFIED: Temporarily commented out as requested */}
-          {/* <Link href="/stock" className={styles.primary}>
-            <LineChart className={styles.ctaIcon} />
-            미국 주식
-          </Link> */}
           <Link href="/kis-stock" className={styles.primary}>
             <TrendingUp className={styles.ctaIcon} />
             마국 주식
@@ -62,17 +56,17 @@ export default function Home() {
             로또 추첨
           </Link>
           <Link href="/my-properties" className={styles.primary}>
-            <Building2 className={styles.ctaIcon} />내 부동산
+            <Building2 className={styles.ctaIcon} />
+            부동산
+          </Link>
+          <Link href="/inheritance" className={styles.primary}>
+            <Scale className={styles.ctaIcon} />
+            상속 케어
           </Link>
         </div>
       </main>
 
       <footer className={styles.footer}>
-        {/* [추가] AWS 비용 페이지로 가는 링크 */}
-        {/*<Link href="/aws-cost" className={styles.footerLink}>
-          <Wallet className={styles.footerIcon} />
-          운영 비용
-        </Link>*/}
         <Link href="/get-token" className={styles.footerLink}>
           <KeyRound className={styles.footerIcon} />
           토큰 발급
