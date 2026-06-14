@@ -123,7 +123,7 @@ export async function collectMarketData(): Promise<void> {
                     console.log(
                       `[PIVOT BREACH] Ticker: ${stock.ticker}, Price: ${currentPrice} >= R2: ${dailyPivot.r2}`,
                     );
-                    await telegramLongTermService.notifyPivotBreach(
+                    await telegramShortTermService.notifyPivotBreach(
                       stock.ticker,
                       currentPrice,
                       dailyPivot.r2,
@@ -134,7 +134,7 @@ export async function collectMarketData(): Promise<void> {
                     console.log(
                       `[PIVOT BREACH] Ticker: ${stock.ticker}, Price: ${currentPrice} <= S2: ${dailyPivot.s2}`,
                     );
-                    await telegramLongTermService.notifyPivotBreach(
+                    await telegramShortTermService.notifyPivotBreach(
                       stock.ticker,
                       currentPrice,
                       dailyPivot.s2,

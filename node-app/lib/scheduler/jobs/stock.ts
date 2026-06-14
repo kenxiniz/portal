@@ -73,12 +73,8 @@ export async function sendDailyStockSignals(
       `Checked ${allLatestSignals.length} KIS US stock statuses. Sending report via Telegram Long-Term Chat.`,
     );
 
-    // Notify in chunks using the long-term service's message formatting
-    await telegramService.notifyInChunks(
-      telegramService.createStockStatusMessage.bind(telegramService),
-      allLatestSignals,
-      schedulerConfig.notificationChunkSize,
-    );
+    // Send portfolio status (summary + chunked detail) via the long-term service
+    await telegramService.notifyPortfolioStatus(allLatestSignals);
   } else {
     console.log("No KIS US stocks found to notify or failed to fetch data.");
   }

@@ -100,6 +100,75 @@ export class TelegramShortTermService {
     return null;
   }
 
+  public async notifyPivotBreach(
+    ticker: string,
+    currentPrice: number,
+    pivotValue: number,
+    type: "R2_UP" | "S2_DOWN",
+    dateStr: string,
+  ): Promise<void> {
+    if (!this.botToken || this.shortTermChatIds.length === 0) return;
+
+    const dateKey = dateStr.split("T")[0].split(" ")[0];
+    const headerTitle =
+      type === "R2_UP"
+        ? "📈 [60분봉 피봇 R2 저항선 돌파]"
+        : "📉 [60분봉 피봇 S2 지지선 이탈]";
+    const description =
+      type === "R2_UP"
+        ? `현재 주가가 피봇 R2 저항선 이상으로 상승했습니다. 시장 과열 가능성에 유의하세요.`
+        : `현재 주가가 피봇 S2 지지선 이하로 하락했습니다. 지지선 붕괴에 유의하세요.`;
+
+    let message = `🚨 <b>${headerTitle}</b>\n\n`;
+    message += `<b>종목:</b> ${ticker}\n`;
+    message += `<b>기준 일자:</b> ${dateKey}\n`;
+    message += `<b>현재가:</b> $${currentPrice.toFixed(2)}\n`;
+    message += `<b>피봇 기준가:</b> $${pivotValue.toFixed(2)}\n\n`;
+    message += `<b>상세 정보:</b>\n${description}\n\n`;
+
+    const targetPath = encodeURIComponent(`kis-stock?ticker=${ticker}&tf=1h`);
+    const redirectLink = `${schedulerConfig.apiBaseUrl}/api/redirect-chrome?target=${targetPath}`;
+    message += `<a href="${redirectLink}">👉 60분봉 차트 확인하기</a>\n\n`;
+
+    const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
+
+    const sendPromises = this.shortTermChatIds.map(async (chatId) => {
+      const cacheKey = `${chatId}_${ticker}_1h_pivot_${type}`;
+      const lastSentValue = TelegramShortTermService.sentSignalCache[cacheKey];
+
+      if (lastSentValue !== dateKey) {
+        TelegramShortTermService.sentSignalCache[cacheKey] = dateKey;
+
+        try {
+          const payload: SendMessagePayload = {
+            chat_id: chatId,
+            text: message,
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+          };
+
+          await axios.post(url, payload, { httpsAgent: ipv4Agent });
+          console.log(
+            `[Pivot Alert] Successfully notified short-term ${type} for ${ticker} to chat ${chatId}`,
+          );
+        } catch (error: unknown) {
+          TelegramShortTermService.sentSignalCache[cacheKey] =
+            lastSentValue || "";
+
+          console.error(`======================================`);
+          console.error(
+            `[Pivot Alert Error] Failed to send short-term pivot to ${chatId}`,
+          );
+          console.error("RAW ERROR OBJECT:");
+          console.error(error);
+          console.error(`======================================`);
+        }
+      }
+    });
+
+    await Promise.allSettled(sendPromises);
+  }
+
   public async notifyRealtimeSignal(
     ticker: string,
     timeframe: string,
