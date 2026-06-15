@@ -78,7 +78,6 @@ export default function KisStockPage() {
 
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
-  const adviceTriggered = useRef(false);
   const previousTimeframe = useRef<Timeframe>("1d");
   const isForceRefreshingRef = useRef(false);
 
@@ -163,21 +162,8 @@ export default function KisStockPage() {
     [],
   );
 
-  useEffect(() => {
-    const triggerAdviceGeneration = async () => {
-      if (adviceTriggered.current) return;
-      adviceTriggered.current = true;
-
-      try {
-        console.log("Triggering background advice generation for US-Stock...");
-        await fetch("/api/trigger-advice", { method: "POST" });
-      } catch (error) {
-        console.error("Failed to trigger advice generation:", error);
-      }
-    };
-
-    triggerAdviceGeneration();
-  }, []);
+  // [REMOVED] Advice generation is handled exclusively by the scheduler (daily 09:00 KST).
+  // Triggering it on every page load caused unintended Gemini API calls outside schedule.
 
   const loadAllTickersSequentially = useCallback(
     async (

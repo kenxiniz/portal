@@ -60,6 +60,7 @@ async function saveToDatabase(ticker: string, advice: AdviceObject) {
 export async function POST(request: Request) {
   let body: {
     ticker?: string;
+    tickers?: string[];
     isBatch?: boolean;
     apiType: ApiType;
     refresh?: boolean;
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { ticker, isBatch, apiType, refresh } = body;
+  const { ticker, tickers, isBatch, apiType, refresh } = body;
 
   if (!apiType) {
     return NextResponse.json(
@@ -85,7 +86,10 @@ export async function POST(request: Request) {
 
   let targetTickers: string[] = [];
   if (isBatch) {
-    if (apiType === "kStock") {
+    if (tickers && tickers.length > 0) {
+      // Use explicitly provided tickers list (e.g. from scheduler with filtered subset)
+      targetTickers = tickers;
+    } else if (apiType === "kStock") {
       targetTickers = stockConfig.k_stocks.map(
         (s: { ticker: string }) => s.ticker,
       );

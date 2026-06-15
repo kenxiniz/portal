@@ -40,10 +40,8 @@ interface KisFuturesDailyItem {
 }
 
 interface KisFuturesMinuteItem {
-  stck_bsop_date: string;
-  stck_cntg_hour: string;
-  data_date?: string;
-  data_time?: string;
+  data_date: string;
+  data_time: string;
   open_price: string;
   high_price: string;
   low_price: string;
@@ -63,17 +61,27 @@ async function fetchFuturesDailyData(
   const token = await getAccessToken();
   const url = `${KIS_API_BASE_URL}/uapi/overseas-futureoption/v1/quotations/daily-ccnl`;
 
+  // API 문서 기준 (해외선물-018 / HHDFC55020100):
+  // - ITEM_CD 파라미터 없음 (SRS_CD만 사용)
+  // - QRY_TP: "Q" (최초조회), QRY_GAP: "" (일간에서는 미사용), INDEX_KEY: "" (최초조회 공백)
+  // - CLOSE_DATE_TIME: 오늘 날짜 (YYYYMMDD), START_DATE_TIME: ""
+  // - QRY_CNT: 최대 40
+  const todayStr = new Date()
+    .toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })
+    .split(".")
+    .map((s) => s.trim().padStart(2, "0"))
+    .slice(0, 3)
+    .join("");
+
   const query = new URLSearchParams({
-    EXCH_CD: "CME",
-    ITEM_CD: ticker,
     SRS_CD: ticker,
+    EXCH_CD: "CME",
     START_DATE_TIME: "",
-    CLOSE_DATE_TIME: "",
-    QRY_CNT: "119",
-    QRY_TP: "",
-    KEYB: "",
-    INDEX_KEY: "",
+    CLOSE_DATE_TIME: todayStr,
+    QRY_TP: "Q",
+    QRY_CNT: "40",
     QRY_GAP: "",
+    INDEX_KEY: "",
   }).toString();
 
   const response = await fetch(`${url}?${query}`, {
@@ -84,6 +92,7 @@ async function fetchFuturesDailyData(
       appkey: process.env.KIS_APP_KEY || "",
       appsecret: process.env.KIS_APP_SECRET || "",
       tr_id: "HHDFC55020100",
+      custtype: "P",
     },
     cache: "no-store",
   });
@@ -92,11 +101,11 @@ async function fetchFuturesDailyData(
   let data;
   try {
     data = JSON.parse(responseText);
-  } catch (err) {
-    // Fixed unused variable 'err'
-    console.error(`[Futures API Raw Error] Failed to parse JSON:`, err);
-    console.error(`[Futures API Raw Data] ${responseText.substring(0, 500)}`);
-    throw new Error(`KIS API returned non-JSON response. Check console logs.`);
+  } catch {
+    // KIS API occasionally returns malformed JSON (unquoted keys).
+    const msgMatch = responseText.match(/"msg1"\s*:\s*"([^"]+)"/);
+    const fallbackMsg = msgMatch ? msgMatch[1] : responseText.substring(0, 200);
+    throw new Error(`KIS Futures API error: ${fallbackMsg}`);
   }
 
   if (!response.ok || data.rt_cd !== "0") {
@@ -105,22 +114,19 @@ async function fetchFuturesDailyData(
     );
   }
 
+  // 일간 API: output1이 메타(ret_cnt 등), output2가 캔들 배열
   let dataList: KisFuturesDailyItem[] = [];
   if (Array.isArray(data.output2)) {
     dataList = data.output2;
-  } else if (data.output2 && typeof data.output2 === "object") {
-    dataList = [data.output2 as KisFuturesDailyItem];
   }
 
   if (dataList.length === 0) return [];
 
   return dataList
     .map((item: KisFuturesDailyItem) => {
-      const yyyy = item.data_date
-        ? item.data_date.substring(0, 4)
-        : new Date().getFullYear().toString();
-      const mm = item.data_date ? item.data_date.substring(4, 6) : "01";
-      const dd = item.data_date ? item.data_date.substring(6, 8) : "01";
+      const yyyy = item.data_date.substring(0, 4);
+      const mm = item.data_date.substring(4, 6);
+      const dd = item.data_date.substring(6, 8);
 
       return {
         date: `${yyyy}-${mm}-${dd}`,
@@ -131,6 +137,7 @@ async function fetchFuturesDailyData(
         volume: parseFloat(item.vol || "0"),
       };
     })
+    .filter((d) => !isNaN(d.close) && d.close > 0)
     .reverse();
 }
 
@@ -141,6 +148,12 @@ async function fetchFuturesMinuteData(
   const token = await getAccessToken();
   const url = `${KIS_API_BASE_URL}/uapi/overseas-futureoption/v1/quotations/inquire-time-futurechartprice`;
 
+  // API 문서 기준 (해외선물-016 / HHDFC55020400):
+  // - ITEM_CD 파라미터 없음 (SRS_CD만 사용)
+  // - QRY_TP: "Q" (최초조회), INDEX_KEY: "" (최초조회 공백)
+  // - QRY_GAP: 분 간격 (5, 15, 60 등)
+  // - CLOSE_DATE_TIME: YYYYMMDD (오늘 날짜), START_DATE_TIME: ""
+  // - 응답: output1이 캔들 배열, output2가 메타(ret_cnt, index_key 등)
   const todayStr = new Date()
     .toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })
     .split(".")
@@ -148,19 +161,17 @@ async function fetchFuturesMinuteData(
     .slice(0, 3)
     .join("");
 
-  const qryGap = timeframe === "1h" ? "60" : timeframe === "15m" ? "15" : "1";
+  const qryGap = timeframe === "1h" ? "60" : timeframe === "15m" ? "15" : "5";
 
   const query = new URLSearchParams({
-    EXCH_CD: "CME",
-    ITEM_CD: ticker,
     SRS_CD: ticker,
+    EXCH_CD: "CME",
     START_DATE_TIME: "",
     CLOSE_DATE_TIME: todayStr,
+    QRY_TP: "Q",
     QRY_CNT: "120",
-    QRY_TP: "",
-    KEYB: "",
-    INDEX_KEY: "",
     QRY_GAP: qryGap,
+    INDEX_KEY: "",
   }).toString();
 
   const response = await fetch(`${url}?${query}`, {
@@ -171,6 +182,7 @@ async function fetchFuturesMinuteData(
       appkey: process.env.KIS_APP_KEY || "",
       appsecret: process.env.KIS_APP_SECRET || "",
       tr_id: "HHDFC55020400",
+      custtype: "P",
     },
     cache: "no-store",
   });
@@ -179,11 +191,10 @@ async function fetchFuturesMinuteData(
   let data;
   try {
     data = JSON.parse(responseText);
-  } catch (err) {
-    // Fixed unused variable 'err'
-    console.error(`[Futures API Raw Error] Failed to parse JSON:`, err);
-    console.error(`[Futures API Raw Data] ${responseText.substring(0, 500)}`);
-    throw new Error(`KIS API returned non-JSON response. Check console logs.`);
+  } catch {
+    const msgMatch = responseText.match(/"msg1"\s*:\s*"([^"]+)"/);
+    const fallbackMsg = msgMatch ? msgMatch[1] : responseText.substring(0, 200);
+    throw new Error(`KIS Futures API error: ${fallbackMsg}`);
   }
 
   if (!response.ok || data.rt_cd !== "0") {
@@ -192,19 +203,18 @@ async function fetchFuturesMinuteData(
     );
   }
 
+  // 분봉 API: output1이 캔들 배열, output2가 메타(ret_cnt, index_key 등)
   let dataList: KisFuturesMinuteItem[] = [];
-  if (Array.isArray(data.output2)) {
-    dataList = data.output2;
-  } else if (data.output2 && typeof data.output2 === "object") {
-    dataList = [data.output2 as KisFuturesMinuteItem];
+  if (Array.isArray(data.output1)) {
+    dataList = data.output1;
   }
 
   if (dataList.length === 0) return [];
 
   return dataList
     .map((item: KisFuturesMinuteItem) => {
-      const dateStr = item.data_date || item.stck_bsop_date || "";
-      const timeStr = item.data_time || item.stck_cntg_hour || "000000";
+      const dateStr = item.data_date || "";
+      const timeStr = item.data_time || "000000";
 
       const yyyy = dateStr.substring(0, 4);
       const mm = dateStr.substring(4, 6);
@@ -213,12 +223,8 @@ async function fetchFuturesMinuteData(
       const min = timeStr.substring(2, 4);
       const ss = timeStr.substring(4, 6);
 
-      const isoString = new Date(
-        `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}Z`,
-      ).toISOString();
-
       return {
-        date: isoString,
+        date: `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`,
         open: parseFloat(item.open_price),
         high: parseFloat(item.high_price),
         low: parseFloat(item.low_price),
@@ -226,6 +232,7 @@ async function fetchFuturesMinuteData(
         volume: parseFloat(item.vol || "0"),
       };
     })
+    .filter((d) => !isNaN(d.close) && d.close > 0)
     .reverse();
 }
 

@@ -31,24 +31,29 @@ const CandleSchema = new mongoose.Schema(
 // Compound index to prevent duplicate candles and speed up queries
 CandleSchema.index({ ticker: 1, timeframe: 1, timestamp: 1 }, { unique: true });
 
-// --- Separate Models for US and KR ---
-// Mongoose will create 'us_candles' and 'kr_candles' collections respectively
+// --- Separate Models for US, KR, and FUTURES ---
+// Mongoose will create 'us_candles', 'kr_candles', and 'futures_candles' collections respectively
 const UsCandle =
   mongoose.models.UsCandle ||
   mongoose.model("UsCandle", CandleSchema, "us_candles");
 const KrCandle =
   mongoose.models.KrCandle ||
   mongoose.model("KrCandle", CandleSchema, "kr_candles");
+const FuturesCandle =
+  mongoose.models.FuturesCandle ||
+  mongoose.model("FuturesCandle", CandleSchema, "futures_candles");
 
 // Helper to get the correct model based on region
-const getModel = (region: "US" | "KR") => {
-  return region === "US" ? UsCandle : KrCandle;
+const getModel = (region: "US" | "KR" | "FUTURES") => {
+  if (region === "US") return UsCandle;
+  if (region === "FUTURES") return FuturesCandle;
+  return KrCandle;
 };
 
 // --- Services ---
 
 export const getCandles = async (
-  region: "US" | "KR",
+  region: "US" | "KR" | "FUTURES",
   ticker: string,
   timeframe: string,
   limit: number = 500,
@@ -67,7 +72,7 @@ export const getCandles = async (
 
 // Keep existing single save function for backward compatibility if needed elsewhere
 export const saveCandle = async (
-  region: "US" | "KR",
+  region: "US" | "KR" | "FUTURES",
   ticker: string,
   timeframe: string,
   candleData: CandleInput,
@@ -93,7 +98,7 @@ export const saveCandle = async (
 
 // Bulk insert to resolve performance bottleneck (N+1 query issue)
 export const saveCandlesBulk = async (
-  region: "US" | "KR",
+  region: "US" | "KR" | "FUTURES",
   ticker: string,
   timeframe: string,
   candles: CandleInput[],
