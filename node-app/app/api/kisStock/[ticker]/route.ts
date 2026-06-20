@@ -71,7 +71,7 @@ export async function GET(request: Request) {
         return NextResponse.json(cachedPayload);
       }
 
-      // Step 2: Cache Miss Fallback - Query DB only, do not touch external APIs or write logs
+      // Step 2: Cache Miss Fallback - Query DB first; if empty, bootstrap via REST API
       console.log(
         `[WARN] [${ticker}] Shared Memory Cache MISS for ${timeframe}. Executing Read-Only DB fallback.`,
       );
@@ -87,6 +87,86 @@ export async function GET(request: Request) {
                     .toISOString()
                     .replace("Z", "")
                     .replace("T", " "),
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+          }))
+          .sort(
+            (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+          );
+
+        const processedData = calculateBollingerBands(calculateRSI(mappedData));
+
+        const usStock = (stockConfig.us_stocks as StockConfigItem[]).find(
+          (s) => s.ticker === ticker,
+        );
+        const kStock = (stockConfig.k_stocks as StockConfigItem[]).find(
+          (s) => s.ticker === ticker,
+        );
+        const isInverse = !!(usStock?.isInverse || kStock?.isInverse);
+
+        const signals = analyzeAllTradingSignals(
+          processedData,
+          timeframe as "1d" | "1h" | "15m",
+          isInverse,
+        );
+
+        const responsePayload: CachePayload = {
+          data: processedData,
+          signals,
+          advice: latestAdvice as AdviceObject | null,
+        };
+
+        return NextResponse.json(responsePayload);
+      }
+
+      // Step 3: DB is empty for this ticker — bootstrap via REST API and persist to DB
+      console.log(
+        `[INFO] [${ticker}] No DB data found for ${timeframe}. Bootstrapping from KIS REST API.`,
+      );
+
+      let stopTimestamp = 0;
+      const nowMs = Date.now();
+      if (timeframe === "1d") {
+        stopTimestamp = nowMs - 730 * 24 * 60 * 60 * 1000;
+      } else if (timeframe === "1h") {
+        stopTimestamp = nowMs - 60 * 24 * 60 * 60 * 1000;
+      } else {
+        stopTimestamp = nowMs - 15 * 24 * 60 * 60 * 1000;
+      }
+
+      let bootstrapApiData: StockDataPoint[] = [];
+      if (timeframe === "1d") {
+        bootstrapApiData = await getDailyStockData(ticker, stopTimestamp);
+      } else {
+        const gap = timeframe === "1h" ? 60 : 15;
+        bootstrapApiData = await getMinuteStockData(
+          ticker,
+          gap,
+          10,
+          stopTimestamp,
+        );
+      }
+
+      if (bootstrapApiData && bootstrapApiData.length > 0) {
+        const formattedCandles = bootstrapApiData.map((candle) => ({
+          timestamp: candle.date,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+        }));
+        await saveCandlesBulk("US", ticker, timeframe, formattedCandles);
+        console.log(
+          `[INFO] [${ticker}] Saved ${bootstrapApiData.length} candles to DB for ${timeframe}.`,
+        );
+
+        const mappedData = bootstrapApiData
+          .map((c) => ({
+            date: c.date,
             open: c.open,
             high: c.high,
             low: c.low,

@@ -1,6 +1,10 @@
 {
   "us_stocks": [
     {
+      "ticker": "SPCX",
+      "exchange": "NAS"
+    },
+    {
       "ticker": "ARM",
       "exchange": "NAS"
     },
