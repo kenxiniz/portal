@@ -7,6 +7,7 @@ const protectedRoutes = [
   "/stock",
   "/kis-stock",
   "/k-stock",
+  "/binance",
   "/api/friends",
   "/lotto",
 ];

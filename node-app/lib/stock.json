@@ -158,5 +158,47 @@
       "ticker": "305720",
       "name": "KODEX 2차전지산업"
     }
+  ],
+  "binance_futures": [
+    {
+      "symbol": "SOXLUSDT",
+      "name": "SOXL"
+    },
+    {
+      "symbol": "SPCXUSDT",
+      "name": "SPCX"
+    },
+    {
+      "symbol": "KORUUSDT",
+      "name": "KORU"
+    },
+    {
+      "symbol": "NVDAUSDT",
+      "name": "NVIDIA"
+    },
+    {
+      "symbol": "TSLAUSDT",
+      "name": "Tesla"
+    },
+    {
+      "symbol": "ARMUSDT",
+      "name": "ARM Holdings"
+    },
+    {
+      "symbol": "GOOGLUSDT",
+      "name": "Google"
+    },
+    {
+      "symbol": "XAGUSDT",
+      "name": "Silver"
+    },
+    {
+      "symbol": "CLUSDT",
+      "name": "Crude Oil"
+    },
+    {
+      "symbol": "EWYUSDT",
+      "name": "EWY (Korea ETF)"
+    }
   ]
 }

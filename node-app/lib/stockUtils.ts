@@ -544,11 +544,11 @@ export const analyzeAllTradingSignals = (
               ((tempExitPrice - lastBuySignal.entryPrice) /
                 lastBuySignal.entryPrice) *
               100;
-            // Trigger exit only if the current loss is 5% or more
-            if (tempProfitRate <= -5.0) {
+            // Trigger exit only if the current loss exceeds stop-loss threshold
+            if (tempProfitRate <= TRADING_CONFIG.stopLossPercent) {
               triggeredExit = true;
               exitPrice = tempExitPrice;
-              reasonBase = "BB 하단 이탈 & 5% 이상 손실";
+              reasonBase = `BB 하단 이탈 & ${Math.abs(TRADING_CONFIG.stopLossPercent)}% 이상 손실`;
               details = `BB Lower: ${currentPoint.bollingerBands.lower.toFixed(2)}`;
             }
           }
@@ -629,11 +629,11 @@ export const analyzeAllTradingSignals = (
               ((lastInverseBuySignal.entryPrice - tempExitPrice) /
                 lastInverseBuySignal.entryPrice) *
               100;
-            // Trigger exit only if the current loss is 5% or more
-            if (tempProfitRate <= -5.0) {
+            // Trigger exit only if the current loss exceeds stop-loss threshold
+            if (tempProfitRate <= TRADING_CONFIG.stopLossPercent) {
               triggeredExit = true;
               exitPrice = tempExitPrice;
-              reasonBase = "BB 상단 돌파 & 5% 이상 손실";
+              reasonBase = `BB 상단 돌파 & ${Math.abs(TRADING_CONFIG.stopLossPercent)}% 이상 손실`;
               details = `BB Upper: ${currentPoint.bollingerBands.upper.toFixed(2)}`;
             }
           }

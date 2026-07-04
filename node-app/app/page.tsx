@@ -11,6 +11,7 @@ import {
   BarChart3,
   Ticket,
   Scale,
+  Bitcoin,
 } from "lucide-react";
 
 export const metadata = {
@@ -50,6 +51,10 @@ export default function Home() {
           <Link href="/k-stock" className={styles.primary}>
             <BarChart3 className={styles.ctaIcon} />
             한국 ETF
+          </Link>
+          <Link href="/binance" className={styles.primary}>
+            <Bitcoin className={styles.ctaIcon} />
+            바이낸스 선물
           </Link>
           <Link href="/lotto" className={styles.primary}>
             <Ticket className={styles.ctaIcon} />

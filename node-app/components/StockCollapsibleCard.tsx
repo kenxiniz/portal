@@ -46,12 +46,12 @@ interface StockConfigItem {
 interface StockCollapsibleCardProps {
   displayName: string;
   tickerSymbol: string;
-  apiType: "kisStock" | "kStock" | "stock";
+  apiType: "kisStock" | "kStock" | "stock" | "binance";
   tickerState: TickerState;
   gridStrokeColor: string;
   isOpen: boolean;
   onOpenChange: () => void;
-  currency?: "USD" | "KRW";
+  currency?: "USD" | "KRW" | "USDT";
   timeframe?: "1d" | "1h" | "15m";
 }
 
