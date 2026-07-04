@@ -166,13 +166,10 @@ export default function BinancePage() {
           await new Promise((resolve) => setTimeout(resolve, 300));
           await fetchSymbolData(symbol, timeframeToLoad, forceRefresh);
         }
-
-        setLastSyncTime(new Date());
       }
     },
     [fetchSymbolData, openedTicker],
   );
-
 
   // WebSocket 실시간 데이터 업데이트
   const handleWebSocketUpdate = useCallback(
@@ -209,7 +206,9 @@ export default function BinancePage() {
         console.log(
           `[WebSocket] Last candle date: "${lastCandle?.date}", New data date: "${formattedDate}"`,
         );
-        console.log(`[WebSocket] Date match: ${lastCandle?.date === formattedDate}`);
+        console.log(
+          `[WebSocket] Date match: ${lastCandle?.date === formattedDate}`,
+        );
         console.log(`[WebSocket] Timeframe: ${selectedTimeframe}`);
 
         // 마지막 캔들 업데이트 또는 새 캔들 추가
@@ -235,7 +234,9 @@ export default function BinancePage() {
         }
 
         // RSI와 볼린저 밴드 재계산
-        const dataWithIndicators = calculateBollingerBands(calculateRSI(updatedData));
+        const dataWithIndicators = calculateBollingerBands(
+          calculateRSI(updatedData),
+        );
 
         console.log(
           `[WebSocket] Chart updated for ${symbol}, total candles: ${dataWithIndicators.length}`,
@@ -257,7 +258,6 @@ export default function BinancePage() {
   const connectWebSocket = useCallback(
     (symbol: string) => {
       console.log(`[WebSocket] connectWebSocket called for ${symbol}`);
-      console.log(`[WebSocket] isRealTimeEnabled: ${isRealTimeEnabled}`);
       console.log(
         `[WebSocket] Already has connection: ${wsClientsRef.current.has(symbol)}`,
       );
@@ -378,8 +378,8 @@ export default function BinancePage() {
       );
       prevTimeframeRef.current = selectedTimeframe;
 
-      // 열려있는 차트가 있고 실시간이 활성화되어 있으면 재연결
-      if (openedTicker && isRealTimeEnabled) {
+      // 열려있는 차트가 있으면 재연결 (바이낸스는 항상 실시간)
+      if (openedTicker) {
         const currentSymbol = openedTicker;
         console.log(
           `[WebSocket] Reconnecting ${currentSymbol} with new timeframe...`,
@@ -410,8 +410,8 @@ export default function BinancePage() {
   }, [selectedTimeframe, openedTicker, handleWebSocketUpdate]);
 
   return (
-    <div className="flex flex-col items-center p-2 sm:p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
-      <div className="flex flex-col md:flex-row justify-between items-center w-full md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mb-6 md:mb-8 gap-4 overflow-hidden">
+    <div className="flex flex-col items-center bg-slate-100 dark:bg-slate-950 min-h-screen">
+      <div className="flex flex-col md:flex-row justify-between items-center w-full px-4 md:px-8 py-6 md:py-8 mb-6 md:mb-8 gap-4 overflow-hidden">
         <div className="flex flex-col md:flex-row items-center gap-4">
           <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0 whitespace-nowrap">
             바이낸스 선물
@@ -454,7 +454,7 @@ export default function BinancePage() {
         </div>
       </div>
 
-      <div className="w-full grid grid-cols-1 gap-4 md:gap-6 md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px]">
+      <div className="w-full grid grid-cols-1 gap-4 md:gap-6 px-4 md:px-8">
         {symbols.map((symbol) => {
           const state = tickerStates[symbol];
           if (!state) return null;
