@@ -14,7 +14,35 @@ import {
 import { TickerAdvice } from "../../../../lib/models/advice";
 import stockConfig from "../../../../lib/stock.json";
 import { getCacheData, setCacheData } from "../../../../lib/cache";
-import { getAccessToken } from "../../../../lib/kisApi";
+import { getFuturesAccessToken } from "../../../../lib/kisApi";
+
+interface FuturesConfigItem {
+  ticker: string;
+  name?: string;
+  exchange: string;
+}
+
+/**
+ * Derive the product code (품목코드) from a full futures ticker symbol.
+ * e.g. "NQU26" → "NQ", "ESZ25" → "ES", "GCQ25" → "GC"
+ * The product code is the leading alphabetic characters before the month/year suffix.
+ */
+function getProductCode(ticker: string): string {
+  const match = ticker.match(/^([A-Z]+)/);
+  return match ? match[1] : ticker;
+}
+
+/**
+ * Look up the exchange code for the given full ticker symbol from stock.json.
+ * Falls back to "CME" if not configured.
+ */
+function getExchangeCode(ticker: string): string {
+  const productCode = getProductCode(ticker);
+  const config = (stockConfig.futures as FuturesConfigItem[]).find(
+    (f) => f.ticker === productCode,
+  );
+  return config?.exchange ?? "CME";
+}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,7 +86,7 @@ const KIS_API_BASE_URL =
 async function fetchFuturesDailyData(
   ticker: string,
 ): Promise<StockDataPoint[]> {
-  const token = await getAccessToken();
+  const token = await getFuturesAccessToken();
   const url = `${KIS_API_BASE_URL}/uapi/overseas-futureoption/v1/quotations/daily-ccnl`;
 
   // API 문서 기준 (해외선물-018 / HHDFC55020100):
@@ -73,9 +101,12 @@ async function fetchFuturesDailyData(
     .slice(0, 3)
     .join("");
 
+  const exchCd = getExchangeCode(ticker);
+  console.log(`[INFO] [${ticker}] Daily fetch — EXCH_CD: ${exchCd}`);
+
   const query = new URLSearchParams({
     SRS_CD: ticker,
-    EXCH_CD: "CME",
+    EXCH_CD: exchCd,
     START_DATE_TIME: "",
     CLOSE_DATE_TIME: todayStr,
     QRY_TP: "Q",
@@ -89,8 +120,8 @@ async function fetchFuturesDailyData(
     headers: {
       "content-type": "application/json; charset=utf-8",
       authorization: `Bearer ${token}`,
-      appkey: process.env.KIS_APP_KEY || "",
-      appsecret: process.env.KIS_APP_SECRET || "",
+      appkey: process.env.KIS_FUTURES_KEY || "",
+      appsecret: process.env.KIS_FUTURES_SECRET || "",
       tr_id: "HHDFC55020100",
       custtype: "P",
     },
@@ -109,8 +140,9 @@ async function fetchFuturesDailyData(
   }
 
   if (!response.ok || data.rt_cd !== "0") {
+    const exchCd = getExchangeCode(ticker);
     throw new Error(
-      data.msg1 || `Failed to fetch daily futures data: ${responseText}`,
+      `KIS Futures API error [EXCH_CD:${exchCd}]: ${data.msg1 || responseText}`,
     );
   }
 
@@ -145,7 +177,7 @@ async function fetchFuturesMinuteData(
   ticker: string,
   timeframe: string,
 ): Promise<StockDataPoint[]> {
-  const token = await getAccessToken();
+  const token = await getFuturesAccessToken();
   const url = `${KIS_API_BASE_URL}/uapi/overseas-futureoption/v1/quotations/inquire-time-futurechartprice`;
 
   // API 문서 기준 (해외선물-016 / HHDFC55020400):
@@ -163,9 +195,14 @@ async function fetchFuturesMinuteData(
 
   const qryGap = timeframe === "1h" ? "60" : timeframe === "15m" ? "15" : "5";
 
+  const exchCd = getExchangeCode(ticker);
+  console.log(
+    `[INFO] [${ticker}] Minute fetch — EXCH_CD: ${exchCd}, QRY_GAP: ${qryGap}`,
+  );
+
   const query = new URLSearchParams({
     SRS_CD: ticker,
-    EXCH_CD: "CME",
+    EXCH_CD: exchCd,
     START_DATE_TIME: "",
     CLOSE_DATE_TIME: todayStr,
     QRY_TP: "Q",
@@ -179,8 +216,8 @@ async function fetchFuturesMinuteData(
     headers: {
       "content-type": "application/json; charset=utf-8",
       authorization: `Bearer ${token}`,
-      appkey: process.env.KIS_APP_KEY || "",
-      appsecret: process.env.KIS_APP_SECRET || "",
+      appkey: process.env.KIS_FUTURES_KEY || "",
+      appsecret: process.env.KIS_FUTURES_SECRET || "",
       tr_id: "HHDFC55020400",
       custtype: "P",
     },
@@ -198,8 +235,9 @@ async function fetchFuturesMinuteData(
   }
 
   if (!response.ok || data.rt_cd !== "0") {
+    const exchCd = getExchangeCode(ticker);
     throw new Error(
-      data.msg1 || `Failed to fetch minute futures data: ${responseText}`,
+      `KIS Futures API error [EXCH_CD:${exchCd}]: ${data.msg1 || responseText}`,
     );
   }
 

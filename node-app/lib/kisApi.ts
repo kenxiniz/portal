@@ -6,12 +6,18 @@ import stockConfig from "./stock.json";
 const KIS_API_URL = "https://openapi.koreainvestment.com:9443";
 const KIS_APP_KEY = process.env.KIS_APP_KEY;
 const KIS_APP_SECRET = process.env.KIS_APP_SECRET;
+const KIS_FUTURES_KEY = process.env.KIS_FUTURES_KEY;
+const KIS_FUTURES_SECRET = process.env.KIS_FUTURES_SECRET;
 
 // 미국 주식과 한국 주식이 완벽하게 토큰을 공유하기 위한 Global Cache
 const globalKisToken = global as typeof globalThis & {
   kisAccessToken?: string | null;
   kisTokenExpiresAt?: number | null;
   kisTokenPromise?: Promise<string> | null;
+  // 해외선물 전용 토큰 캐시
+  kisFuturesAccessToken?: string | null;
+  kisFuturesTokenExpiresAt?: number | null;
+  kisFuturesTokenPromise?: Promise<string> | null;
 };
 
 // Interfaces
@@ -117,6 +123,61 @@ export async function getAccessToken(): Promise<string> {
   })();
 
   return globalKisToken.kisTokenPromise;
+}
+
+export async function getFuturesAccessToken(): Promise<string> {
+  const now = Date.now();
+
+  // 1. 유효한 선물 전용 토큰이 캐시에 있으면 즉시 반환
+  if (
+    globalKisToken.kisFuturesAccessToken &&
+    globalKisToken.kisFuturesTokenExpiresAt &&
+    now < globalKisToken.kisFuturesTokenExpiresAt
+  ) {
+    return globalKisToken.kisFuturesAccessToken;
+  }
+
+  // 2. 이미 발급 중이면 해당 Promise 대기
+  if (globalKisToken.kisFuturesTokenPromise) {
+    console.log("[INFO] Waiting for shared KIS Futures token promise...");
+    return globalKisToken.kisFuturesTokenPromise;
+  }
+
+  if (!KIS_FUTURES_KEY || !KIS_FUTURES_SECRET) {
+    throw new Error(
+      "KIS_FUTURES_KEY and KIS_FUTURES_SECRET must be set for futures API",
+    );
+  }
+
+  // 3. 선물 전용 토큰 발급 시작
+  globalKisToken.kisFuturesTokenPromise = (async () => {
+    try {
+      const response = await fetchWithRetry(`${KIS_API_URL}/oauth2/tokenP`, {
+        method: "POST",
+        data: {
+          grant_type: "client_credentials",
+          appkey: KIS_FUTURES_KEY,
+          appsecret: KIS_FUTURES_SECRET,
+        },
+      });
+
+      globalKisToken.kisFuturesAccessToken = response.data.access_token;
+      globalKisToken.kisFuturesTokenExpiresAt =
+        Date.now() + (response.data.expires_in - 60) * 1000;
+
+      console.log(
+        "[INFO] Shared KIS Futures Access Token has been issued successfully.",
+      );
+      return globalKisToken.kisFuturesAccessToken!;
+    } catch (error) {
+      console.error("[ERROR] Failed to get KIS Futures access token:", error);
+      throw new Error("Failed to get KIS Futures access token");
+    } finally {
+      globalKisToken.kisFuturesTokenPromise = null;
+    }
+  })();
+
+  return globalKisToken.kisFuturesTokenPromise;
 }
 
 async function getDailyOverseasStockData(

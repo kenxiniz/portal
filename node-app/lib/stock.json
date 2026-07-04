@@ -82,6 +82,28 @@
       "exchange": "AMS"
     }
   ],
+  "futures": [
+    {
+      "ticker": "NQ",
+      "name": "E-mini NASDAQ 100",
+      "exchange": "CME"
+    },
+    {
+      "ticker": "ES",
+      "name": "E-mini S&P 500",
+      "exchange": "CME"
+    },
+    {
+      "ticker": "GC",
+      "name": "Gold Futures",
+      "exchange": "CME"
+    },
+    {
+      "ticker": "CL",
+      "name": "Crude Oil Futures",
+      "exchange": "CME"
+    }
+  ],
   "k_stocks": [
     {
       "ticker": "Q530105",
