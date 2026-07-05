@@ -53,6 +53,7 @@ export const MacdChart: React.FC<MacdChartProps> = ({
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: gridStrokeColor,
@@ -93,12 +94,7 @@ export const MacdChart: React.FC<MacdChartProps> = ({
     seriesRef.current = { line, signal, hist, dummy };
     onReady(chart);
 
-    const handleResize = () =>
-      chart.applyOptions({ width: containerRef.current?.clientWidth || 0 });
-    window.addEventListener("resize", handleResize);
-
     return () => {
-      window.removeEventListener("resize", handleResize);
       chart.remove();
     };
     // Intentionally omitting 'height' to prevent chart destruction on resize
@@ -144,7 +140,7 @@ export const MacdChart: React.FC<MacdChartProps> = ({
   }, [data, macdData, macdStatus]);
 
   return (
-    <div className="relative w-full">
+    <div className="relative w-full h-full">
       {macdStatus && (
         <div
           className="absolute top-2 left-2 z-10 px-2 py-0.5 text-xs font-semibold rounded text-white shadow-sm pointer-events-none"
@@ -153,7 +149,10 @@ export const MacdChart: React.FC<MacdChartProps> = ({
           적응형 모멘텀 {macdStatus.title}
         </div>
       )}
-      <div ref={containerRef} style={{ width: "100%" }} />
+      <div
+        ref={containerRef}
+        style={{ width: "100%", height: "100%", minWidth: 0 }}
+      />
     </div>
   );
 };

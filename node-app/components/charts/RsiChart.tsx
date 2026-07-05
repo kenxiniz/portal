@@ -37,6 +37,7 @@ export const RsiChart: React.FC<RsiChartProps> = ({
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: gridStrokeColor,
@@ -81,12 +82,7 @@ export const RsiChart: React.FC<RsiChartProps> = ({
     seriesRef.current = { rsi: rsiLineSeries, dummy: dummySeries };
     onReady(chart);
 
-    const handleResize = () =>
-      chart.applyOptions({ width: containerRef.current?.clientWidth || 0 });
-    window.addEventListener("resize", handleResize);
-
     return () => {
-      window.removeEventListener("resize", handleResize);
       chart.remove();
     };
     // Intentionally omitting 'height' to prevent chart destruction on resize
@@ -136,7 +132,7 @@ export const RsiChart: React.FC<RsiChartProps> = ({
 
   // 💡 기존 로직은 100% 유지하고 화면 좌상단에 RSI UI 태그만 추가했습니다.
   return (
-    <div className="relative w-full">
+    <div className="relative w-full h-full">
       {rsiStatus && (
         <div className="absolute top-2 left-2 z-10 flex gap-1 pointer-events-none">
           <div
@@ -147,7 +143,10 @@ export const RsiChart: React.FC<RsiChartProps> = ({
           </div>
         </div>
       )}
-      <div ref={containerRef} style={{ width: "100%" }} />
+      <div
+        ref={containerRef}
+        style={{ width: "100%", height: "100%", minWidth: 0 }}
+      />
     </div>
   );
 };

@@ -33,6 +33,30 @@ export const PivotChart: React.FC<PivotChartProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const isFirstLoadRef = useRef(true);
+  const previousFirstDateRef = useRef<string | null>(null);
+
+  // timeframe 변경 시 firstLoad 플래그 리셋
+  useEffect(() => {
+    isFirstLoadRef.current = true;
+  }, [timeframe]);
+
+  // 종목 변경 감지 (첫 데이터 날짜 변경)
+  useEffect(() => {
+    if (data.length === 0) return;
+
+    const firstDate = data[0].date;
+    if (
+      previousFirstDateRef.current !== null &&
+      previousFirstDateRef.current !== firstDate
+    ) {
+      // 종목 변경 시 firstLoad 리셋 → range preservation skip → Y축 자동 맞춤
+      isFirstLoadRef.current = true;
+      console.log("[PivotChart] Symbol changed detected");
+    }
+
+    previousFirstDateRef.current = firstDate;
+  }, [data]);
 
   const seriesRef = useRef<{
     candle: ISeriesApi<"Candlestick"> | null;
@@ -54,6 +78,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: gridStrokeColor,
@@ -93,12 +118,12 @@ export const PivotChart: React.FC<PivotChartProps> = ({
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#E53935",
-      downColor: "#1E88E5",
-      borderUpColor: "black",
-      borderDownColor: "black",
-      wickUpColor: "#E53935",
-      wickDownColor: "#1E88E5",
+      upColor: "#66BB6A",
+      downColor: "#000000",
+      borderUpColor: "#66BB6A",
+      borderDownColor: "#000000",
+      wickUpColor: "#66BB6A",
+      wickDownColor: "#000000",
     });
 
     // P (Pivot Point)
@@ -163,12 +188,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
     };
     onReady(chart);
 
-    const handleResize = () =>
-      chart.applyOptions({ width: containerRef.current?.clientWidth || 0 });
-    window.addEventListener("resize", handleResize);
-
     return () => {
-      window.removeEventListener("resize", handleResize);
       chart.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -181,7 +201,13 @@ export const PivotChart: React.FC<PivotChartProps> = ({
   }, [height]);
 
   useEffect(() => {
-    if (!data.length || !seriesRef.current.candle) return;
+    if (!data.length || !seriesRef.current.candle || !chartRef.current) return;
+
+    // 현재 visible range 저장
+    let savedRange = null;
+    if (!isFirstLoadRef.current) {
+      savedRange = chartRef.current.timeScale().getVisibleLogicalRange();
+    }
 
     const candleData: CandlestickData[] = data.map((d) => ({
       time: d.time,
@@ -191,7 +217,19 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       close: d.close,
       color: d.color,
     }));
+
     seriesRef.current.candle.setData(candleData);
+
+    // Visible range 복원
+    if (savedRange && !isFirstLoadRef.current) {
+      try {
+        chartRef.current.timeScale().setVisibleLogicalRange(savedRange);
+      } catch {
+        // Range 복원 실패 무시
+      }
+    }
+
+    isFirstLoadRef.current = false;
 
     // 💡 수정됨: date 필드를 반드시 포함하여 넘겨주고, 줄바꿈(\n)을 다시 공백으로 복원합니다.
     const pivotInputs = data.map((d) => ({
@@ -228,5 +266,10 @@ export const PivotChart: React.FC<PivotChartProps> = ({
     seriesRef.current.s3?.setData(s3Data);
   }, [data, timeframe]);
 
-  return <div ref={containerRef} style={{ width: "100%" }} />;
+  return (
+    <div
+      ref={containerRef}
+      style={{ width: "100%", height: "100%", minWidth: 0 }}
+    />
+  );
 };

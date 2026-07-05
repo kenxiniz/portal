@@ -46,7 +46,7 @@ export default function Home() {
         <div className={styles.ctas}>
           <Link href="/kis-stock" className={styles.primary}>
             <TrendingUp className={styles.ctaIcon} />
-            마국 주식
+            미국 주식
           </Link>
           <Link href="/k-stock" className={styles.primary}>
             <BarChart3 className={styles.ctaIcon} />

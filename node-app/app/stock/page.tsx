@@ -12,7 +12,7 @@ import {
   AdviceObject,
 } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
-import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
+import { StockLayout } from "@/components/StockLayout";
 
 const tickers = stockConfig.us_stocks.map((t) => t.ticker);
 
@@ -33,7 +33,7 @@ export default function StockPage() {
     },
   );
 
-  const [openedTicker, setOpenedTicker] = useState<string | null>(null);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(tickers[0]);
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
 
@@ -97,7 +97,7 @@ export default function StockPage() {
     const loadAllTickersSequentially = async () => {
       if (tickers.length > 0) {
         const firstTicker = tickers[0];
-        setOpenedTicker(firstTicker);
+        setSelectedSymbol(firstTicker);
         await fetchStockData(firstTicker);
 
         for (let i = 1; i < tickers.length; i++) {
@@ -114,35 +114,28 @@ export default function StockPage() {
     }
   }, [fetchStockData]);
 
-  const handleOpenChange = (ticker: string) => {
-    const newOpenedTicker = openedTicker === ticker ? null : ticker;
-    setOpenedTicker(newOpenedTicker);
+  // 종목 선택 핸들러
+  const handleSelectSymbol = (ticker: string) => {
+    console.log(`[UI] User selected symbol: ${ticker}`);
+    setSelectedSymbol(ticker);
   };
 
+  // 레이아웃에 전달할 종목 목록 생성
+  const symbolItems = tickers.map((ticker) => ({
+    id: ticker,
+    name: ticker,
+  }));
+
   return (
-    <div className="flex flex-col items-center p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
-      <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-100 mb-8">
-        미국 주식 (Alpha Vantage)
-      </h1>
-      <div className="w-full grid grid-cols-1 gap-6">
-        {tickers.map((ticker) => {
-          const state = tickerStates[ticker];
-          if (!state) return null;
-          return (
-            <StockCollapsibleCard
-              key={ticker}
-              tickerSymbol={ticker}
-              displayName={ticker}
-              apiType="stock"
-              tickerState={state}
-              gridStrokeColor={gridStrokeColor}
-              isOpen={openedTicker === ticker}
-              onOpenChange={() => handleOpenChange(ticker)}
-              currency="USD"
-            />
-          );
-        })}
-      </div>
-    </div>
+    <StockLayout
+      title="미국 주식 (Alpha Vantage)"
+      apiType="stock"
+      symbols={symbolItems}
+      selectedSymbol={selectedSymbol}
+      tickerStates={tickerStates}
+      onSelectSymbol={handleSelectSymbol}
+      gridStrokeColor={gridStrokeColor}
+      currency="USD"
+    />
   );
 }

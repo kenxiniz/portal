@@ -63,11 +63,36 @@ export const MainChart: React.FC<MainChartProps> = ({
 
   const priceLinesRef = useRef<IPriceLine[]>([]); // 💡 다시 추가됨
   const boxPrimitiveRef = useRef<GaussianBoxPrimitive | null>(null);
+  const isFirstLoadRef = useRef(true);
+  const previousFirstDateRef = useRef<string | null>(null);
+
+  // timeframe 변경 시 firstLoad 플래그 리셋
+  useEffect(() => {
+    isFirstLoadRef.current = true;
+  }, [timeframe]);
+
+  // 종목 변경 감지 (첫 데이터 날짜 변경)
+  useEffect(() => {
+    if (data.length === 0) return;
+
+    const firstDate = data[0].date;
+    if (
+      previousFirstDateRef.current !== null &&
+      previousFirstDateRef.current !== firstDate
+    ) {
+      // 종목 변경 시 firstLoad 리셋 → range preservation skip → Y축 자동 맞춤
+      isFirstLoadRef.current = true;
+      console.log("[MainChart] Symbol changed detected");
+    }
+
+    previousFirstDateRef.current = firstDate;
+  }, [data]);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: gridStrokeColor,
@@ -107,12 +132,12 @@ export const MainChart: React.FC<MainChartProps> = ({
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#E53935",
-      downColor: "#1E88E5",
-      borderUpColor: "black",
-      borderDownColor: "black",
-      wickUpColor: "#E53935",
-      wickDownColor: "#1E88E5",
+      upColor: "#66BB6A",
+      downColor: "#000000",
+      borderUpColor: "#66BB6A",
+      borderDownColor: "#000000",
+      wickUpColor: "#66BB6A",
+      wickDownColor: "#000000",
     });
 
     const boxPrimitive = new GaussianBoxPrimitive([]);
@@ -165,12 +190,7 @@ export const MainChart: React.FC<MainChartProps> = ({
     };
     onReady(chart);
 
-    const handleResize = () =>
-      chart.applyOptions({ width: containerRef.current?.clientWidth || 0 });
-    window.addEventListener("resize", handleResize);
-
     return () => {
-      window.removeEventListener("resize", handleResize);
       chart.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,7 +203,13 @@ export const MainChart: React.FC<MainChartProps> = ({
   }, [height]);
 
   useEffect(() => {
-    if (!data.length || !seriesRef.current.candle) return;
+    if (!data.length || !seriesRef.current.candle || !chartRef.current) return;
+
+    // 현재 visible range 저장 (첫 로드 아닐 때만)
+    let savedRange = null;
+    if (!isFirstLoadRef.current) {
+      savedRange = chartRef.current.timeScale().getVisibleLogicalRange();
+    }
 
     const candleData: CandlestickData[] = data.map((d) => ({
       time: d.time,
@@ -196,6 +222,17 @@ export const MainChart: React.FC<MainChartProps> = ({
 
     seriesRef.current.candle.setData(candleData);
 
+    // Visible range 복원 (첫 로드 아닐 때만)
+    if (savedRange && !isFirstLoadRef.current) {
+      try {
+        chartRef.current.timeScale().setVisibleLogicalRange(savedRange);
+      } catch {
+        // Range 복원 실패 무시
+      }
+    }
+
+    isFirstLoadRef.current = false;
+
     const boxes = calculateGaussianTrendBoxes(data, 20, 3);
     if (boxPrimitiveRef.current) {
       boxPrimitiveRef.current.setData(boxes);
@@ -207,8 +244,6 @@ export const MainChart: React.FC<MainChartProps> = ({
     const dnData = data
       .filter((d) => d.lower !== undefined)
       .map((d) => ({ time: d.time, value: d.lower! }));
-    seriesRef.current.upper?.setData(upData);
-    seriesRef.current.lower?.setData(dnData);
 
     const extData = data as ExtendedChartData[];
 
@@ -226,6 +261,8 @@ export const MainChart: React.FC<MainChartProps> = ({
       )
       .map((d) => ({ time: d.time, value: d.ema20! }));
 
+    seriesRef.current.upper?.setData(upData);
+    seriesRef.current.lower?.setData(dnData);
     seriesRef.current.vwap?.setData(vwapData);
     seriesRef.current.ema9?.setData(ema9Data);
     seriesRef.current.ema20?.setData(ema20Data);
@@ -255,5 +292,10 @@ export const MainChart: React.FC<MainChartProps> = ({
     });
   }, [data, probLevels, timeframe]);
 
-  return <div ref={containerRef} style={{ width: "100%" }} />;
+  return (
+    <div
+      ref={containerRef}
+      style={{ width: "100%", height: "100%", minWidth: 0 }}
+    />
+  );
 };

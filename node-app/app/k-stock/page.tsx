@@ -12,7 +12,7 @@ import {
   AdviceObject,
 } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
-import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
+import { StockLayout } from "@/components/StockLayout";
 import { RefreshCw, Globe, MapPin, Sparkles } from "lucide-react";
 
 const tickers = stockConfig.k_stocks.map((t) => t.ticker);
@@ -40,7 +40,7 @@ export default function KStockPage() {
     },
   );
 
-  const [openedTicker, setOpenedTicker] = useState<string | null>(null);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(tickers[0]);
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>("1d");
 
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -168,8 +168,8 @@ export default function KStockPage() {
 
         let initialTicker = tickers[0];
 
-        if (isTimeframeChange && openedTicker) {
-          initialTicker = openedTicker;
+        if (isTimeframeChange && selectedSymbol) {
+          initialTicker = selectedSymbol;
         } else if (focusTicker && tickers.includes(focusTicker)) {
           initialTicker = focusTicker;
         }
@@ -178,7 +178,7 @@ export default function KStockPage() {
           !fullLoadInitiated.current ||
           (!isTimeframeChange && !forceRefresh && !isAutoRefresh)
         ) {
-          setOpenedTicker(initialTicker);
+          setSelectedSymbol(initialTicker);
         }
 
         await fetchStockData(initialTicker, timeframeToLoad, forceRefresh);
@@ -196,7 +196,7 @@ export default function KStockPage() {
         setTimeUntilNextSync(AUTO_REFRESH_INTERVAL_MS);
       }
     },
-    [fetchStockData, openedTicker],
+    [fetchStockData, selectedSymbol],
   );
 
   const handleManualSync = async () => {
@@ -322,9 +322,10 @@ export default function KStockPage() {
     return () => clearInterval(unifiedSyncTimer);
   }, [loadAllTickersSequentially, selectedTimeframe]);
 
-  const handleOpenChange = (ticker: string) => {
-    const newOpenedTicker = openedTicker === ticker ? null : ticker;
-    setOpenedTicker(newOpenedTicker);
+  // 종목 선택 핸들러
+  const handleSelectSymbol = (ticker: string) => {
+    console.log(`[UI] User selected symbol: ${ticker}`);
+    setSelectedSymbol(ticker);
   };
 
   const getSyncButtonText = () => {
@@ -352,141 +353,84 @@ export default function KStockPage() {
     return `${formattedCountdown} 갱신`;
   };
 
+  // 레이아웃에 전달할 종목 목록 생성
+  const symbolItems = tickers.map((ticker) => {
+    const stockInfo = stockConfig.k_stocks.find((s) => s.ticker === ticker) as
+      | { ticker: string; name?: string }
+      | undefined;
+    return {
+      id: ticker,
+      name: stockInfo?.name || ticker,
+    };
+  });
+
+  // 헤더 버튼들
+  const headerButtons = (
+    <>
+      <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg shrink-0">
+        <button
+          onClick={() => router.push("/kis-stock")}
+          className="flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-colors text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white whitespace-nowrap"
+        >
+          <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0" />
+          미국
+        </button>
+        <button
+          onClick={() => router.push("/k-stock")}
+          className="flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-bold transition-colors bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400 shadow-sm whitespace-nowrap"
+        >
+          <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0" />
+          한국
+        </button>
+      </div>
+
+      <button
+        onClick={handleAiSync}
+        disabled={isAiSyncing}
+        className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap
+            ${
+              isAiSyncing
+                ? "bg-purple-100 text-purple-400 cursor-not-allowed dark:bg-purple-900/30 dark:text-purple-500"
+                : "bg-purple-600 text-white hover:bg-purple-700 shadow-md active:scale-95"
+            }`}
+      >
+        <Sparkles
+          className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isAiSyncing ? "animate-pulse" : ""}`}
+        />
+        {isAiSyncing ? "AI 갱신 중" : "AI 갱신"}
+      </button>
+
+      <button
+        onClick={handleManualSync}
+        disabled={isSyncing}
+        className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap min-w-[120px] sm:min-w-[140px]
+            ${
+              isSyncing
+                ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
+                : "bg-blue-600 text-white hover:bg-blue-700 shadow-md active:scale-95"
+            }`}
+      >
+        <RefreshCw
+          className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
+        />
+        {getSyncButtonText()}
+      </button>
+    </>
+  );
+
   return (
-    <div className="flex flex-col items-center p-2 sm:p-4 md:p-8 bg-slate-100 dark:bg-slate-950 min-h-screen">
-      <div className="flex flex-col md:flex-row justify-between items-center w-full md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px] mb-6 md:mb-8 gap-4 overflow-hidden">
-        {/* 상단 타이틀 */}
-        <div className="flex flex-col md:flex-row items-center gap-4">
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0 whitespace-nowrap">
-            한국 ETF
-          </h1>
-        </div>
-
-        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto overflow-hidden">
-          {/* Timeframe buttons */}
-          <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center shrink-0">
-            <button
-              onClick={() => setSelectedTimeframe("1d")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "1d"
-                  ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              일봉
-            </button>
-            <button
-              onClick={() => setSelectedTimeframe("1h")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "1h"
-                  ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              1시간 봉 (단타)
-            </button>
-            <button
-              onClick={() => setSelectedTimeframe("15m")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "15m"
-                  ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              15분 봉 (단타)
-            </button>
-          </div>
-
-          <div
-            className="flex flex-row items-center gap-1.5 sm:gap-2 w-full md:w-auto justify-start md:justify-end flex-nowrap overflow-x-auto pb-2 md:pb-0"
-            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-          >
-            <style
-              dangerouslySetInnerHTML={{
-                __html: `div::-webkit-scrollbar { display: none; }`,
-              }}
-            />
-
-            <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg shrink-0">
-              <button
-                onClick={() => router.push("/kis-stock")}
-                className="flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-colors text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white whitespace-nowrap"
-              >
-                <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0" />
-                미국
-              </button>
-              <button
-                onClick={() => router.push("/k-stock")}
-                className="flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-bold transition-colors bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400 shadow-sm whitespace-nowrap"
-              >
-                <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0" />
-                한국
-              </button>
-            </div>
-
-            <button
-              onClick={handleAiSync}
-              disabled={isAiSyncing}
-              className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap
-                  ${
-                    isAiSyncing
-                      ? "bg-purple-100 text-purple-400 cursor-not-allowed dark:bg-purple-900/30 dark:text-purple-500"
-                      : "bg-purple-600 text-white hover:bg-purple-700 shadow-md active:scale-95"
-                  }`}
-            >
-              <Sparkles
-                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isAiSyncing ? "animate-pulse" : ""}`}
-              />
-              {isAiSyncing ? "AI 갱신 중" : "AI 갱신"}
-            </button>
-
-            <button
-              onClick={handleManualSync}
-              disabled={isSyncing}
-              className={`flex items-center justify-center px-3 sm:px-4 py-2 sm:py-2.5 rounded-md text-xs sm:text-sm font-medium transition-all shrink-0 whitespace-nowrap min-w-[120px] sm:min-w-[140px]
-                  ${
-                    isSyncing
-                      ? "bg-blue-100 text-blue-400 cursor-not-allowed dark:bg-blue-900/30 dark:text-blue-500"
-                      : "bg-blue-600 text-white hover:bg-blue-700 shadow-md active:scale-95"
-                  }`}
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 shrink-0 ${isSyncing ? "animate-spin" : ""}`}
-              />
-              {getSyncButtonText()}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="w-full grid grid-cols-1 gap-4 md:gap-6 md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-[1600px]">
-        {tickers.map((ticker) => {
-          const state = tickerStates[ticker];
-          if (!state) return null;
-
-          // 💡 수정된 부분: 한국 주식(k_stocks)에서 이름을 찾도록 변경했습니다.
-          const stockInfo = stockConfig.k_stocks.find(
-            (s) => s.ticker === ticker,
-          ) as { ticker: string; name?: string } | undefined;
-
-          const displayName = stockInfo?.name || ticker;
-
-          return (
-            <StockCollapsibleCard
-              key={ticker}
-              tickerSymbol={ticker}
-              displayName={displayName}
-              apiType="kStock"
-              tickerState={state}
-              gridStrokeColor={gridStrokeColor}
-              isOpen={openedTicker === ticker}
-              onOpenChange={() => handleOpenChange(ticker)}
-              currency="KRW"
-              timeframe={selectedTimeframe}
-            />
-          );
-        })}
-      </div>
-    </div>
+    <StockLayout
+      title="한국 ETF"
+      apiType="kStock"
+      symbols={symbolItems}
+      selectedSymbol={selectedSymbol}
+      tickerStates={tickerStates}
+      onSelectSymbol={handleSelectSymbol}
+      timeframe={selectedTimeframe}
+      onTimeframeChange={setSelectedTimeframe}
+      headerButtons={headerButtons}
+      gridStrokeColor={gridStrokeColor}
+      currency="KRW"
+    />
   );
 }

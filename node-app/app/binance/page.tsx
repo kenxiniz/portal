@@ -13,7 +13,7 @@ import {
   calculateBollingerBands,
 } from "@/lib/stockUtils";
 import stockConfig from "@/lib/stock.json";
-import { StockCollapsibleCard } from "@/components/StockCollapsibleCard";
+import { StockLayout } from "@/components/StockLayout";
 import {
   createBinanceWebSocket,
   BinanceWebSocketClient,
@@ -41,15 +41,13 @@ export default function BinancePage() {
     },
   );
 
-  const [openedTicker, setOpenedTicker] = useState<string | null>(null);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(symbols[0]);
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>("1d");
-
-  // 바이낸스는 항상 실시간만 지원
 
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
   const previousTimeframe = useRef<Timeframe>("1d");
-  const wsClientsRef = useRef<Map<string, BinanceWebSocketClient>>(new Map());
+  const wsClientRef = useRef<BinanceWebSocketClient | null>(null);
 
   const fetchSymbolData = useCallback(
     async (
@@ -78,10 +76,22 @@ export default function BinancePage() {
         const response = await fetch(endpoint, { cache: "no-store" });
 
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(
-            errorData.error || `HTTP error! status: ${response.status}`,
-          );
+          // 502/500 errors return HTML, not JSON
+          const contentType = response.headers.get("content-type");
+          let errorMsg = `HTTP ${response.status}`;
+
+          if (contentType?.includes("application/json")) {
+            try {
+              const errorData = await response.json();
+              errorMsg = errorData.error || errorMsg;
+            } catch {
+              errorMsg = `Server error ${response.status}`;
+            }
+          } else {
+            errorMsg = `Server error ${response.status} (API unavailable)`;
+          }
+
+          throw new Error(errorMsg);
         }
 
         const {
@@ -144,8 +154,8 @@ export default function BinancePage() {
 
         let initialSymbol = symbols[0];
 
-        if (isTimeframeChange && openedTicker) {
-          initialSymbol = openedTicker;
+        if (isTimeframeChange && selectedSymbol) {
+          initialSymbol = selectedSymbol;
         } else if (focusSymbol && symbols.includes(focusSymbol)) {
           initialSymbol = focusSymbol;
         }
@@ -154,7 +164,7 @@ export default function BinancePage() {
           !fullLoadInitiated.current ||
           (!isTimeframeChange && !forceRefresh)
         ) {
-          setOpenedTicker(initialSymbol);
+          setSelectedSymbol(initialSymbol);
         }
 
         await fetchSymbolData(initialSymbol, timeframeToLoad, forceRefresh);
@@ -168,7 +178,7 @@ export default function BinancePage() {
         }
       }
     },
-    [fetchSymbolData, openedTicker],
+    [fetchSymbolData, selectedSymbol],
   );
 
   // WebSocket 실시간 데이터 업데이트
@@ -258,13 +268,12 @@ export default function BinancePage() {
   const connectWebSocket = useCallback(
     (symbol: string) => {
       console.log(`[WebSocket] connectWebSocket called for ${symbol}`);
-      console.log(
-        `[WebSocket] Already has connection: ${wsClientsRef.current.has(symbol)}`,
-      );
 
-      if (wsClientsRef.current.has(symbol)) {
-        console.log(`[WebSocket] ${symbol} already connected, skipping`);
-        return;
+      // 기존 연결 정리
+      if (wsClientRef.current) {
+        console.log(`[WebSocket] Disconnecting previous connection...`);
+        wsClientRef.current.disconnect();
+        wsClientRef.current = null;
       }
 
       console.log(`[WebSocket] Connecting to ${symbol}...`);
@@ -282,18 +291,17 @@ export default function BinancePage() {
 
       console.log(`[WebSocket] Starting connection for ${symbol}...`);
       ws.connect();
-      wsClientsRef.current.set(symbol, ws);
+      wsClientRef.current = ws;
       console.log(`[WebSocket] Connection stored in ref for ${symbol}`);
     },
     [selectedTimeframe, handleWebSocketUpdate],
   );
 
-  const disconnectWebSocket = useCallback((symbol: string) => {
-    const ws = wsClientsRef.current.get(symbol);
-    if (ws) {
-      console.log(`[WebSocket] Disconnecting ${symbol}...`);
-      ws.disconnect();
-      wsClientsRef.current.delete(symbol);
+  const disconnectWebSocket = useCallback(() => {
+    if (wsClientRef.current) {
+      console.log(`[WebSocket] Disconnecting...`);
+      wsClientRef.current.disconnect();
+      wsClientRef.current = null;
     }
   }, []);
 
@@ -341,146 +349,71 @@ export default function BinancePage() {
     }
   }, [loadAllSymbolsSequentially, selectedTimeframe]);
 
-  const handleOpenChange = (symbol: string) => {
-    const newOpenedTicker = openedTicker === symbol ? null : symbol;
-    console.log(
-      `[WebSocket] handleOpenChange - symbol: ${symbol}, newOpenedTicker: ${newOpenedTicker}`,
-    );
-    setOpenedTicker(newOpenedTicker);
+  // 선택된 종목 변경 시 WebSocket 재연결
+  useEffect(() => {
+    console.log(`[WebSocket] Selected symbol changed to: ${selectedSymbol}`);
 
-    // 바이낸스는 항상 실시간 연결
-    if (newOpenedTicker === symbol) {
-      console.log(`[WebSocket] Opening chart with real-time`);
-      connectWebSocket(symbol);
-    } else if (newOpenedTicker === null) {
-      console.log(`[WebSocket] Closing chart`);
-      disconnectWebSocket(symbol);
+    // 데이터가 없으면 먼저 가져오기
+    const currentState = tickerStates[selectedSymbol];
+    if (!currentState?.data || currentState.data.length === 0) {
+      console.log(
+        `[WebSocket] No data for ${selectedSymbol}, fetching first...`,
+      );
+      fetchSymbolData(selectedSymbol, selectedTimeframe);
     }
-  };
 
-  // 컴포넌트 언마운트 시 모든 WebSocket 정리
+    // WebSocket 연결
+    connectWebSocket(selectedSymbol);
+
+    return () => {
+      disconnectWebSocket();
+    };
+  }, [
+    selectedSymbol,
+    selectedTimeframe,
+    connectWebSocket,
+    disconnectWebSocket,
+    fetchSymbolData,
+    tickerStates,
+  ]);
+
+  // 컴포넌트 언마운트 시 WebSocket 정리
   useEffect(() => {
     return () => {
       console.log("[WebSocket] Component unmounting, cleaning up...");
-      const clients = wsClientsRef.current;
-      clients.forEach((ws) => ws.disconnect());
-      clients.clear();
+      disconnectWebSocket();
     };
-  }, []);
+  }, [disconnectWebSocket]);
 
-  // timeframe 변경 시에만 WebSocket 재연결
-  const prevTimeframeRef = useRef<Timeframe>(selectedTimeframe);
-  useEffect(() => {
-    // timeframe이 실제로 변경되었을 때만 재연결
-    if (prevTimeframeRef.current !== selectedTimeframe) {
-      console.log(
-        `[WebSocket] Timeframe changed from ${prevTimeframeRef.current} to ${selectedTimeframe}`,
-      );
-      prevTimeframeRef.current = selectedTimeframe;
+  // 종목 선택 핸들러
+  const handleSelectSymbol = (symbol: string) => {
+    console.log(`[UI] User selected symbol: ${symbol}`);
+    setSelectedSymbol(symbol);
+  };
 
-      // 열려있는 차트가 있으면 재연결 (바이낸스는 항상 실시간)
-      if (openedTicker) {
-        const currentSymbol = openedTicker;
-        console.log(
-          `[WebSocket] Reconnecting ${currentSymbol} with new timeframe...`,
-        );
-
-        // 기존 연결 끊기
-        const ws = wsClientsRef.current.get(currentSymbol);
-        if (ws) {
-          ws.disconnect();
-          wsClientsRef.current.delete(currentSymbol);
-        }
-
-        // 새로운 timeframe으로 재연결
-        const newWs = createBinanceWebSocket(
-          currentSymbol,
-          selectedTimeframe,
-          (klineData: BinanceKlineData) => {
-            handleWebSocketUpdate(currentSymbol, klineData);
-          },
-          (error) => {
-            console.error(`[WebSocket] Error for ${currentSymbol}:`, error);
-          },
-        );
-        newWs.connect();
-        wsClientsRef.current.set(currentSymbol, newWs);
-      }
-    }
-  }, [selectedTimeframe, openedTicker, handleWebSocketUpdate]);
+  // 레이아웃에 전달할 종목 목록 생성
+  const symbolItems = symbols.map((symbol) => {
+    const symbolInfo = stockConfig.binance_futures.find(
+      (s) => s.symbol === symbol,
+    ) as { symbol: string; name: string } | undefined;
+    return {
+      id: symbol,
+      name: symbolInfo?.name || symbol,
+    };
+  });
 
   return (
-    <div className="flex flex-col items-center bg-slate-100 dark:bg-slate-950 min-h-screen">
-      <div className="flex flex-col md:flex-row justify-between items-center w-full px-4 md:px-8 py-6 md:py-8 mb-6 md:mb-8 gap-4 overflow-hidden">
-        <div className="flex flex-col md:flex-row items-center gap-4">
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-slate-100 mb-2 md:mb-0 whitespace-nowrap">
-            바이낸스 선물
-          </h1>
-        </div>
-
-        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto overflow-hidden">
-          <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-full md:w-auto justify-center shrink-0">
-            <button
-              onClick={() => setSelectedTimeframe("1d")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "1d"
-                  ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              일봉
-            </button>
-            <button
-              onClick={() => setSelectedTimeframe("1h")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "1h"
-                  ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              1시간 봉
-            </button>
-            <button
-              onClick={() => setSelectedTimeframe("15m")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTimeframe === "15m"
-                  ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              15분 봉
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="w-full grid grid-cols-1 gap-4 md:gap-6 px-4 md:px-8">
-        {symbols.map((symbol) => {
-          const state = tickerStates[symbol];
-          if (!state) return null;
-
-          const symbolInfo = stockConfig.binance_futures.find(
-            (s) => s.symbol === symbol,
-          ) as { symbol: string; name: string } | undefined;
-
-          const displayName = symbolInfo?.name || symbol;
-
-          return (
-            <StockCollapsibleCard
-              key={symbol}
-              tickerSymbol={symbol}
-              displayName={displayName}
-              apiType="binance"
-              tickerState={state}
-              gridStrokeColor={gridStrokeColor}
-              isOpen={openedTicker === symbol}
-              onOpenChange={() => handleOpenChange(symbol)}
-              currency="USDT"
-              timeframe={selectedTimeframe}
-            />
-          );
-        })}
-      </div>
-    </div>
+    <StockLayout
+      title="바이낸스 선물"
+      apiType="binance"
+      symbols={symbolItems}
+      selectedSymbol={selectedSymbol}
+      tickerStates={tickerStates}
+      onSelectSymbol={handleSelectSymbol}
+      timeframe={selectedTimeframe}
+      onTimeframeChange={setSelectedTimeframe}
+      gridStrokeColor={gridStrokeColor}
+      currency="USDT"
+    />
   );
 }

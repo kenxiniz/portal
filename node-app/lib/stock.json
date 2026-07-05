@@ -161,6 +161,10 @@
   ],
   "binance_futures": [
     {
+      "symbol": "TSLAUSDT",
+      "name": "Tesla"
+    },
+    {
       "symbol": "SOXLUSDT",
       "name": "SOXL"
     },
@@ -175,10 +179,6 @@
     {
       "symbol": "NVDAUSDT",
       "name": "NVIDIA"
-    },
-    {
-      "symbol": "TSLAUSDT",
-      "name": "Tesla"
     },
     {
       "symbol": "ARMUSDT",
