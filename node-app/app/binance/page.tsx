@@ -353,29 +353,14 @@ export default function BinancePage() {
   useEffect(() => {
     console.log(`[WebSocket] Selected symbol changed to: ${selectedSymbol}`);
 
-    // 데이터가 없으면 먼저 가져오기
-    const currentState = tickerStates[selectedSymbol];
-    if (!currentState?.data || currentState.data.length === 0) {
-      console.log(
-        `[WebSocket] No data for ${selectedSymbol}, fetching first...`,
-      );
-      fetchSymbolData(selectedSymbol, selectedTimeframe);
-    }
-
     // WebSocket 연결
     connectWebSocket(selectedSymbol);
 
     return () => {
       disconnectWebSocket();
     };
-  }, [
-    selectedSymbol,
-    selectedTimeframe,
-    connectWebSocket,
-    disconnectWebSocket,
-    fetchSymbolData,
-    tickerStates,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSymbol, selectedTimeframe]);
 
   // 컴포넌트 언마운트 시 WebSocket 정리
   useEffect(() => {

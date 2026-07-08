@@ -18,6 +18,12 @@ import { ProcessedChartData } from "../StockChartDisplay";
 import { calculateGaussianTrendBoxes } from "@/lib/charts/indicators";
 import { GaussianBoxPrimitive } from "./plugins/GaussianBoxPrimitive";
 
+// .env에서 봉 개수 가져오기 (기본값 100)
+const DEFAULT_BAR_COUNT = parseInt(
+  process.env.NEXT_PUBLIC_CHART_BAR_COUNT || "100",
+  10
+);
+
 interface MainChartProps {
   data: ProcessedChartData[];
   probLevels: { price: number; title: string; color: string }[];
@@ -25,7 +31,6 @@ interface MainChartProps {
   gridStrokeColor: string;
   height: number;
   onReady: (chart: IChartApi) => void;
-  initialVisibleBars?: number;
 }
 
 type ExtendedChartData = ProcessedChartData & {
@@ -61,35 +66,15 @@ export const MainChart: React.FC<MainChartProps> = ({
     ema20: null,
   });
 
-  const priceLinesRef = useRef<IPriceLine[]>([]); // 💡 다시 추가됨
+  const priceLinesRef = useRef<IPriceLine[]>([]);
   const boxPrimitiveRef = useRef<GaussianBoxPrimitive | null>(null);
-  const isFirstLoadRef = useRef(true);
-  const previousFirstDateRef = useRef<string | null>(null);
-
-  // timeframe 변경 시 firstLoad 플래그 리셋
-  useEffect(() => {
-    isFirstLoadRef.current = true;
-  }, [timeframe]);
-
-  // 종목 변경 감지 (첫 데이터 날짜 변경)
-  useEffect(() => {
-    if (data.length === 0) return;
-
-    const firstDate = data[0].date;
-    if (
-      previousFirstDateRef.current !== null &&
-      previousFirstDateRef.current !== firstDate
-    ) {
-      // 종목 변경 시 firstLoad 리셋 → range preservation skip → Y축 자동 맞춤
-      isFirstLoadRef.current = true;
-      console.log("[MainChart] Symbol changed detected");
-    }
-
-    previousFirstDateRef.current = firstDate;
-  }, [data]);
+  const isInitialZoomApplied = useRef(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // 차트 재생성 시 초기 zoom 플래그 리셋
+    isInitialZoomApplied.current = false;
 
     const chart = createChart(containerRef.current, {
       autoSize: true,
@@ -194,7 +179,7 @@ export const MainChart: React.FC<MainChartProps> = ({
       chart.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridStrokeColor, timeframe, onReady]);
+  }, [gridStrokeColor, timeframe]);
 
   useEffect(() => {
     if (chartRef.current) {
@@ -204,12 +189,6 @@ export const MainChart: React.FC<MainChartProps> = ({
 
   useEffect(() => {
     if (!data.length || !seriesRef.current.candle || !chartRef.current) return;
-
-    // 현재 visible range 저장 (첫 로드 아닐 때만)
-    let savedRange = null;
-    if (!isFirstLoadRef.current) {
-      savedRange = chartRef.current.timeScale().getVisibleLogicalRange();
-    }
 
     const candleData: CandlestickData[] = data.map((d) => ({
       time: d.time,
@@ -222,16 +201,8 @@ export const MainChart: React.FC<MainChartProps> = ({
 
     seriesRef.current.candle.setData(candleData);
 
-    // Visible range 복원 (첫 로드 아닐 때만)
-    if (savedRange && !isFirstLoadRef.current) {
-      try {
-        chartRef.current.timeScale().setVisibleLogicalRange(savedRange);
-      } catch {
-        // Range 복원 실패 무시
-      }
-    }
-
-    isFirstLoadRef.current = false;
+    // 차트 기본 동작에 맡김 - setVisibleLogicalRange 제거
+    // fitContent나 scrollToRealTime도 호출 안 함
 
     const boxes = calculateGaussianTrendBoxes(data, 20, 3);
     if (boxPrimitiveRef.current) {
@@ -290,6 +261,7 @@ export const MainChart: React.FC<MainChartProps> = ({
         if (pl) priceLinesRef.current.push(pl);
       } catch {}
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, probLevels, timeframe]);
 
   return (

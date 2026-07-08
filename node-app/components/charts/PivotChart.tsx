@@ -33,30 +33,6 @@ export const PivotChart: React.FC<PivotChartProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const isFirstLoadRef = useRef(true);
-  const previousFirstDateRef = useRef<string | null>(null);
-
-  // timeframe 변경 시 firstLoad 플래그 리셋
-  useEffect(() => {
-    isFirstLoadRef.current = true;
-  }, [timeframe]);
-
-  // 종목 변경 감지 (첫 데이터 날짜 변경)
-  useEffect(() => {
-    if (data.length === 0) return;
-
-    const firstDate = data[0].date;
-    if (
-      previousFirstDateRef.current !== null &&
-      previousFirstDateRef.current !== firstDate
-    ) {
-      // 종목 변경 시 firstLoad 리셋 → range preservation skip → Y축 자동 맞춤
-      isFirstLoadRef.current = true;
-      console.log("[PivotChart] Symbol changed detected");
-    }
-
-    previousFirstDateRef.current = firstDate;
-  }, [data]);
 
   const seriesRef = useRef<{
     candle: ISeriesApi<"Candlestick"> | null;
@@ -192,7 +168,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       chart.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridStrokeColor, timeframe, onReady]);
+  }, [gridStrokeColor, timeframe]);
 
   useEffect(() => {
     if (chartRef.current) {
@@ -202,12 +178,6 @@ export const PivotChart: React.FC<PivotChartProps> = ({
 
   useEffect(() => {
     if (!data.length || !seriesRef.current.candle || !chartRef.current) return;
-
-    // 현재 visible range 저장
-    let savedRange = null;
-    if (!isFirstLoadRef.current) {
-      savedRange = chartRef.current.timeScale().getVisibleLogicalRange();
-    }
 
     const candleData: CandlestickData[] = data.map((d) => ({
       time: d.time,
@@ -220,16 +190,8 @@ export const PivotChart: React.FC<PivotChartProps> = ({
 
     seriesRef.current.candle.setData(candleData);
 
-    // Visible range 복원
-    if (savedRange && !isFirstLoadRef.current) {
-      try {
-        chartRef.current.timeScale().setVisibleLogicalRange(savedRange);
-      } catch {
-        // Range 복원 실패 무시
-      }
-    }
-
-    isFirstLoadRef.current = false;
+    // 차트 기본 동작에 맡김 - setVisibleLogicalRange 제거
+    // fitContent나 scrollToRealTime도 호출 안 함
 
     // 💡 수정됨: date 필드를 반드시 포함하여 넘겨주고, 줄바꿈(\n)을 다시 공백으로 복원합니다.
     const pivotInputs = data.map((d) => ({
@@ -264,6 +226,7 @@ export const PivotChart: React.FC<PivotChartProps> = ({
     seriesRef.current.r3?.setData(r3Data);
     seriesRef.current.s2?.setData(s2Data);
     seriesRef.current.s3?.setData(s3Data);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, timeframe]);
 
   return (

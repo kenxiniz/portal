@@ -6,17 +6,12 @@ import React, {
   useRef,
   useState,
   useMemo,
+  useCallback,
   forwardRef,
   useImperativeHandle,
 } from "react";
 import { StockDataPoint, TradingSignal } from "@/lib/stockUtils";
-import {
-  Time,
-  IChartApi,
-  LogicalRange,
-  LineData,
-  HistogramData,
-} from "lightweight-charts";
+import { Time, IChartApi, LineData, HistogramData } from "lightweight-charts";
 import {
   calculateMacdKama,
   getMacdStatus,
@@ -120,75 +115,12 @@ export const StockChartDisplay = forwardRef<
   const [pivotChart, setPivotChart] = useState<IChartApi | null>(null);
 
   const [chartHeights, setChartHeights] = useState({ main: 250, sub: 100 });
-  const isInitialZoomApplied = useRef(false);
   const isMovingToDate = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const isApplyingZoom = useRef(false);
 
-  // 전역 zoom 저장 (모든 타임프레임 공통, localStorage 저장)
-  const globalZoom = useRef<number | null>(null);
-  const lastBarCount = useRef<number | null>(null);
-
-  // localStorage에서 zoom 로드 (초기화 시 1회)
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("chartZoom");
-      if (saved) {
-        const parsed = parseInt(saved, 10);
-        if (!isNaN(parsed) && parsed > 0) {
-          globalZoom.current = parsed;
-          console.log(`[ZOOM] Loaded from localStorage: ${parsed} bars`);
-        }
-      }
-    } catch (e) {
-      console.warn("[ZOOM] Failed to load from localStorage", e);
-    }
+  const handleMainChartReady = useCallback((chart: IChartApi) => {
+    setMainChart(chart);
   }, []);
-
-  // 사용자 zoom 추적 (range 길이 변경만, 전역 저장)
-  useEffect(() => {
-    if (!mainChart) return;
-
-    const handleRangeChange = (range: LogicalRange | null) => {
-      if (!range || isApplyingZoom.current || isMovingToDate.current) return;
-
-      const barCount = Math.round(range.to - range.from);
-
-      // 첫 실행 시 기준 설정
-      if (lastBarCount.current === null) {
-        lastBarCount.current = barCount;
-        return;
-      }
-
-      // zoom 감지: range 길이 변경 (scroll은 길이 동일)
-      if (barCount !== lastBarCount.current) {
-        globalZoom.current = barCount;
-        lastBarCount.current = barCount;
-
-        // localStorage 저장
-        try {
-          localStorage.setItem("chartZoom", barCount.toString());
-          console.log(`[ZOOM] User zoom saved: ${barCount} bars`);
-        } catch (e) {
-          console.warn("[ZOOM] Failed to save to localStorage", e);
-        }
-      }
-    };
-
-    mainChart.timeScale().subscribeVisibleLogicalRangeChange(handleRangeChange);
-
-    return () => {
-      mainChart
-        .timeScale()
-        .unsubscribeVisibleLogicalRangeChange(handleRangeChange);
-      lastBarCount.current = null;
-    };
-  }, [mainChart]);
-
-  // timeframe 변경 시 isInitialZoomApplied 리셋
-  useEffect(() => {
-    isInitialZoomApplied.current = false;
-  }, [timeframe]);
 
   useEffect(() => {
     const updateChartHeights = () => {
@@ -384,94 +316,8 @@ export const StockChartDisplay = forwardRef<
     return { data: { line, signal, hist }, status };
   }, [closePrices, processedData]);
 
-  // autoScale: 차트 기본 동작에 완전히 맡김 (건드리지 않음)
-  // 종목 변경, WebSocket 갱신 모두 차트 라이브러리가 자동 처리
-
-  useEffect(() => {
-    const charts = [mainChart, pivotChart, rsiChart, macdChart].filter(
-      (c): c is IChartApi => c !== null,
-    );
-
-    if (charts.length < 2) return;
-
-    let isSyncing = false;
-
-    const syncHandlers = charts.map((sourceChart) => {
-      const handler = (logicalRange: LogicalRange | null) => {
-        if (!logicalRange || isSyncing) return;
-
-        isSyncing = true;
-        charts.forEach((targetChart) => {
-          if (targetChart !== sourceChart) {
-            if (isMovingToDate.current && targetChart === mainChart) {
-              return;
-            }
-            targetChart.timeScale().setVisibleLogicalRange(logicalRange);
-          }
-        });
-        isSyncing = false;
-      };
-
-      sourceChart.timeScale().subscribeVisibleLogicalRangeChange(handler);
-      return { sourceChart, handler };
-    });
-
-    return () => {
-      syncHandlers.forEach(({ sourceChart, handler }) => {
-        sourceChart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
-      });
-    };
-  }, [mainChart, pivotChart, rsiChart, macdChart]);
-
-  useEffect(() => {
-    if (
-      mainChart &&
-      processedData.length > 0 &&
-      !isInitialZoomApplied.current
-    ) {
-      isInitialZoomApplied.current = true; // 중복 실행 방지
-
-      // container 렌더 완료 대기 (RAF 2회)
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          try {
-            const container = containerRef.current;
-            if (!container) {
-              console.warn("[ZOOM] Container not found");
-              return;
-            }
-
-            const actualWidth = container.clientWidth;
-            if (actualWidth < 100) {
-              console.warn(`[ZOOM] Container too small: ${actualWidth}px`);
-              return;
-            }
-
-            // 전역 저장된 zoom 또는 기본값 (모든 타임프레임 공통)
-            const savedZoom = globalZoom.current;
-            const visibleBars = savedZoom || 80;
-
-            console.log(
-              `[ZOOM] Container width: ${actualWidth}px, Applying ${savedZoom ? "saved" : "default"} zoom: ${visibleBars} bars`,
-            );
-
-            isApplyingZoom.current = true;
-            mainChart.timeScale().setVisibleLogicalRange({
-              from: processedData.length - 1 - visibleBars,
-              to: processedData.length + 1,
-            });
-
-            // 플래그 해제
-            setTimeout(() => {
-              isApplyingZoom.current = false;
-            }, 100);
-          } catch (err) {
-            console.warn("[ZOOM] Failed to apply initial zoom", err);
-          }
-        });
-      });
-    }
-  }, [mainChart, timeframe]);
+  // 차트 동기화 제거 - setVisibleLogicalRange 호출 시 "Object is disposed" 에러 발생
+  // 각 차트는 독립적으로 동작
 
   useImperativeHandle(ref, () => ({
     moveToDate(date: string) {
@@ -557,7 +403,7 @@ export const StockChartDisplay = forwardRef<
             timeframe={timeframe}
             gridStrokeColor={gridStrokeColor}
             height={chartHeights.main}
-            onReady={setMainChart}
+            onReady={handleMainChartReady}
           />
         )}
       </div>
@@ -610,3 +456,5 @@ export const StockChartDisplay = forwardRef<
     </div>
   );
 });
+
+StockChartDisplay.displayName = "StockChartDisplay";
