@@ -83,6 +83,8 @@ export const RsiChart: React.FC<RsiChartProps> = ({
     onReady(chart);
 
     return () => {
+      chartRef.current = null;
+      seriesRef.current = { rsi: null, dummy: null };
       chart.remove();
     };
     // Intentionally omitting 'height' to prevent chart destruction on resize

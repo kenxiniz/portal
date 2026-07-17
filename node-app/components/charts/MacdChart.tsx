@@ -95,6 +95,8 @@ export const MacdChart: React.FC<MacdChartProps> = ({
     onReady(chart);
 
     return () => {
+      chartRef.current = null;
+      seriesRef.current = { line: null, signal: null, hist: null, dummy: null };
       chart.remove();
     };
     // Intentionally omitting 'height' to prevent chart destruction on resize

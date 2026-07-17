@@ -3,7 +3,7 @@
 # ===============================================================================
 # STAGE: 프로덕션 러너 (Runner)
 # ===============================================================================
-FROM node:20-alpine AS runner
+FROM node:20-bullseye-slim AS runner
 
 WORKDIR /app
 
@@ -16,19 +16,24 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
 # -------------------------------------------------------------------------
-# [Step 1] Install AWS CLI (Must be root)
+# [Step 1] Install dependencies and Chromium for Puppeteer
 # -------------------------------------------------------------------------
-# Add dumb-init to handle PID 1 issues and graceful shutdowns (SIGTERM)
-RUN apk add --no-cache aws-cli dumb-init
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dumb-init \
+    chromium \
+    fonts-liberation \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Verify installation during build
-RUN aws --version
+# Puppeteer 환경변수 설정
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # -------------------------------------------------------------------------
 # [Step 2] Setup Users and Groups
 # -------------------------------------------------------------------------
-RUN addgroup --system --gid 1001 appgroup
-RUN adduser --system --uid 1001 --ingroup appgroup appuser
+RUN groupadd --system --gid 1001 appgroup
+RUN useradd --system --uid 1001 --gid appgroup --shell /bin/false appuser
 
 # -------------------------------------------------------------------------
 # [Step 3] Copy Local Build Artifacts (Removing --from=builder)
@@ -38,6 +43,10 @@ RUN adduser --system --uid 1001 --ingroup appgroup appuser
 COPY --chown=appuser:appgroup ./public ./public
 COPY --chown=appuser:appgroup ./.next/standalone ./
 COPY --chown=appuser:appgroup ./.next/static ./.next/static
+COPY --chown=appuser:appgroup ./scripts ./scripts
+
+# screenshots 폴더 생성
+RUN mkdir -p /app/screenshots && chown appuser:appgroup /app/screenshots
 
 # -------------------------------------------------------------------------
 # [Step 4] Finalize

@@ -11,7 +11,13 @@ import React, {
   useImperativeHandle,
 } from "react";
 import { StockDataPoint, TradingSignal } from "@/lib/stockUtils";
-import { Time, IChartApi, LineData, HistogramData } from "lightweight-charts";
+import {
+  Time,
+  IChartApi,
+  LineData,
+  HistogramData,
+  LogicalRange,
+} from "lightweight-charts";
 import {
   calculateMacdKama,
   getMacdStatus,
@@ -22,7 +28,6 @@ import {
 import { MainChart } from "./charts/MainChart";
 import { RsiChart } from "./charts/RsiChart";
 import { MacdChart } from "./charts/MacdChart";
-import { PivotChart } from "./charts/PivotChart";
 
 export interface ProcessedChartData {
   time: Time;
@@ -112,9 +117,17 @@ export const StockChartDisplay = forwardRef<
   const [mainChart, setMainChart] = useState<IChartApi | null>(null);
   const [rsiChart, setRsiChart] = useState<IChartApi | null>(null);
   const [macdChart, setMacdChart] = useState<IChartApi | null>(null);
-  const [pivotChart, setPivotChart] = useState<IChartApi | null>(null);
 
   const [chartHeights, setChartHeights] = useState({ main: 250, sub: 100 });
+  const [visibleBarCount, setVisibleBarCount] = useState<number>(
+    parseInt(process.env.NEXT_PUBLIC_CHART_BAR_COUNT || "100", 10),
+  );
+  const [probabilityBoxEnabled, setProbabilityBoxEnabled] =
+    useState<boolean>(false);
+  const [bollingerEnabled, setBollingerEnabled] = useState<boolean>(true);
+  const [vwapEnabled, setVwapEnabled] = useState<boolean>(true);
+  const [emaEnabled, setEmaEnabled] = useState<boolean>(true);
+  const [pivotEnabled, setPivotEnabled] = useState<boolean>(true);
   const isMovingToDate = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -128,18 +141,17 @@ export const StockChartDisplay = forwardRef<
 
       const containerHeight = containerRef.current.clientHeight;
 
-      // 전체 차트 개수 계산
-      const totalMainCharts = ["1h", "15m"].includes(timeframe) ? 2 : 1; // Main + Pivot or Main only
-      const totalCharts = totalMainCharts + 2; // + RSI + MACD
+      // 전체 차트 개수 계산 (Main + RSI + MACD = 3)
+      const totalCharts = 3;
 
       // 전체 높이에서 gap(4px * (차트개수-1))를 빼고 분배
       const totalGap = 4 * (totalCharts - 1);
       const availableHeight = containerHeight - totalGap;
 
       // Sub charts: 10% each (RSI, MACD)
-      // Main chart(s): 80% (1h/15m에서 Main과 Pivot이 공유)
+      // Main chart: 80%
       const subHeight = Math.floor(availableHeight * 0.1);
-      const mainHeight = Math.floor((availableHeight * 0.8) / totalMainCharts);
+      const mainHeight = Math.floor(availableHeight * 0.8);
 
       setChartHeights({
         main: Math.max(mainHeight, 200),
@@ -161,7 +173,7 @@ export const StockChartDisplay = forwardRef<
     return () => {
       resizeObserver.disconnect();
     };
-  }, [timeframe, mainChart, pivotChart, rsiChart, macdChart]);
+  }, [timeframe, mainChart, rsiChart, macdChart]);
 
   const { processedData, closePrices } = useMemo(() => {
     if (!data || data.length === 0)
@@ -316,8 +328,68 @@ export const StockChartDisplay = forwardRef<
     return { data: { line, signal, hist }, status };
   }, [closePrices, processedData]);
 
-  // 차트 동기화 제거 - setVisibleLogicalRange 호출 시 "Object is disposed" 에러 발생
-  // 각 차트는 독립적으로 동작
+  // 차트 X축 동기화 (Main/Pivot → 전체)
+  // 현재 차트 참조를 ref로 유지하여 stale closure 방지
+  const chartsRef = useRef<{
+    main: IChartApi | null;
+    pivot: IChartApi | null;
+    rsi: IChartApi | null;
+    macd: IChartApi | null;
+  }>({ main: null, pivot: null, rsi: null, macd: null });
+
+  useEffect(() => {
+    chartsRef.current = {
+      main: mainChart,
+      pivot: null,
+      rsi: rsiChart,
+      macd: macdChart,
+    };
+  }, [mainChart, rsiChart, macdChart]);
+
+  useEffect(() => {
+    const sourceCharts = [mainChart].filter((c): c is IChartApi => c !== null);
+
+    if (sourceCharts.length === 0) return;
+
+    let isSyncing = false;
+
+    const handlers = sourceCharts.map((sourceChart) => {
+      const handler = (logicalRange: LogicalRange | null) => {
+        if (!logicalRange || isSyncing || isMovingToDate.current) return;
+
+        // 현재 보이는 봉 개수 업데이트
+        const barCount = Math.round(logicalRange.to - logicalRange.from);
+        setVisibleBarCount(barCount);
+
+        isSyncing = true;
+        // 최신 차트 참조 사용
+        const { main, pivot, rsi, macd } = chartsRef.current;
+        [main, pivot, rsi, macd].forEach((targetChart) => {
+          if (targetChart && targetChart !== sourceChart) {
+            try {
+              targetChart.timeScale().setVisibleLogicalRange(logicalRange);
+            } catch {
+              // disposed 차트 무시
+            }
+          }
+        });
+        isSyncing = false;
+      };
+
+      sourceChart.timeScale().subscribeVisibleLogicalRangeChange(handler);
+      return { chart: sourceChart, handler };
+    });
+
+    return () => {
+      handlers.forEach(({ chart, handler }) => {
+        try {
+          chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
+        } catch {
+          // disposed 무시
+        }
+      });
+    };
+  }, [mainChart]);
 
   useImperativeHandle(ref, () => ({
     moveToDate(date: string) {
@@ -391,6 +463,74 @@ export const StockChartDisplay = forwardRef<
         </div>
       )}
 
+      {/* 디버그: 봉 개수 표시 */}
+      <div className="absolute top-2 left-2 z-20 bg-black/70 text-white text-xs px-2 py-1 rounded font-mono">
+        봉: {visibleBarCount} | 설정:{" "}
+        {process.env.NEXT_PUBLIC_CHART_BAR_COUNT || "100"} | 데이터:{" "}
+        {processedData.length}
+      </div>
+
+      {/* Indicator Toggles */}
+      <div className="absolute top-2 right-2 z-20 flex gap-1">
+        <button
+          onClick={() => setProbabilityBoxEnabled(!probabilityBoxEnabled)}
+          className={`text-xs px-2 py-1 rounded font-mono transition-colors ${
+            probabilityBoxEnabled
+              ? "bg-blue-600 text-white"
+              : "bg-black/70 text-white hover:bg-black/90"
+          }`}
+          title="Probability Box"
+        >
+          P
+        </button>
+        <button
+          onClick={() => setBollingerEnabled(!bollingerEnabled)}
+          className={`text-xs px-2 py-1 rounded font-mono transition-colors ${
+            bollingerEnabled
+              ? "bg-blue-600 text-white"
+              : "bg-black/70 text-white hover:bg-black/90"
+          }`}
+          title="Bollinger Bands"
+        >
+          B
+        </button>
+        <button
+          onClick={() => setVwapEnabled(!vwapEnabled)}
+          className={`text-xs px-2 py-1 rounded font-mono transition-colors ${
+            vwapEnabled
+              ? "bg-blue-600 text-white"
+              : "bg-black/70 text-white hover:bg-black/90"
+          }`}
+          title="VWAP"
+        >
+          V
+        </button>
+        <button
+          onClick={() => setEmaEnabled(!emaEnabled)}
+          className={`text-xs px-2 py-1 rounded font-mono transition-colors ${
+            emaEnabled
+              ? "bg-blue-600 text-white"
+              : "bg-black/70 text-white hover:bg-black/90"
+          }`}
+          title="EMA"
+        >
+          E
+        </button>
+        {["1h", "15m"].includes(timeframe) && (
+          <button
+            onClick={() => setPivotEnabled(!pivotEnabled)}
+            className={`text-xs px-2 py-1 rounded font-mono transition-colors ${
+              pivotEnabled
+                ? "bg-blue-600 text-white"
+                : "bg-black/70 text-white hover:bg-black/90"
+            }`}
+            title="Pivot Points"
+          >
+            Pv
+          </button>
+        )}
+      </div>
+
       {/* 차트 렌더링 (항상) */}
       <div
         className="w-full min-w-0 overflow-hidden flex-shrink-0"
@@ -404,26 +544,14 @@ export const StockChartDisplay = forwardRef<
             gridStrokeColor={gridStrokeColor}
             height={chartHeights.main}
             onReady={handleMainChartReady}
+            probabilityBoxEnabled={probabilityBoxEnabled}
+            bollingerEnabled={bollingerEnabled}
+            vwapEnabled={vwapEnabled}
+            emaEnabled={emaEnabled}
+            pivotEnabled={pivotEnabled}
           />
         )}
       </div>
-
-      {["1h", "15m"].includes(timeframe) && (
-        <div
-          className="w-full min-w-0 overflow-hidden flex-shrink-0"
-          style={{ height: `${chartHeights.main}px` }}
-        >
-          {hasData && (
-            <PivotChart
-              data={processedData}
-              timeframe={timeframe}
-              gridStrokeColor={gridStrokeColor}
-              height={chartHeights.main}
-              onReady={setPivotChart}
-            />
-          )}
-        </div>
-      )}
 
       <div
         className="w-full min-w-0 overflow-hidden flex-shrink-0"

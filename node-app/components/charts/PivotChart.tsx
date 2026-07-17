@@ -33,6 +33,8 @@ export const PivotChart: React.FC<PivotChartProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const prevFirstDateRef = useRef<string | null>(null);
+  const prevTimeframeRef = useRef<string | null>(null);
 
   const seriesRef = useRef<{
     candle: ISeriesApi<"Candlestick"> | null;
@@ -165,6 +167,15 @@ export const PivotChart: React.FC<PivotChartProps> = ({
     onReady(chart);
 
     return () => {
+      chartRef.current = null;
+      seriesRef.current = {
+        candle: null,
+        p: null,
+        r2: null,
+        r3: null,
+        s2: null,
+        s3: null,
+      };
       chart.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -188,10 +199,31 @@ export const PivotChart: React.FC<PivotChartProps> = ({
       color: d.color,
     }));
 
+    // 종목 변경 감지 (첫 번째 데이터 날짜 비교)
+    const firstDate = data[0]?.date || null;
+    const symbolChanged =
+      prevFirstDateRef.current !== null &&
+      prevFirstDateRef.current !== firstDate;
+    prevFirstDateRef.current = firstDate;
+
+    // Timeframe 변경 감지
+    prevTimeframeRef.current = timeframe;
+
     seriesRef.current.candle.setData(candleData);
 
-    // 차트 기본 동작에 맡김 - setVisibleLogicalRange 제거
-    // fitContent나 scrollToRealTime도 호출 안 함
+    // PivotChart는 StockChartDisplay의 동기화를 통해 MainChart를 따라감
+    // 자체적으로 setVisibleLogicalRange 호출하지 않음 (충돌 방지)
+
+    // 종목 변경 시 Y축 자동 맞춤
+    if (symbolChanged && seriesRef.current.candle) {
+      try {
+        seriesRef.current.candle.priceScale().applyOptions({
+          autoScale: true,
+        });
+      } catch {
+        // disposed 무시
+      }
+    }
 
     // 💡 수정됨: date 필드를 반드시 포함하여 넘겨주고, 줄바꿈(\n)을 다시 공백으로 복원합니다.
     const pivotInputs = data.map((d) => ({
@@ -226,7 +258,6 @@ export const PivotChart: React.FC<PivotChartProps> = ({
     seriesRef.current.r3?.setData(r3Data);
     seriesRef.current.s2?.setData(s2Data);
     seriesRef.current.s3?.setData(s3Data);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, timeframe]);
 
   return (

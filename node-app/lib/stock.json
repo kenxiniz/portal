@@ -161,12 +161,12 @@
   ],
   "binance_futures": [
     {
-      "symbol": "TSLAUSDT",
-      "name": "Tesla"
-    },
-    {
       "symbol": "SOXLUSDT",
       "name": "SOXL"
+    },
+    {
+      "symbol": "TSLAUSDT",
+      "name": "Tesla"
     },
     {
       "symbol": "SPCXUSDT",

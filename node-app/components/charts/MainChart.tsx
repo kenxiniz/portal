@@ -15,14 +15,11 @@ import {
   CandlestickData,
 } from "lightweight-charts";
 import { ProcessedChartData } from "../StockChartDisplay";
-import { calculateGaussianTrendBoxes } from "@/lib/charts/indicators";
+import {
+  calculateGaussianTrendBoxes,
+  calculatePivotPoints,
+} from "@/lib/charts/indicators";
 import { GaussianBoxPrimitive } from "./plugins/GaussianBoxPrimitive";
-
-// .env에서 봉 개수 가져오기 (기본값 100)
-const DEFAULT_BAR_COUNT = parseInt(
-  process.env.NEXT_PUBLIC_CHART_BAR_COUNT || "100",
-  10
-);
 
 interface MainChartProps {
   data: ProcessedChartData[];
@@ -31,6 +28,11 @@ interface MainChartProps {
   gridStrokeColor: string;
   height: number;
   onReady: (chart: IChartApi) => void;
+  probabilityBoxEnabled: boolean;
+  bollingerEnabled: boolean;
+  vwapEnabled: boolean;
+  emaEnabled: boolean;
+  pivotEnabled: boolean;
 }
 
 type ExtendedChartData = ProcessedChartData & {
@@ -46,6 +48,11 @@ export const MainChart: React.FC<MainChartProps> = ({
   gridStrokeColor,
   height,
   onReady,
+  probabilityBoxEnabled,
+  bollingerEnabled,
+  vwapEnabled,
+  emaEnabled,
+  pivotEnabled,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -57,6 +64,11 @@ export const MainChart: React.FC<MainChartProps> = ({
     vwap: ISeriesApi<"Line"> | null;
     ema9: ISeriesApi<"Line"> | null;
     ema20: ISeriesApi<"Line"> | null;
+    p: ISeriesApi<"Line"> | null;
+    r2: ISeriesApi<"Line"> | null;
+    r3: ISeriesApi<"Line"> | null;
+    s2: ISeriesApi<"Line"> | null;
+    s3: ISeriesApi<"Line"> | null;
   }>({
     candle: null,
     upper: null,
@@ -64,17 +76,24 @@ export const MainChart: React.FC<MainChartProps> = ({
     vwap: null,
     ema9: null,
     ema20: null,
+    p: null,
+    r2: null,
+    r3: null,
+    s2: null,
+    s3: null,
   });
 
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const boxPrimitiveRef = useRef<GaussianBoxPrimitive | null>(null);
-  const isInitialZoomApplied = useRef(false);
+  const prevFirstDateRef = useRef<string | null>(null);
+  const prevTimeframeRef = useRef<string | null>(null);
+  const [yAxisInfo, setYAxisInfo] = React.useState<{
+    min: number;
+    max: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
-
-    // 차트 재생성 시 초기 zoom 플래그 리셋
-    isInitialZoomApplied.current = false;
 
     const chart = createChart(containerRef.current, {
       autoSize: true,
@@ -164,6 +183,62 @@ export const MainChart: React.FC<MainChartProps> = ({
       priceLineVisible: false,
     });
 
+    // Pivot series (1h/15m only)
+    const pSeries = chart.addSeries(LineSeries, {
+      color: "#FFB6C1",
+      lineWidth: 3,
+      lineStyle: 0,
+      lineType: 0,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      title: "Pivot",
+      visible: ["1h", "15m"].includes(timeframe),
+    });
+
+    const r2Series = chart.addSeries(LineSeries, {
+      color: "#42A5F5",
+      lineWidth: 1,
+      lineStyle: 0,
+      lineType: 0,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      title: "R2",
+      visible: ["1h", "15m"].includes(timeframe),
+    });
+
+    const r3Series = chart.addSeries(LineSeries, {
+      color: "#1E88E5",
+      lineWidth: 1,
+      lineStyle: 0,
+      lineType: 0,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      title: "R3",
+      visible: ["1h", "15m"].includes(timeframe),
+    });
+
+    const s2Series = chart.addSeries(LineSeries, {
+      color: "#EF5350",
+      lineWidth: 1,
+      lineStyle: 0,
+      lineType: 0,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      title: "S2",
+      visible: ["1h", "15m"].includes(timeframe),
+    });
+
+    const s3Series = chart.addSeries(LineSeries, {
+      color: "#E53935",
+      lineWidth: 1,
+      lineStyle: 0,
+      lineType: 0,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      title: "S3",
+      visible: ["1h", "15m"].includes(timeframe),
+    });
+
     chartRef.current = chart;
     seriesRef.current = {
       candle: candleSeries,
@@ -172,10 +247,58 @@ export const MainChart: React.FC<MainChartProps> = ({
       vwap: vwapSeries,
       ema9: ema9Series,
       ema20: ema20Series,
+      p: pSeries,
+      r2: r2Series,
+      r3: r3Series,
+      s2: s2Series,
+      s3: s3Series,
     };
+
+    // Debug event: Y축 스케일 변경 (Puppeteer 테스트용)
+    const handleDebugYScale = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!candleSeries || !chart) return;
+      try {
+        // autoScale 끄고 수동 범위 설정
+        candleSeries.priceScale().applyOptions({ autoScale: false });
+        // lightweight-charts v5: getVisibleRange / setVisibleRange 사용
+        const priceScale = candleSeries.priceScale();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const currentRange = (priceScale as any).getVisibleRange?.();
+        if (currentRange) {
+          const mid = (currentRange.from + currentRange.to) / 2;
+          const halfRange = (currentRange.to - currentRange.from) / 2;
+          const factor = detail?.factor || 0.5; // 기본 50% 축소
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (priceScale as any).setVisibleRange?.({
+            from: mid - halfRange * factor,
+            to: mid + halfRange * factor,
+          });
+        }
+      } catch {
+        // disposed 무시
+      }
+    };
+    window.addEventListener("debug-yscale", handleDebugYScale);
+
     onReady(chart);
 
     return () => {
+      window.removeEventListener("debug-yscale", handleDebugYScale);
+      chartRef.current = null;
+      seriesRef.current = {
+        candle: null,
+        upper: null,
+        lower: null,
+        vwap: null,
+        ema9: null,
+        ema20: null,
+        p: null,
+        r2: null,
+        r3: null,
+        s2: null,
+        s3: null,
+      };
       chart.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,14 +322,110 @@ export const MainChart: React.FC<MainChartProps> = ({
       color: d.color,
     }));
 
+    // 종목 변경 감지 (첫 번째 + 마지막 데이터 날짜 + 첫 가격 비교)
+    const firstDate = data[0]?.date || null;
+    const lastDate = data[data.length - 1]?.date || null;
+    const firstClose = data[0]?.close || 0;
+    const dataSignature = `${firstDate}_${lastDate}_${firstClose.toFixed(2)}`;
+    const prevSignature = prevFirstDateRef.current;
+    const symbolChanged =
+      prevSignature !== null && prevSignature !== dataSignature;
+    prevFirstDateRef.current = dataSignature;
+
+    // Timeframe 변경 감지
+    const timeframeChanged =
+      prevTimeframeRef.current !== null &&
+      prevTimeframeRef.current !== timeframe;
+    prevTimeframeRef.current = timeframe;
+
+    // 종목이나 timeframe 변경이 아니면 현재 범위 저장
+    let savedRange = null;
+    if (!symbolChanged && !timeframeChanged && chartRef.current) {
+      try {
+        savedRange = chartRef.current.timeScale().getVisibleLogicalRange();
+      } catch {}
+    }
+
     seriesRef.current.candle.setData(candleData);
 
-    // 차트 기본 동작에 맡김 - setVisibleLogicalRange 제거
-    // fitContent나 scrollToRealTime도 호출 안 함
+    // 저장된 범위 복원 또는 고정 봉 개수 적용
+    if (savedRange) {
+      // 종목/timeframe 변경이 아니면 사용자 위치 유지
+      try {
+        chartRef.current.timeScale().setVisibleLogicalRange(savedRange);
+      } catch {}
+    } else {
+      // 종목/timeframe 변경 시 고정 봉 개수 적용
+      const barCount = parseInt(
+        process.env.NEXT_PUBLIC_CHART_BAR_COUNT || "100",
+        10,
+      );
 
-    const boxes = calculateGaussianTrendBoxes(data, 20, 3);
+      if (barCount > 0 && chartRef.current && data.length > 0) {
+        try {
+          chartRef.current.timeScale().getVisibleLogicalRange();
+          // 음수 방지: 데이터가 barCount보다 적으면 0부터 시작
+          const fromVal = Math.max(0, data.length - 1 - barCount);
+          const toVal = data.length - 1;
+          chartRef.current.timeScale().setVisibleLogicalRange({
+            from: fromVal,
+            to: toVal,
+          });
+        } catch (err) {
+          console.error(
+            `[MainChart ${timeframe}] setVisibleLogicalRange error:`,
+            err,
+          );
+        }
+      }
+    }
+
+    // Y축 range 업데이트
+    if (chartRef.current) {
+      try {
+        const visibleRange = chartRef.current
+          .timeScale()
+          .getVisibleLogicalRange();
+        if (visibleRange) {
+          const startIdx = Math.max(0, Math.floor(visibleRange.from));
+          const endIdx = Math.min(data.length - 1, Math.ceil(visibleRange.to));
+
+          let minPrice = Infinity;
+          let maxPrice = -Infinity;
+
+          for (let i = startIdx; i <= endIdx; i++) {
+            if (data[i]) {
+              minPrice = Math.min(minPrice, data[i].low);
+              maxPrice = Math.max(maxPrice, data[i].high);
+            }
+          }
+
+          if (minPrice !== Infinity && maxPrice !== -Infinity) {
+            setYAxisInfo({ min: minPrice, max: maxPrice });
+          }
+        }
+      } catch {}
+    }
+
+    // 종목 변경 시 Y축 자동 맞춤
+    if (symbolChanged && seriesRef.current.candle) {
+      try {
+        seriesRef.current.candle.priceScale().applyOptions({
+          autoScale: true,
+        });
+      } catch {
+        // disposed 무시
+      }
+    }
+
+    // Probability box (conditional)
     if (boxPrimitiveRef.current) {
-      boxPrimitiveRef.current.setData(boxes);
+      if (probabilityBoxEnabled) {
+        const boxes = calculateGaussianTrendBoxes(data, 20, 3);
+        boxPrimitiveRef.current.setData(boxes);
+      } else {
+        boxPrimitiveRef.current.setData([]);
+      }
     }
 
     const upData = data
@@ -232,11 +451,59 @@ export const MainChart: React.FC<MainChartProps> = ({
       )
       .map((d) => ({ time: d.time, value: d.ema20! }));
 
-    seriesRef.current.upper?.setData(upData);
-    seriesRef.current.lower?.setData(dnData);
-    seriesRef.current.vwap?.setData(vwapData);
-    seriesRef.current.ema9?.setData(ema9Data);
-    seriesRef.current.ema20?.setData(ema20Data);
+    // Bollinger Bands
+    seriesRef.current.upper?.setData(bollingerEnabled ? upData : []);
+    seriesRef.current.lower?.setData(bollingerEnabled ? dnData : []);
+
+    // VWAP
+    seriesRef.current.vwap?.setData(vwapEnabled ? vwapData : []);
+
+    // EMA
+    seriesRef.current.ema9?.setData(emaEnabled ? ema9Data : []);
+    seriesRef.current.ema20?.setData(emaEnabled ? ema20Data : []);
+
+    // Pivot data (1h/15m only)
+    if (["1h", "15m"].includes(timeframe) && pivotEnabled) {
+      const pivotInputs = data.map((d) => ({
+        date: d.date.replace("\n", " "),
+        chartTime: d.time,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }));
+
+      const pivots = calculatePivotPoints(pivotInputs);
+
+      const pData: { time: Time; value: number }[] = [];
+      const r2Data: { time: Time; value: number }[] = [];
+      const r3Data: { time: Time; value: number }[] = [];
+      const s2Data: { time: Time; value: number }[] = [];
+      const s3Data: { time: Time; value: number }[] = [];
+
+      for (let i = 0; i < data.length; i++) {
+        const time = data[i].time;
+        const pt = pivots[i];
+
+        if (pt.p !== null) pData.push({ time, value: pt.p });
+        if (pt.r2 !== null) r2Data.push({ time, value: pt.r2 });
+        if (pt.r3 !== null) r3Data.push({ time, value: pt.r3 });
+        if (pt.s2 !== null) s2Data.push({ time, value: pt.s2 });
+        if (pt.s3 !== null) s3Data.push({ time, value: pt.s3 });
+      }
+
+      seriesRef.current.p?.setData(pData);
+      seriesRef.current.r2?.setData(r2Data);
+      seriesRef.current.r3?.setData(r3Data);
+      seriesRef.current.s2?.setData(s2Data);
+      seriesRef.current.s3?.setData(s3Data);
+    } else {
+      // 1d or disabled: clear pivot data
+      seriesRef.current.p?.setData([]);
+      seriesRef.current.r2?.setData([]);
+      seriesRef.current.r3?.setData([]);
+      seriesRef.current.s2?.setData([]);
+      seriesRef.current.s3?.setData([]);
+    }
 
     // 💡 기존 priceLine 초기화 로직 복구
     priceLinesRef.current.forEach((pl) => {
@@ -261,13 +528,90 @@ export const MainChart: React.FC<MainChartProps> = ({
         if (pl) priceLinesRef.current.push(pl);
       } catch {}
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, probLevels, timeframe]);
+  }, [
+    data,
+    probLevels,
+    timeframe,
+    probabilityBoxEnabled,
+    bollingerEnabled,
+    vwapEnabled,
+    emaEnabled,
+    pivotEnabled,
+  ]);
+
+  // Y축 정보 실시간 업데이트 (스크롤/줌 시)
+  useEffect(() => {
+    if (!chartRef.current || !data.length) return;
+
+    const updateYAxis = () => {
+      if (!chartRef.current) return;
+      try {
+        const visibleRange = chartRef.current
+          .timeScale()
+          .getVisibleLogicalRange();
+        if (visibleRange) {
+          const startIdx = Math.max(0, Math.floor(visibleRange.from));
+          const endIdx = Math.min(data.length - 1, Math.ceil(visibleRange.to));
+
+          let minPrice = Infinity;
+          let maxPrice = -Infinity;
+
+          for (let i = startIdx; i <= endIdx; i++) {
+            if (data[i]) {
+              minPrice = Math.min(minPrice, data[i].low);
+              maxPrice = Math.max(maxPrice, data[i].high);
+            }
+          }
+
+          if (minPrice !== Infinity && maxPrice !== -Infinity) {
+            setYAxisInfo({ min: minPrice, max: maxPrice });
+          }
+        }
+      } catch {}
+    };
+
+    const unsubscribe = chartRef.current
+      .timeScale()
+      .subscribeVisibleLogicalRangeChange(updateYAxis);
+
+    return () => {
+      try {
+        unsubscribe();
+      } catch {}
+    };
+  }, [data]);
 
   return (
     <div
-      ref={containerRef}
-      style={{ width: "100%", height: "100%", minWidth: 0 }}
-    />
+      style={{
+        width: "100%",
+        height: "100%",
+        minWidth: 0,
+        position: "relative",
+      }}
+    >
+      <div
+        ref={containerRef}
+        style={{ width: "100%", height: "100%", minWidth: 0 }}
+      />
+      {yAxisInfo && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "4px",
+            left: "4px",
+            backgroundColor: "rgba(0, 0, 0, 0.7)",
+            color: "white",
+            fontSize: "10px",
+            padding: "4px 8px",
+            borderRadius: "4px",
+            fontFamily: "monospace",
+            zIndex: 10,
+          }}
+        >
+          Y축: {yAxisInfo.min.toFixed(2)} ~ {yAxisInfo.max.toFixed(2)}
+        </div>
+      )}
+    </div>
   );
 };

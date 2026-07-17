@@ -25,7 +25,7 @@ services:
     # ==========================================================
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid
+      - /tmp:rw,nosuid
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -41,6 +41,7 @@ services:
       - ./node-app/.next/cache:/app/.next/cache
       - ./node-app/.cache:/app/.cache
       - ./node-app/lib:/app/lib:ro
+      - ./node-app/screenshots:/app/screenshots
 
   # 인메모리 캐시 서버 (Redis)
   redis:
