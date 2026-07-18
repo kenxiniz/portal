@@ -52,6 +52,7 @@ interface StockChartDisplayProps {
   loading: boolean;
   error: string | null;
   timeframe?: "1d" | "1h" | "15m";
+  apiType?: "kisStock" | "kStock" | "stock" | "binance";
 }
 
 export interface StockChartDisplayHandles {
@@ -111,7 +112,7 @@ export const StockChartDisplay = forwardRef<
   StockChartDisplayHandles,
   StockChartDisplayProps
 >(function StockChartDisplay(
-  { data, signals, gridStrokeColor, loading, error, timeframe = "1d" },
+  { data, signals, gridStrokeColor, loading, error, timeframe = "1d", apiType },
   ref,
 ) {
   const [mainChart, setMainChart] = useState<IChartApi | null>(null);
@@ -180,11 +181,17 @@ export const StockChartDisplay = forwardRef<
       return { processedData: [], closePrices: [] };
 
     // Detect if incoming dataset uses raw US Eastern Time stamps
-    const isUsRawEt = data.slice(0, 20).some((d) => {
-      if (!d?.date) return false;
-      const hour = parseInt(d.date.split(/[T\s]/)[1]?.split(":")[0] || "0", 10);
-      return hour >= 4 && hour <= 8;
-    });
+    // Binance uses UTC, skip EST conversion
+    const isUsRawEt =
+      apiType !== "binance" &&
+      data.slice(0, 20).some((d) => {
+        if (!d?.date) return false;
+        const hour = parseInt(
+          d.date.split(/[T\s]/)[1]?.split(":")[0] || "0",
+          10,
+        );
+        return hour >= 4 && hour <= 8;
+      });
 
     const cleanData = data
       .filter((d) => d?.date)
@@ -224,6 +231,19 @@ export const StockChartDisplay = forwardRef<
 
     let isHolding = false;
 
+    // DEBUG: signals 정보 출력
+    if (signals.length > 0) {
+      console.log(`[DEBUG] Total signals: ${signals.length}`);
+      const buySignals = signals.filter(
+        (s) => s.type === "buy" || s.type === "inverse-buy",
+      );
+      buySignals.slice(0, 3).forEach((s) => {
+        console.log(
+          `[DEBUG] Signal: type=${s.type}, startDate=${s.startDate}, date=${s.date}`,
+        );
+      });
+    }
+
     const processed = uniqueData.map((d, i) => {
       const signalsOnDate = signals.filter((s) => s.date === d.date);
       let turnOn = false;
@@ -236,18 +256,29 @@ export const StockChartDisplay = forwardRef<
 
       if (turnOn) isHolding = true;
 
-      const isPatternFormation = signals.some(
+      // 신호 생성 구간 (startDate ~ date): buy는 파랑, inverse-buy는 빨강
+      // RSI 조건: 쌍바닥(buy)은 startDate 이후 RSI가 startDate 봉보다 높은 봉만 (과매도 탈출 구간)
+      //           쌍봉(inverse-buy)은 startDate 이후 RSI가 startDate 봉보다 낮은 봉만 (과매수 탈출 구간)
+      const patternSignal = signals.find(
         (s) =>
           s.startDate &&
           d.date >= s.startDate &&
           d.date <= s.date &&
-          s.type.includes("buy"),
+          (s.type === "buy" || s.type === "inverse-buy"),
       );
 
       let highlightColor: string | undefined = undefined;
-      if (isHolding || turnOff) {
-        highlightColor = "#FFB6C1";
-      } else if (isPatternFormation) {
+      if (patternSignal) {
+        // buy (쌍바닥): 파랑, inverse-buy (쌍봉): 빨강
+        // startDate ~ date 전체 구간 색칠
+        highlightColor = patternSignal.type === "buy" ? "#2196F3" : "#F44336";
+        if (d.date.includes("07-15") || d.date.includes("07-16")) {
+          console.log(
+            `[DEBUG] Blue/Red candle: ${d.date}, RSI: ${d.rsi?.toFixed(2)}, type: ${patternSignal.type}`,
+          );
+        }
+      } else if (isHolding || turnOff) {
+        // 보유 기간 (신호 확정일 이후): 노랑
         highlightColor = "#FFEB3B";
       }
 
@@ -288,7 +319,7 @@ export const StockChartDisplay = forwardRef<
     });
 
     return { processedData: processed, closePrices: closes };
-  }, [data, signals, timeframe]);
+  }, [data, signals, timeframe, apiType]);
 
   const probLevels = useMemo(
     () => calculateProbabilityLevels(closePrices),

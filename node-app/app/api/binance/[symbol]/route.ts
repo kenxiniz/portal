@@ -200,6 +200,14 @@ export async function GET(request: Request) {
         false, // Binance는 inverse 없음
       );
 
+      console.log(
+        `[INFO] [${symbol}] ${timeframe} signals generated:`,
+        signals.length,
+        signals
+          .slice(0, 3)
+          .map((s) => ({ type: s.type, date: s.date, startDate: s.startDate })),
+      );
+
       const responsePayload: CachePayload = {
         data: processedData,
         signals,

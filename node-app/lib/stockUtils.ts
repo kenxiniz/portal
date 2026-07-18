@@ -143,10 +143,9 @@ export const analyzeAllTradingSignals = (
       ? TRADING_CONFIG.timeLimit1dDays * 24 * 60 * 60 * 1000
       : TRADING_CONFIG.timeLimitOtherDays * 24 * 60 * 60 * 1000;
 
+  // 1d: 5봉, 1h/15m: 15봉 (인트라데이에서 더 긴 간격 필요)
   const minDivergenceBars =
-    timeframe === "1d"
-      ? TRADING_CONFIG.divergenceMinDays
-      : TRADING_CONFIG.divergenceMinDays;
+    timeframe === "1d" ? TRADING_CONFIG.divergenceMinDays : 15;
 
   const closePrices = data.map((d) => d.close);
   const highPrices = data.map((d) => d.high);
@@ -363,21 +362,22 @@ export const analyzeAllTradingSignals = (
     // 3. Setup Logic
     if (potentialSecondTrough && firstTrough) {
       if (currentPoint.close > potentialSecondTrough.close) {
-        if (timeframe === "1d") {
-          const buySignal: TradingSignal = {
-            date: currentPoint.date,
-            startDate: firstTrough.date,
-            type: "buy",
-            reason: isInverse
-              ? "시장 과열 신호 (RSI 쌍바닥)"
-              : "매수 (RSI 쌍바닥)",
-            entryPrice: currentPoint.close,
-            currentPrice: currentPoint.close,
-            details: `RSI Bullish Divergence`,
-          };
-          signals.push(buySignal);
-          lastBuySignal = buySignal;
-        } else {
+        // 1d, 1h, 15m 모두 직접 신호 생성 (바이낸스 선물)
+        const buySignal: TradingSignal = {
+          date: currentPoint.date,
+          startDate: firstTrough.date,
+          type: "buy",
+          reason: isInverse
+            ? "시장 과열 신호 (RSI 쌍바닥)"
+            : "매수 (RSI 쌍바닥)",
+          entryPrice: currentPoint.close,
+          currentPrice: currentPoint.close,
+          details: `RSI Bullish Divergence`,
+        };
+        signals.push(buySignal);
+        lastBuySignal = buySignal;
+        if (timeframe !== "1d") {
+          // 1h/15m에서도 setup 활성화 유지 (BB 익절 로직용)
           isBullishSetupActive = true;
           bullishSetupStartDate = firstTrough.date;
         }
@@ -419,6 +419,7 @@ export const analyzeAllTradingSignals = (
           firstTroughIndex = null;
         } else if (daysSinceFirstTrough > minDivergenceBars) {
           if (
+            currentPoint.rsi >= TRADING_CONFIG.rsiOversold &&
             currentPoint.close < firstTrough.close &&
             currentPoint.rsi > firstTrough.rsi!
           ) {
@@ -430,19 +431,20 @@ export const analyzeAllTradingSignals = (
 
     if (potentialSecondPeak && firstPeak) {
       if (currentPoint.close < potentialSecondPeak.close) {
-        if (timeframe === "1d") {
-          const inverseBuySignal: TradingSignal = {
-            date: currentPoint.date,
-            startDate: firstPeak.date,
-            type: "inverse-buy",
-            reason: "시장 과열 신호 (RSI 쌍봉)",
-            entryPrice: currentPoint.close,
-            currentPrice: currentPoint.close,
-            details: `RSI Bearish Divergence`,
-          };
-          signals.push(inverseBuySignal);
-          lastInverseBuySignal = inverseBuySignal;
-        } else {
+        // 1d, 1h, 15m 모두 직접 신호 생성 (바이낸스 선물)
+        const inverseBuySignal: TradingSignal = {
+          date: currentPoint.date,
+          startDate: firstPeak.date,
+          type: "inverse-buy",
+          reason: "시장 과열 신호 (RSI 쌍봉)",
+          entryPrice: currentPoint.close,
+          currentPrice: currentPoint.close,
+          details: `RSI Bearish Divergence`,
+        };
+        signals.push(inverseBuySignal);
+        lastInverseBuySignal = inverseBuySignal;
+        if (timeframe !== "1d") {
+          // 1h/15m에서도 setup 활성화 유지 (BB 익절 로직용)
           isBearishSetupActive = true;
           bearishSetupStartDate = firstPeak.date;
         }
@@ -484,6 +486,7 @@ export const analyzeAllTradingSignals = (
           firstPeakIndex = null;
         } else if (daysSinceFirstPeak > minDivergenceBars) {
           if (
+            currentPoint.rsi <= TRADING_CONFIG.rsiOverbought &&
             currentPoint.close > firstPeak.close &&
             currentPoint.rsi < firstPeak.rsi!
           ) {

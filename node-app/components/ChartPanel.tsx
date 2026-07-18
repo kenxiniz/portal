@@ -99,6 +99,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   gridStrokeColor,
   currency,
   timeframe = "1d",
+  apiType,
 }) => {
   const chartRef = useRef<StockChartDisplayHandles>(null);
   const historyYears = Number(process.env.NEXT_PUBLIC_HISTORY_YEARS) || 1;
@@ -639,6 +640,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 loading={isFetching}
                 error={null}
                 timeframe={timeframe}
+                apiType={apiType}
               />
             )}
             {tickerState.error && !isFetching && (

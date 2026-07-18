@@ -192,6 +192,16 @@ export default function BinancePage() {
 
       setTickerStates((prev) => {
         const currentState = prev[symbol];
+        // DEBUG: Check original RSI before any processing
+        const debugCandle = currentState?.data?.find(
+          (c) => c.date === "2026-07-15 16:00:00",
+        );
+        if (debugCandle) {
+          console.log(
+            "[DEBUG ORIG RSI] Before processing: " +
+              debugCandle.rsi?.toFixed(2),
+          );
+        }
         if (!currentState?.data || currentState.data.length === 0) {
           console.log(
             `[WebSocket] No data available for ${symbol}, skipping update`,
@@ -243,11 +253,32 @@ export default function BinancePage() {
           });
         }
 
-        // RSI와 볼린저 밴드 재계산
-        const dataWithIndicators = calculateBollingerBands(
+        // RSI와 볼린저 밴드: 기존값 유지, 마지막만 재계산
+        // 전체 재계산하면 신호(REST API RSI)와 화면 RSI 불일치
+        const recalcWithIndicators = calculateBollingerBands(
           calculateRSI(updatedData),
         );
+        // date 기준으로 원본 RSI 찾기 (인덱스 밀림 방지)
+        const origDataMap = new Map(
+          (currentState.data || []).map((c) => [c.date, c]),
+        );
+        const dataWithIndicators = updatedData.map((d, i) => {
+          const orig = origDataMap.get(d.date);
+          if (i < updatedData.length - 1 && orig) {
+            return { ...d, rsi: orig.rsi, bollingerBands: orig.bollingerBands };
+          }
+          return recalcWithIndicators[i];
+        });
+        // OLD:
 
+        // DEBUG: RSI 유지 확인
+        const testDate = "2026-07-15 16:00:00";
+        const testCandle = dataWithIndicators.find((c) => c.date === testDate);
+        if (testCandle) {
+          console.log(
+            `[DEBUG RSI] ${testDate} RSI after update: ${testCandle.rsi?.toFixed(2)}`,
+          );
+        }
         console.log(
           `[WebSocket] Chart updated for ${symbol}, total candles: ${dataWithIndicators.length}`,
         );
