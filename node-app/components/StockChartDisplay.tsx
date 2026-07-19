@@ -383,28 +383,39 @@ export const StockChartDisplay = forwardRef<
     if (sourceCharts.length === 0) return;
 
     let isSyncing = false;
+    let pendingRange: LogicalRange | null = null;
+    let rafId: number | null = null;
+    let lastBarCount = 0;
 
     const handlers = sourceCharts.map((sourceChart) => {
       const handler = (logicalRange: LogicalRange | null) => {
         if (!logicalRange || isSyncing || isMovingToDate.current) return;
 
-        // 현재 보이는 봉 개수 업데이트
-        const barCount = Math.round(logicalRange.to - logicalRange.from);
-        setVisibleBarCount(barCount);
+        pendingRange = logicalRange;
+        if (rafId !== null) return;
 
-        isSyncing = true;
-        // 최신 차트 참조 사용
-        const { main, pivot, rsi, macd } = chartsRef.current;
-        [main, pivot, rsi, macd].forEach((targetChart) => {
-          if (targetChart && targetChart !== sourceChart) {
-            try {
-              targetChart.timeScale().setVisibleLogicalRange(logicalRange);
-            } catch {
-              // disposed 차트 무시
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          if (!pendingRange || isSyncing) return;
+
+          isSyncing = true;
+          const { main, pivot, rsi, macd } = chartsRef.current;
+          [main, pivot, rsi, macd].forEach((targetChart) => {
+            if (targetChart && targetChart !== sourceChart) {
+              try {
+                targetChart.timeScale().setVisibleLogicalRange(pendingRange!);
+              } catch {}
             }
+          });
+          isSyncing = false;
+
+          const barCount = Math.round(pendingRange.to - pendingRange.from);
+          if (barCount !== lastBarCount) {
+            lastBarCount = barCount;
+            setVisibleBarCount(barCount);
           }
+          pendingRange = null;
         });
-        isSyncing = false;
       };
 
       sourceChart.timeScale().subscribeVisibleLogicalRangeChange(handler);
@@ -415,10 +426,9 @@ export const StockChartDisplay = forwardRef<
       handlers.forEach(({ chart, handler }) => {
         try {
           chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
-        } catch {
-          // disposed 무시
-        }
+        } catch {}
       });
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [mainChart]);
 
