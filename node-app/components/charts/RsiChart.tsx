@@ -28,6 +28,9 @@ export const RsiChart: React.FC<RsiChartProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   // Add chartRef to safely handle dynamic resize without re-rendering chart
   const chartRef = useRef<IChartApi | null>(null);
+  const prevDataLengthRef = useRef<number>(0);
+  const prevLastTimeRef = useRef<number | string | null>(null);
+
   const seriesRef = useRef<{
     rsi: ISeriesApi<"Line"> | null;
     dummy: ISeriesApi<"Candlestick"> | null;
@@ -114,7 +117,20 @@ export const RsiChart: React.FC<RsiChartProps> = ({
     }));
 
     try {
-      seriesRef.current.rsi.setData(rsiData);
+      // 실시간 업데이트 감지
+      const lastRsi = rsiData[rsiData.length - 1];
+      const isRealtimeUpdate =
+        data.length === prevDataLengthRef.current &&
+        lastRsi?.time === prevLastTimeRef.current;
+
+      prevDataLengthRef.current = data.length;
+      prevLastTimeRef.current = lastRsi?.time || null;
+
+      if (isRealtimeUpdate && lastRsi) {
+        seriesRef.current.rsi.update(lastRsi);
+      } else {
+        seriesRef.current.rsi.setData(rsiData);
+      }
       seriesRef.current.dummy?.setData(dummyData);
     } catch {}
   }, [data]);

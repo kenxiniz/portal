@@ -37,6 +37,9 @@ export const MacdChart: React.FC<MacdChartProps> = ({
   // Add chartRef to safely handle dynamic resize without re-rendering chart
   const chartRef = useRef<IChartApi | null>(null);
 
+  const prevDataLengthRef = useRef<number>(0);
+  const prevLastTimeRef = useRef<number | string | null>(null);
+
   const seriesRef = useRef<{
     line: ISeriesApi<"Line"> | null;
     signal: ISeriesApi<"Line"> | null;
@@ -123,9 +126,26 @@ export const MacdChart: React.FC<MacdChartProps> = ({
     }));
 
     try {
-      seriesRef.current.line.setData(macdData.line);
-      seriesRef.current.signal?.setData(macdData.signal);
-      seriesRef.current.hist?.setData(macdData.hist);
+      // 실시간 업데이트 감지
+      const lastLine = macdData.line[macdData.line.length - 1];
+      const lastSignal = macdData.signal[macdData.signal.length - 1];
+      const lastHist = macdData.hist[macdData.hist.length - 1];
+      const isRealtimeUpdate =
+        macdData.line.length === prevDataLengthRef.current &&
+        lastLine?.time === prevLastTimeRef.current;
+
+      prevDataLengthRef.current = macdData.line.length;
+      prevLastTimeRef.current = lastLine?.time || null;
+
+      if (isRealtimeUpdate) {
+        if (lastLine) seriesRef.current.line.update(lastLine);
+        if (lastSignal) seriesRef.current.signal?.update(lastSignal);
+        if (lastHist) seriesRef.current.hist?.update(lastHist);
+      } else {
+        seriesRef.current.line.setData(macdData.line);
+        seriesRef.current.signal?.setData(macdData.signal);
+        seriesRef.current.hist?.setData(macdData.hist);
+      }
       seriesRef.current.dummy?.setData(dummyData);
 
       // 💡 텍스트를 제거하고 우측 이동 태그에 수치만 소수점 둘째 자리까지 표시하도록 변경했습니다.

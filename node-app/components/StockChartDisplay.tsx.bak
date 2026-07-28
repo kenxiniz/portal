@@ -383,34 +383,28 @@ export const StockChartDisplay = forwardRef<
     if (sourceCharts.length === 0) return;
 
     let isSyncing = false;
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastBarCount = 0;
 
     const handlers = sourceCharts.map((sourceChart) => {
       const handler = (logicalRange: LogicalRange | null) => {
         if (!logicalRange || isSyncing || isMovingToDate.current) return;
 
-        // 즉시 동기화 (UI 반응성)
+        // 현재 보이는 봉 개수 업데이트
+        const barCount = Math.round(logicalRange.to - logicalRange.from);
+        setVisibleBarCount(barCount);
+
         isSyncing = true;
+        // 최신 차트 참조 사용
         const { main, pivot, rsi, macd } = chartsRef.current;
         [main, pivot, rsi, macd].forEach((targetChart) => {
           if (targetChart && targetChart !== sourceChart) {
             try {
               targetChart.timeScale().setVisibleLogicalRange(logicalRange);
-            } catch {}
+            } catch {
+              // disposed 차트 무시
+            }
           }
         });
         isSyncing = false;
-
-        // 봉 개수 업데이트는 debounce (300ms 후 1회만)
-        const barCount = Math.round(logicalRange.to - logicalRange.from);
-        if (barCount !== lastBarCount) {
-          lastBarCount = barCount;
-          if (debounceTimer) clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => {
-            setVisibleBarCount(barCount);
-          }, 300);
-        }
       };
 
       sourceChart.timeScale().subscribeVisibleLogicalRangeChange(handler);
@@ -421,9 +415,10 @@ export const StockChartDisplay = forwardRef<
       handlers.forEach(({ chart, handler }) => {
         try {
           chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
-        } catch {}
+        } catch {
+          // disposed 무시
+        }
       });
-      if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [mainChart]);
 

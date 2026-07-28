@@ -95,6 +95,9 @@ export const MainChart: React.FC<MainChartProps> = ({
   const boxPrimitiveRef = useRef<GaussianBoxPrimitive | null>(null);
   const prevFirstDateRef = useRef<string | null>(null);
   const prevTimeframeRef = useRef<string | null>(null);
+  const prevDataLengthRef = useRef<number>(0);
+  const prevLastTimeRef = useRef<number | string | null>(null);
+  const currentPriceRef = useRef<number>(0);
   const [yAxisInfo, setYAxisInfo] = React.useState<{
     min: number;
     max: number;
@@ -150,6 +153,16 @@ export const MainChart: React.FC<MainChartProps> = ({
       borderDownColor: "#000000",
       wickUpColor: "#66BB6A",
       wickDownColor: "#000000",
+      priceFormat: {
+        type: "custom",
+        formatter: (price: number) => {
+          const currentPrice = currentPriceRef.current;
+          if (currentPrice <= 0) return price.toFixed(2);
+          const pctDiff = ((price - currentPrice) / currentPrice) * 100;
+          const sign = pctDiff >= 0 ? "+" : "";
+          return `${price.toFixed(2)} (${sign}${pctDiff.toFixed(1)}%)`;
+        },
+      },
     });
 
     const boxPrimitive = new GaussianBoxPrimitive([]);
@@ -354,7 +367,26 @@ export const MainChart: React.FC<MainChartProps> = ({
       } catch {}
     }
 
-    seriesRef.current.candle.setData(candleData);
+    // WebSocket 실시간 업데이트 감지
+    const lastCandle = candleData[candleData.length - 1];
+    const isRealtimeUpdate =
+      !symbolChanged &&
+      !timeframeChanged &&
+      data.length === prevDataLengthRef.current &&
+      lastCandle?.time === prevLastTimeRef.current;
+
+    prevDataLengthRef.current = data.length;
+    prevLastTimeRef.current = lastCandle?.time || null;
+
+    // 현재가 업데이트 (crosshair % 표시용)
+    currentPriceRef.current = data[data.length - 1]?.close || 0;
+
+    // 실시간 업데이트면 update()로 마지막 봉만 갱신
+    if (isRealtimeUpdate && lastCandle) {
+      seriesRef.current.candle.update(lastCandle);
+    } else {
+      seriesRef.current.candle.setData(candleData);
+    }
 
     // 매수/매도 신호 마커 설정
     if (signals.length > 0 && seriesRef.current.candle) {

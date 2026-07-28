@@ -143,9 +143,9 @@ export const analyzeAllTradingSignals = (
       ? TRADING_CONFIG.timeLimit1dDays * 24 * 60 * 60 * 1000
       : TRADING_CONFIG.timeLimitOtherDays * 24 * 60 * 60 * 1000;
 
-  // 1d: 5봉, 1h/15m: 15봉 (인트라데이에서 더 긴 간격 필요)
+  // 1d: 5봉, 1h/15m: 8봉 (인트라데이에서 더 긴 간격 필요)
   const minDivergenceBars =
-    timeframe === "1d" ? TRADING_CONFIG.divergenceMinDays : 15;
+    timeframe === "1d" ? TRADING_CONFIG.divergenceMinDays : 8;
 
   const closePrices = data.map((d) => d.close);
   const highPrices = data.map((d) => d.high);
