@@ -98,6 +98,7 @@ export const MainChart: React.FC<MainChartProps> = ({
   const prevDataLengthRef = useRef<number>(0);
   const prevLastTimeRef = useRef<number | string | null>(null);
   const currentPriceRef = useRef<number>(0);
+  const prevIndicatorStateRef = useRef<string>("");
   const [yAxisInfo, setYAxisInfo] = React.useState<{
     min: number;
     max: number;
@@ -376,9 +377,18 @@ export const MainChart: React.FC<MainChartProps> = ({
 
     // WebSocket 실시간 업데이트 감지
     const lastCandle = candleData[candleData.length - 1];
+
+    // Indicator 상태 변경 감지
+    const indicatorState = `${probabilityBoxEnabled}-${bollingerEnabled}-${vwapEnabled}-${emaEnabled}-${pivotEnabled}`;
+    const indicatorChanged =
+      prevIndicatorStateRef.current !== "" &&
+      prevIndicatorStateRef.current !== indicatorState;
+    prevIndicatorStateRef.current = indicatorState;
+
     const isRealtimeUpdate =
       !symbolChanged &&
       !timeframeChanged &&
+      !indicatorChanged &&
       data.length === prevDataLengthRef.current &&
       lastCandle?.time === prevLastTimeRef.current;
 
