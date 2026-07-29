@@ -24,7 +24,11 @@ const symbols = stockConfig.binance_futures.map((t) => t.symbol);
 
 type Timeframe = "1d" | "1h" | "15m";
 
+// MVVM: UI 갱신 주기 (1초)
+const UI_UPDATE_INTERVAL_MS = 1000;
+
 export default function BinancePage() {
+  // ===== View State (UI 렌더링용) =====
   const [tickerStates, setTickerStates] = useState<Record<string, TickerState>>(
     () => {
       const initialState: Record<string, TickerState> = {};
@@ -47,36 +51,120 @@ export default function BinancePage() {
   const gridStrokeColor = useThemeDetector();
   const fullLoadInitiated = useRef(false);
   const previousTimeframe = useRef<Timeframe>("1d");
-  const wsClientRef = useRef<BinanceWebSocketClient | null>(null);
 
+  // ===== Model (데이터 저장용 - 리렌더 안함) =====
+  const dataModelRef = useRef<Record<string, StockDataPoint[]>>({});
+  const signalsModelRef = useRef<Record<string, TradingSignal[]>>({});
+  const adviceModelRef = useRef<Record<string, AdviceObject | null>>({});
+  const wsClientRef = useRef<BinanceWebSocketClient | null>(null);
+  const uiUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ===== ViewModel: Model → View 동기화 (throttled) =====
+  const syncModelToView = useCallback((symbol: string) => {
+    const data = dataModelRef.current[symbol];
+    const signals = signalsModelRef.current[symbol];
+    const advice = adviceModelRef.current[symbol];
+
+    if (!data || data.length === 0) return;
+
+    setTickerStates((prev) => {
+      const prevState = prev[symbol];
+      // 데이터 변경 없으면 스킵
+      if (prevState.data === data) return prev;
+
+      return {
+        ...prev,
+        [symbol]: {
+          data,
+          signals: signals || [],
+          loading: false,
+          error: null,
+          advice: advice || null,
+        },
+      };
+    });
+  }, []);
+
+  // ===== Model 업데이트 (WebSocket 수신 시) =====
+  const updateModel = useCallback(
+    (symbol: string, klineData: BinanceKlineData) => {
+      const currentData = dataModelRef.current[symbol];
+      if (!currentData || currentData.length === 0) return;
+
+      const updatedData = [...currentData];
+      const lastCandle = updatedData[updatedData.length - 1];
+
+      // 날짜 형식 변환
+      const klineDate = new Date(klineData.time);
+      const formattedDate =
+        selectedTimeframe === "1d"
+          ? klineDate.toISOString().split("T")[0]
+          : klineDate
+              .toISOString()
+              .replace("Z", "")
+              .replace("T", " ")
+              .substring(0, 19);
+
+      // 마지막 캔들 업데이트 또는 새 캔들 추가
+      if (lastCandle && lastCandle.date === formattedDate) {
+        updatedData[updatedData.length - 1] = {
+          ...lastCandle,
+          high: Math.max(lastCandle.high, klineData.high),
+          low: Math.min(lastCandle.low, klineData.low),
+          close: klineData.close,
+          volume: klineData.volume,
+        };
+      } else {
+        updatedData.push({
+          date: formattedDate,
+          open: klineData.open,
+          high: klineData.high,
+          low: klineData.low,
+          close: klineData.close,
+          volume: klineData.volume,
+        });
+        // 500개 초과 시 제거
+        if (updatedData.length > 500) {
+          updatedData.shift();
+        }
+      }
+
+      // RSI/BB: 기존값 유지, 마지막만 재계산
+      const recalcData = calculateBollingerBands(calculateRSI(updatedData));
+      const origDataMap = new Map(currentData.map((c) => [c.date, c]));
+      const finalData = recalcData.map((d, i) => {
+        const orig = origDataMap.get(d.date);
+        if (i < recalcData.length - 1 && orig) {
+          return { ...d, rsi: orig.rsi, bollingerBands: orig.bollingerBands };
+        }
+        return d;
+      });
+
+      // Model 업데이트 (리렌더 없음)
+      dataModelRef.current[symbol] = finalData;
+    },
+    [selectedTimeframe],
+  );
+
+  // ===== REST API에서 초기 데이터 로드 =====
   const fetchSymbolData = useCallback(
     async (
       symbol: string,
       timeframe: Timeframe,
       forceRefresh: boolean = false,
     ) => {
-      const shouldBypassCache = forceRefresh;
-
-      setTickerStates((prev) => {
-        if (prev[symbol]?.loading === true && !shouldBypassCache) return prev;
-        return {
-          ...prev,
-          [symbol]: { ...prev[symbol], loading: true, error: null },
-        };
-      });
+      setTickerStates((prev) => ({
+        ...prev,
+        [symbol]: { ...prev[symbol], loading: true, error: null },
+      }));
 
       try {
-        console.log(
-          `[DATA FETCH] Fetching ${symbol} data for timeframe: ${timeframe}, refresh: ${shouldBypassCache}`,
-        );
-
         const noCacheTimestamp = Date.now();
-        const endpoint = `/api/binance/${symbol}?timeframe=${timeframe}${shouldBypassCache ? "&refresh=true" : ""}&t=${noCacheTimestamp}`;
+        const endpoint = `/api/binance/${symbol}?timeframe=${timeframe}${forceRefresh ? "&refresh=true" : ""}&t=${noCacheTimestamp}`;
 
         const response = await fetch(endpoint, { cache: "no-store" });
 
         if (!response.ok) {
-          // 502/500 errors return HTML, not JSON
           const contentType = response.headers.get("content-type");
           let errorMsg = `HTTP ${response.status}`;
 
@@ -104,24 +192,33 @@ export default function BinancePage() {
           advice: AdviceObject | null;
         } = await response.json();
 
-        setTickerStates((prev) => {
-          const prevState = prev[symbol];
-          const hasNewData = Array.isArray(data) && data.length > 0;
+        if (Array.isArray(data) && data.length > 0) {
+          // Model에 저장
+          dataModelRef.current[symbol] = data;
+          signalsModelRef.current[symbol] = signals;
+          adviceModelRef.current[symbol] = advice;
 
-          return {
+          // View에 즉시 반영
+          setTickerStates((prev) => ({
             ...prev,
             [symbol]: {
-              data: hasNewData ? data : prevState.data,
-              signals: hasNewData ? signals : prevState.signals,
+              data,
+              signals,
               loading: false,
-              error:
-                !hasNewData && prevState.data && prevState.data.length > 0
-                  ? "API call delayed. Keeping existing chart data."
-                  : null,
-              advice: advice || prevState.advice || null,
+              error: null,
+              advice,
             },
-          };
-        });
+          }));
+        } else {
+          setTickerStates((prev) => ({
+            ...prev,
+            [symbol]: {
+              ...prev[symbol],
+              loading: false,
+              error: "No data available",
+            },
+          }));
+        }
       } catch (e: unknown) {
         const errorMessage =
           e instanceof Error ? e.message : "An unknown error occurred";
@@ -131,10 +228,7 @@ export default function BinancePage() {
           [symbol]: {
             ...prev[symbol],
             loading: false,
-            error:
-              prev[symbol]?.data && prev[symbol].data!.length > 0
-                ? `Sync failed: ${errorMessage} (Keeping existing data)`
-                : `Failed to load data for ${symbol}. Error: ${errorMessage}`,
+            error: errorMessage,
           },
         }));
       }
@@ -142,6 +236,7 @@ export default function BinancePage() {
     [],
   );
 
+  // ===== 전체 심볼 로드 =====
   const loadAllSymbolsSequentially = useCallback(
     async (
       timeframeToLoad: Timeframe,
@@ -181,128 +276,11 @@ export default function BinancePage() {
     [fetchSymbolData, selectedSymbol],
   );
 
-  // WebSocket 실시간 데이터 업데이트
-  const handleWebSocketUpdate = useCallback(
-    (symbol: string, klineData: BinanceKlineData) => {
-      console.log(`[WebSocket] Received data for ${symbol}:`, {
-        time: new Date(klineData.time).toISOString(),
-        close: klineData.close,
-        volume: klineData.volume,
-      });
-
-      setTickerStates((prev) => {
-        const currentState = prev[symbol];
-        // DEBUG: Check original RSI before any processing
-        const debugCandle = currentState?.data?.find(
-          (c) => c.date === "2026-07-15 16:00:00",
-        );
-        if (debugCandle) {
-          console.log(
-            "[DEBUG ORIG RSI] Before processing: " +
-              debugCandle.rsi?.toFixed(2),
-          );
-        }
-        if (!currentState?.data || currentState.data.length === 0) {
-          console.log(
-            `[WebSocket] No data available for ${symbol}, skipping update`,
-          );
-          return prev;
-        }
-
-        const updatedData = [...currentState.data];
-        const lastCandle = updatedData[updatedData.length - 1];
-
-        // 날짜 형식 변환
-        const klineDate = new Date(klineData.time);
-        const formattedDate =
-          selectedTimeframe === "1d"
-            ? klineDate.toISOString().split("T")[0]
-            : klineDate
-                .toISOString()
-                .replace("Z", "")
-                .replace("T", " ")
-                .substring(0, 19);
-
-        console.log(
-          `[WebSocket] Last candle date: "${lastCandle?.date}", New data date: "${formattedDate}"`,
-        );
-        console.log(
-          `[WebSocket] Date match: ${lastCandle?.date === formattedDate}`,
-        );
-        console.log(`[WebSocket] Timeframe: ${selectedTimeframe}`);
-
-        // 마지막 캔들 업데이트 또는 새 캔들 추가
-        if (lastCandle && lastCandle.date === formattedDate) {
-          console.log(`[WebSocket] Updating existing candle for ${symbol}`);
-          updatedData[updatedData.length - 1] = {
-            ...lastCandle,
-            high: Math.max(lastCandle.high, klineData.high),
-            low: Math.min(lastCandle.low, klineData.low),
-            close: klineData.close,
-            volume: klineData.volume,
-          };
-        } else {
-          console.log(`[WebSocket] Adding new candle for ${symbol}`);
-          updatedData.push({
-            date: formattedDate,
-            open: klineData.open,
-            high: klineData.high,
-            low: klineData.low,
-            close: klineData.close,
-            volume: klineData.volume,
-          });
-        }
-
-        // RSI와 볼린저 밴드: 기존값 유지, 마지막만 재계산
-        // 전체 재계산하면 신호(REST API RSI)와 화면 RSI 불일치
-        const recalcWithIndicators = calculateBollingerBands(
-          calculateRSI(updatedData),
-        );
-        // date 기준으로 원본 RSI 찾기 (인덱스 밀림 방지)
-        const origDataMap = new Map(
-          (currentState.data || []).map((c) => [c.date, c]),
-        );
-        const dataWithIndicators = updatedData.map((d, i) => {
-          const orig = origDataMap.get(d.date);
-          if (i < updatedData.length - 1 && orig) {
-            return { ...d, rsi: orig.rsi, bollingerBands: orig.bollingerBands };
-          }
-          return recalcWithIndicators[i];
-        });
-        // OLD:
-
-        // DEBUG: RSI 유지 확인
-        const testDate = "2026-07-15 16:00:00";
-        const testCandle = dataWithIndicators.find((c) => c.date === testDate);
-        if (testCandle) {
-          console.log(
-            `[DEBUG RSI] ${testDate} RSI after update: ${testCandle.rsi?.toFixed(2)}`,
-          );
-        }
-        console.log(
-          `[WebSocket] Chart updated for ${symbol}, total candles: ${dataWithIndicators.length}`,
-        );
-
-        return {
-          ...prev,
-          [symbol]: {
-            ...currentState,
-            data: dataWithIndicators,
-          },
-        };
-      });
-    },
-    [selectedTimeframe],
-  );
-
-  // WebSocket 연결/해제
+  // ===== WebSocket 연결 =====
   const connectWebSocket = useCallback(
     (symbol: string) => {
-      console.log(`[WebSocket] connectWebSocket called for ${symbol}`);
-
       // 기존 연결 정리
       if (wsClientRef.current) {
-        console.log(`[WebSocket] Disconnecting previous connection...`);
         wsClientRef.current.disconnect();
         wsClientRef.current = null;
       }
@@ -313,29 +291,71 @@ export default function BinancePage() {
         symbol,
         selectedTimeframe,
         (klineData: BinanceKlineData) => {
-          handleWebSocketUpdate(symbol, klineData);
+          // Model만 업데이트 (리렌더 없음)
+          updateModel(symbol, klineData);
         },
         (error) => {
           console.error(`[WebSocket] Error for ${symbol}:`, error);
         },
       );
 
-      console.log(`[WebSocket] Starting connection for ${symbol}...`);
       ws.connect();
       wsClientRef.current = ws;
-      console.log(`[WebSocket] Connection stored in ref for ${symbol}`);
     },
-    [selectedTimeframe, handleWebSocketUpdate],
+    [selectedTimeframe, updateModel],
   );
 
   const disconnectWebSocket = useCallback(() => {
     if (wsClientRef.current) {
-      console.log(`[WebSocket] Disconnecting...`);
       wsClientRef.current.disconnect();
       wsClientRef.current = null;
     }
   }, []);
 
+  // ===== UI 갱신 타이머 시작 =====
+  const startUiUpdateTimer = useCallback(
+    (symbol: string) => {
+      // 기존 타이머 정리
+      if (uiUpdateIntervalRef.current) {
+        clearInterval(uiUpdateIntervalRef.current);
+        uiUpdateIntervalRef.current = null;
+      }
+
+      console.log(`[MVVM] Starting UI update timer for ${symbol}`);
+
+      uiUpdateIntervalRef.current = setInterval(() => {
+        // 마지막 업데이트 이후 데이터 변경 확인
+        const currentData = dataModelRef.current[symbol];
+        const viewData = tickerStates[symbol]?.data;
+
+        if (currentData && currentData !== viewData) {
+          const lastCandle = currentData[currentData.length - 1];
+          const viewLastCandle = viewData?.[viewData.length - 1];
+
+          // 마지막 봉 변경 시에만 UI 갱신
+          if (
+            !viewLastCandle ||
+            lastCandle.close !== viewLastCandle.close ||
+            lastCandle.high !== viewLastCandle.high ||
+            lastCandle.low !== viewLastCandle.low ||
+            lastCandle.date !== viewLastCandle.date
+          ) {
+            syncModelToView(symbol);
+          }
+        }
+      }, UI_UPDATE_INTERVAL_MS);
+    },
+    [syncModelToView, tickerStates],
+  );
+
+  const stopUiUpdateTimer = useCallback(() => {
+    if (uiUpdateIntervalRef.current) {
+      clearInterval(uiUpdateIntervalRef.current);
+      uiUpdateIntervalRef.current = null;
+    }
+  }, []);
+
+  // ===== 초기 로드 =====
   useEffect(() => {
     if (!fullLoadInitiated.current) {
       fullLoadInitiated.current = true;
@@ -362,6 +382,10 @@ export default function BinancePage() {
       );
       previousTimeframe.current = selectedTimeframe;
 
+      // Model 초기화
+      dataModelRef.current = {};
+      signalsModelRef.current = {};
+
       setTickerStates((prev) => {
         const resetState: Record<string, TickerState> = {};
         Object.keys(prev).forEach((key) => {
@@ -380,34 +404,43 @@ export default function BinancePage() {
     }
   }, [loadAllSymbolsSequentially, selectedTimeframe]);
 
-  // 선택된 종목 변경 시 WebSocket 재연결
+  // ===== 선택 심볼 변경 시 WebSocket + UI타이머 재시작 =====
   useEffect(() => {
-    console.log(`[WebSocket] Selected symbol changed to: ${selectedSymbol}`);
+    console.log(
+      `[MVVM] Symbol/Timeframe changed: ${selectedSymbol} @ ${selectedTimeframe}`,
+    );
 
-    // WebSocket 연결
     connectWebSocket(selectedSymbol);
+    startUiUpdateTimer(selectedSymbol);
 
     return () => {
       disconnectWebSocket();
+      stopUiUpdateTimer();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSymbol, selectedTimeframe]);
+  }, [
+    selectedSymbol,
+    selectedTimeframe,
+    connectWebSocket,
+    disconnectWebSocket,
+    startUiUpdateTimer,
+    stopUiUpdateTimer,
+  ]);
 
-  // 컴포넌트 언마운트 시 WebSocket 정리
+  // ===== 언마운트 정리 =====
   useEffect(() => {
     return () => {
-      console.log("[WebSocket] Component unmounting, cleaning up...");
       disconnectWebSocket();
+      stopUiUpdateTimer();
     };
-  }, [disconnectWebSocket]);
+  }, [disconnectWebSocket, stopUiUpdateTimer]);
 
-  // 종목 선택 핸들러
+  // ===== 종목 선택 핸들러 =====
   const handleSelectSymbol = (symbol: string) => {
     console.log(`[UI] User selected symbol: ${symbol}`);
     setSelectedSymbol(symbol);
   };
 
-  // 레이아웃에 전달할 종목 목록 생성
+  // ===== 레이아웃 심볼 목록 =====
   const symbolItems = symbols.map((symbol) => {
     const symbolInfo = stockConfig.binance_futures.find(
       (s) => s.symbol === symbol,

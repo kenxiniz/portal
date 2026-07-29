@@ -102,6 +102,10 @@ export const MainChart: React.FC<MainChartProps> = ({
     min: number;
     max: number;
   } | null>(null);
+  const [crosshairInfo, setCrosshairInfo] = React.useState<{
+    price: number;
+    y: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -153,16 +157,6 @@ export const MainChart: React.FC<MainChartProps> = ({
       borderDownColor: "#000000",
       wickUpColor: "#66BB6A",
       wickDownColor: "#000000",
-      priceFormat: {
-        type: "custom",
-        formatter: (price: number) => {
-          const currentPrice = currentPriceRef.current;
-          if (currentPrice <= 0) return price.toFixed(2);
-          const pctDiff = ((price - currentPrice) / currentPrice) * 100;
-          const sign = pctDiff >= 0 ? "+" : "";
-          return `${price.toFixed(2)} (${sign}${pctDiff.toFixed(1)}%)`;
-        },
-      },
     });
 
     const boxPrimitive = new GaussianBoxPrimitive([]);
@@ -302,10 +296,23 @@ export const MainChart: React.FC<MainChartProps> = ({
     };
     window.addEventListener("debug-yscale", handleDebugYScale);
 
+    // Crosshair move 감지 (% 표시용)
+    chart.subscribeCrosshairMove((param) => {
+      if (!param.point || param.point.y < 0) {
+        setCrosshairInfo(null);
+        return;
+      }
+      const price = candleSeries.coordinateToPrice(param.point.y);
+      if (price !== null) {
+        setCrosshairInfo({ price: price as number, y: param.point.y });
+      }
+    });
+
     onReady(chart);
 
     return () => {
       window.removeEventListener("debug-yscale", handleDebugYScale);
+      setCrosshairInfo(null);
       chartRef.current = null;
       seriesRef.current = {
         candle: null,
@@ -381,12 +388,14 @@ export const MainChart: React.FC<MainChartProps> = ({
     // 현재가 업데이트 (crosshair % 표시용)
     currentPriceRef.current = data[data.length - 1]?.close || 0;
 
-    // 실시간 업데이트면 update()로 마지막 봉만 갱신
+    // 실시간 업데이트면 update()로 마지막 봉만 갱신하고 나머지 스킵
     if (isRealtimeUpdate && lastCandle) {
       seriesRef.current.candle.update(lastCandle);
-    } else {
-      seriesRef.current.candle.setData(candleData);
+      // 마지막 봉만 업데이트했으므로 indicator/marker 재계산 불필요
+      return;
     }
+
+    seriesRef.current.candle.setData(candleData);
 
     // 매수/매도 신호 마커 설정
     if (signals.length > 0 && seriesRef.current.candle) {
@@ -693,6 +702,37 @@ export const MainChart: React.FC<MainChartProps> = ({
           }}
         >
           Y축: {yAxisInfo.min.toFixed(2)} ~ {yAxisInfo.max.toFixed(2)}
+        </div>
+      )}
+      {crosshairInfo && currentPriceRef.current > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            right: "4px",
+            top: Math.max(0, crosshairInfo.y - 20),
+            backgroundColor: "rgba(33, 150, 243, 0.9)",
+            color: "white",
+            fontSize: "10px",
+            padding: "2px 6px",
+            borderRadius: "3px",
+            fontFamily: "monospace",
+            zIndex: 20,
+            pointerEvents: "none",
+            whiteSpace: "pre",
+            textAlign: "center",
+            lineHeight: "1.3",
+          }}
+        >
+          {crosshairInfo.price.toFixed(2)}
+          {"\n"}
+          {(() => {
+            const pct =
+              ((crosshairInfo.price - currentPriceRef.current) /
+                currentPriceRef.current) *
+              100;
+            const sign = pct >= 0 ? "+" : "";
+            return `${sign}${pct.toFixed(1)}%`;
+          })()}
         </div>
       )}
     </div>
