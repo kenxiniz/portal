@@ -407,48 +407,6 @@ export const MainChart: React.FC<MainChartProps> = ({
 
     seriesRef.current.candle.setData(candleData);
 
-    // 매수/매도 신호 마커 설정
-    if (signals.length > 0 && seriesRef.current.candle) {
-      const markers = signals
-        .filter(
-          (s) =>
-            s.type === "buy" || s.type === "sell" || s.type === "inverse-buy",
-        )
-        .map((s) => {
-          // date 형식 정규화 후 비교
-          const normalizeDate = (dateStr: string) => dateStr.split(/[ T]/)[0];
-          const dataPoint = data.find(
-            (d) => normalizeDate(d.date) === normalizeDate(s.date),
-          );
-          if (!dataPoint) return null;
-
-          // long(buy): 파랑, short(inverse-buy): 빨강, sell: 노랑(보유 종료)
-          const isLong = s.type === "buy";
-          const isShort = s.type === "inverse-buy";
-          const isSell = s.type === "sell";
-
-          let color = "#FFEB3B"; // 기본 노랑 (sell/보유 종료)
-          if (isLong) color = "#2196F3"; // 파랑 (long)
-          if (isShort) color = "#F44336"; // 빨강 (short)
-
-          return {
-            time: dataPoint.chartTime,
-            position: isSell ? "aboveBar" : "belowBar",
-            color,
-            shape: isSell ? "arrowDown" : "arrowUp",
-            text: isLong ? "매수" : isShort ? "역매수" : "매도",
-          };
-        })
-        .filter((m): m is NonNullable<typeof m> => m !== null);
-
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (seriesRef.current.candle as any).setMarkers(markers);
-      } catch {
-        // setMarkers 실패 무시
-      }
-    }
-
     // 저장된 범위 복원 또는 고정 봉 개수 적용
     if (savedRange) {
       // 종목/timeframe 변경이 아니면 사용자 위치 유지

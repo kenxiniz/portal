@@ -250,7 +250,10 @@ export const StockChartDisplay = forwardRef<
       let turnOff = false;
 
       signalsOnDate.forEach((s) => {
-        if (s.type === "buy" || s.type === "inverse-buy") turnOn = true;
+        if (s.type === "buy" || s.type === "inverse-buy") {
+          turnOn = true;
+          console.log(`[DEBUG] turnOn at ${d.date}, signal.date=${s.date}`);
+        }
         if (s.type === "sell") turnOff = true;
       });
 
@@ -269,17 +272,26 @@ export const StockChartDisplay = forwardRef<
 
       let highlightColor: string | undefined = undefined;
       if (patternSignal) {
-        // buy (쌍바닥): 파랑, inverse-buy (쌍봉): 빨강
-        // startDate ~ date 전체 구간 색칠
-        highlightColor = patternSignal.type === "buy" ? "#2196F3" : "#F44336";
+        // 양봉/음봉 판단
+        const isUp = Number(d.close) >= Number(d.open);
+
+        if (patternSignal.type === "buy") {
+          // 쌍바닥: 상승=밝은파랑, 하락=진한파랑
+          highlightColor = isUp ? "#64B5F6" : "#1565C0";
+        } else {
+          // 쌍봉: 상승=밝은빨강, 하락=진한빨강
+          highlightColor = isUp ? "#EF9A9A" : "#C62828";
+        }
+
         if (d.date.includes("07-15") || d.date.includes("07-16")) {
           console.log(
             `[DEBUG] Blue/Red candle: ${d.date}, RSI: ${d.rsi?.toFixed(2)}, type: ${patternSignal.type}`,
           );
         }
       } else if (isHolding || turnOff) {
-        // 보유 기간 (신호 확정일 이후): 노랑
-        highlightColor = "#FFEB3B";
+        // 보유 기간 (신호 확정일 이후): 상승=밝은노랑, 하락=진한노랑
+        const isUp = Number(d.close) >= Number(d.open);
+        highlightColor = isUp ? "#FFF59D" : "#F9A825";
       }
 
       if (turnOff) isHolding = false;
