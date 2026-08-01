@@ -361,7 +361,9 @@ export const analyzeAllTradingSignals = (
 
     // 3. Setup Logic
     if (potentialSecondTrough && firstTrough) {
-      if (currentPoint.close > potentialSecondTrough.close) {
+      // 반등 감지: 이전 봉보다 현재 봉이 높으면 확정
+      // (두번째 바닥 이후 첫 상승 봉에서 바로 신호 발생)
+      if (currentPoint.close > prevPoint.close) {
         // 1d, 1h, 15m 모두 직접 신호 생성 (바이낸스 선물)
         const buySignal: TradingSignal = {
           date: currentPoint.date,
@@ -381,15 +383,19 @@ export const analyzeAllTradingSignals = (
           isBullishSetupActive = true;
           bullishSetupStartDate = firstTrough.date;
         }
-        firstTrough = null;
-        firstTroughIndex = null;
+        // 신호 발생 후 secondTrough를 새 firstTrough로 (연속 패턴 지원)
+        // firstTroughIndex 유지해서 minDivergenceBars 조건 바로 통과
+        firstTrough = potentialSecondTrough;
         potentialSecondTrough = null;
       } else {
         if (currentPoint.rsi < firstTrough.rsi!) {
+          // RSI가 첫 바닥보다 낮으면 새 첫바닥으로 리셋 (새 패턴 시작)
+          // 기존 firstTroughIndex 유지해서 minDivergenceBars 조건 통과
+          firstTrough = currentPoint;
+          // firstTroughIndex는 유지 (minDivergenceBars 이미 통과했으므로)
           potentialSecondTrough = null;
-          firstTrough = null;
-          firstTroughIndex = null;
-        } else {
+        } else if (currentPoint.close < potentialSecondTrough.close) {
+          // 더 낮은 가격이면 두 번째 바닥 갱신 (진짜 바닥 찾기)
           potentialSecondTrough = currentPoint;
         }
       }
@@ -412,14 +418,17 @@ export const analyzeAllTradingSignals = (
         const daysSinceFirstTrough = i - firstTroughIndex;
 
         if (currentPoint.rsi < firstTrough.rsi!) {
-          firstTrough = null;
-          firstTroughIndex = null;
+          // RSI가 첫 바닥보다 낮으면 새 첫바닥으로 갱신 (N중 바닥 지원)
+          // minDivergenceBars 조건 없이 바로 새 패턴 시작
+          firstTrough = currentPoint;
+          firstTroughIndex = i;
         } else if (daysSinceFirstTrough > TRADING_CONFIG.divergenceMaxDays) {
           firstTrough = null;
           firstTroughIndex = null;
         } else if (daysSinceFirstTrough > minDivergenceBars) {
+          // 두 번째 바닥 조건 (RSI divergence)
+          // 가격은 첫바닥보다 낮고, RSI는 첫바닥보다 높으면 됨
           if (
-            currentPoint.rsi >= TRADING_CONFIG.rsiOversold &&
             currentPoint.close < firstTrough.close &&
             currentPoint.rsi > firstTrough.rsi!
           ) {
@@ -430,7 +439,9 @@ export const analyzeAllTradingSignals = (
     }
 
     if (potentialSecondPeak && firstPeak) {
-      if (currentPoint.close < potentialSecondPeak.close) {
+      // 하락 감지: 이전 봉보다 현재 봉이 낮으면 확정
+      // (두번째 봉우리 이후 첫 하락 봉에서 바로 신호 발생)
+      if (currentPoint.close < prevPoint.close) {
         // 1d, 1h, 15m 모두 직접 신호 생성 (바이낸스 선물)
         const inverseBuySignal: TradingSignal = {
           date: currentPoint.date,
@@ -448,15 +459,19 @@ export const analyzeAllTradingSignals = (
           isBearishSetupActive = true;
           bearishSetupStartDate = firstPeak.date;
         }
-        firstPeak = null;
-        firstPeakIndex = null;
+        // 신호 발생 후 secondPeak를 새 firstPeak로 (연속 패턴 지원)
+        // firstPeakIndex 유지해서 minDivergenceBars 조건 바로 통과
+        firstPeak = potentialSecondPeak;
         potentialSecondPeak = null;
       } else {
         if (currentPoint.rsi > firstPeak.rsi!) {
+          // RSI가 첫 봉우리보다 높으면 새 첫봉우리로 리셋 (새 패턴 시작)
+          // 기존 firstPeakIndex 유지해서 minDivergenceBars 조건 통과
+          firstPeak = currentPoint;
+          // firstPeakIndex는 유지 (minDivergenceBars 이미 통과했으므로)
           potentialSecondPeak = null;
-          firstPeak = null;
-          firstPeakIndex = null;
-        } else {
+        } else if (currentPoint.close > potentialSecondPeak.close) {
+          // 더 높은 가격이면 두 번째 봉우리 갱신 (진짜 봉우리 찾기)
           potentialSecondPeak = currentPoint;
         }
       }
@@ -479,14 +494,16 @@ export const analyzeAllTradingSignals = (
         const daysSinceFirstPeak = i - firstPeakIndex;
 
         if (currentPoint.rsi > firstPeak.rsi!) {
-          firstPeak = null;
-          firstPeakIndex = null;
+          // RSI가 첫 봉우리보다 높으면 새 첫봉우리로 갱신 (N중 봉우리 지원)
+          firstPeak = currentPoint;
+          firstPeakIndex = i;
         } else if (daysSinceFirstPeak > TRADING_CONFIG.divergenceMaxDays) {
           firstPeak = null;
           firstPeakIndex = null;
         } else if (daysSinceFirstPeak > minDivergenceBars) {
+          // 두 번째 봉우리 조건 (RSI divergence)
+          // 가격은 첫봉우리보다 높고, RSI는 첫봉우리보다 낮으면 됨
           if (
-            currentPoint.rsi <= TRADING_CONFIG.rsiOverbought &&
             currentPoint.close > firstPeak.close &&
             currentPoint.rsi < firstPeak.rsi!
           ) {
