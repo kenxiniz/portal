@@ -388,7 +388,12 @@ export const analyzeAllTradingSignals = (
         firstTrough = potentialSecondTrough;
         potentialSecondTrough = null;
       } else {
-        if (currentPoint.rsi < firstTrough.rsi!) {
+        // RSI 70 넘으면 쌍바닥 패턴 무효
+        if (currentPoint.rsi > TRADING_CONFIG.rsiOverbought) {
+          firstTrough = null;
+          firstTroughIndex = null;
+          potentialSecondTrough = null;
+        } else if (currentPoint.rsi < firstTrough.rsi!) {
           // RSI가 첫 바닥보다 낮으면 새 첫바닥으로 리셋 (새 패턴 시작)
           // 기존 firstTroughIndex 유지해서 minDivergenceBars 조건 통과
           firstTrough = currentPoint;
@@ -417,7 +422,11 @@ export const analyzeAllTradingSignals = (
         }
         const daysSinceFirstTrough = i - firstTroughIndex;
 
-        if (currentPoint.rsi < firstTrough.rsi!) {
+        // RSI 70 넘으면 쌍바닥 패턴 무효
+        if (currentPoint.rsi > TRADING_CONFIG.rsiOverbought) {
+          firstTrough = null;
+          firstTroughIndex = null;
+        } else if (currentPoint.rsi < firstTrough.rsi!) {
           // RSI가 첫 바닥보다 낮으면 새 첫바닥으로 갱신 (N중 바닥 지원)
           // minDivergenceBars 조건 없이 바로 새 패턴 시작
           firstTrough = currentPoint;
@@ -464,7 +473,12 @@ export const analyzeAllTradingSignals = (
         firstPeak = potentialSecondPeak;
         potentialSecondPeak = null;
       } else {
-        if (currentPoint.rsi > firstPeak.rsi!) {
+        // RSI 30 밑으로 내려가면 쌍봉 패턴 무효
+        if (currentPoint.rsi < TRADING_CONFIG.rsiOversold) {
+          firstPeak = null;
+          firstPeakIndex = null;
+          potentialSecondPeak = null;
+        } else if (currentPoint.rsi > firstPeak.rsi!) {
           // RSI가 첫 봉우리보다 높으면 새 첫봉우리로 리셋 (새 패턴 시작)
           // 기존 firstPeakIndex 유지해서 minDivergenceBars 조건 통과
           firstPeak = currentPoint;
@@ -493,7 +507,11 @@ export const analyzeAllTradingSignals = (
         }
         const daysSinceFirstPeak = i - firstPeakIndex;
 
-        if (currentPoint.rsi > firstPeak.rsi!) {
+        // RSI 30 밑으로 내려가면 쌍봉 패턴 무효
+        if (currentPoint.rsi < TRADING_CONFIG.rsiOversold) {
+          firstPeak = null;
+          firstPeakIndex = null;
+        } else if (currentPoint.rsi > firstPeak.rsi!) {
           // RSI가 첫 봉우리보다 높으면 새 첫봉우리로 갱신 (N중 봉우리 지원)
           firstPeak = currentPoint;
           firstPeakIndex = i;
